@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Xiaomi MiMo V2.5 Pro vs Flash for WebBrain — WebBrain Blog</title>
+  <meta name="description" content="Research notes on Xiaomi's MiMo V2.5 Pro and MiMo V2.5/Flash-style tier: why these multimodal models look promising for WebBrain compared with text-only alternatives.">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="canonical" href="https://webbrain.one/blog/mimo-v25-pro-vs-flash">
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    :root { --bg:#0b0e17; --text:#e4e4ec; --dim:#8b8fa4; --accent:#a78bfa; --border:rgba(255,255,255,.08); --max:760px; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif; background:var(--bg); color:var(--text); line-height:1.75; font-size:17px; }
+    a { color:var(--accent); }
+    nav { border-bottom:1px solid var(--border); position:sticky; top:0; background:rgba(11,14,23,.9); backdrop-filter: blur(8px); }
+    .nav-inner, article, footer { max-width:var(--max); margin:0 auto; padding:16px 24px; }
+    article { padding-top:56px; padding-bottom:72px; }
+    h1 { font-size:36px; line-height:1.2; margin-bottom:12px; }
+    h2 { font-size:24px; margin:38px 0 12px; }
+    p, ul { margin-bottom:14px; }
+    ul { margin-left:20px; }
+    .meta,.lede { color:var(--dim); }
+    .lede { font-size:19px; margin-bottom:30px; }
+    .callout { border:1px solid rgba(167,139,250,.3); background:rgba(167,139,250,.08); border-radius:12px; padding:14px 16px; margin:18px 0; color:var(--dim); }
+    table { width:100%; border-collapse:collapse; font-size:14px; margin:18px 0; }
+    th,td { text-align:left; padding:10px; border-bottom:1px solid var(--border); vertical-align:top; }
+    th { color:var(--dim); font-size:12px; text-transform:uppercase; letter-spacing:.05em; }
+    footer { border-top:1px solid var(--border); color:var(--dim); font-size:13px; display:flex; justify-content:space-between; }
+  </style>
+</head>
+<body>
+  <nav><div class="nav-inner"><a href="/">🧠 WebBrain</a> · <a href="/blog">Blog</a></div></nav>
+  <article>
+    <div class="meta">April 30, 2026 · 8 min read</div>
+    <h1>Xiaomi MiMo V2.5 Pro vs “V2.5 Flash”: should WebBrain add both?</h1>
+    <p class="lede">Short answer: yes, these look like serious candidates. They pair strong reasoning with multimodal input, which is exactly where text-only models can bottleneck browser agents.</p>
+
+    <h2>First, naming clarity</h2>
+    <p>Xiaomi's official open model cards are <strong>MiMo-V2.5-Pro</strong> and <strong>MiMo-V2.5</strong>. In API ecosystems, people often refer to a lower-cost tier as “flash”, and comparisons are frequently written as <code>mimo-v2.5-pro</code> vs <code>mimo-v2.5-flash</code>. For this post, "V2.5 Flash" means the faster/cheaper V2.5-tier experience, while "Pro" is the flagship reasoning tier.</p>
+
+    <h2>Why MiMo is interesting for WebBrain</h2>
+    <ul>
+      <li><strong>Multimodal by design:</strong> Xiaomi positions MiMo-V2.5 as native omni-modal (image/video/audio/text), which better matches WebBrain's screenshot-heavy browsing loop.</li>
+      <li><strong>Long-context agent work:</strong> both tiers are published with up to 1M context claims, useful for long tool traces and replay buffers.</li>
+      <li><strong>Strong benchmark posture:</strong> Xiaomi's own tables show Pro very competitive against DeepSeek-V4-Pro/Flash and Kimi-K2 on reasoning and agent-style tasks.</li>
+    </ul>
+
+
+    <h2>Public benchmark snapshots (as reported by Xiaomi)</h2>
+    <p>Using Xiaomi's public release tables for MiMo V2.5, the Pro tier posts top-tier results across math/coding/reasoning suites and is generally in the same class as DeepSeek-V4-Pro and Kimi-K2 on many reasoning-heavy tests. The non-Pro V2.5 tier trails Pro but still lands in a strong efficiency band for routine agent work.</p>
+    <ul>
+      <li><strong>AIME-style math + GPQA-style science reasoning:</strong> Pro is reported in the leading cluster among open frontier models.</li>
+      <li><strong>Code benchmarks (LiveCodeBench / SWE-style slices):</strong> Pro is competitive enough to be a realistic primary for difficult coding turns.</li>
+      <li><strong>Agentic/tool benchmarks:</strong> Xiaomi reports gains in agent scenarios, which matters more for WebBrain than pure single-turn chat scores.</li>
+    </ul>
+    <p>Important caveat: these are vendor-reported numbers. We should treat them as a prioritization signal, not final truth, until WebBrain's own eval harness confirms behavior.</p>
+
+    <h2>Pro vs Flash-style tier in practical routing</h2>
+    <table>
+      <thead><tr><th>Workload</th><th>Default pick</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td>Complex multi-step bugfixes, architecture refactors, hard planning</td><td>MiMo V2.5 Pro</td><td>Higher headroom for long-horizon reasoning and tool trajectories.</td></tr>
+        <tr><td>Routine coding turns, UI inspections, broad agent throughput</td><td>MiMo V2.5 ("flash" tier)</td><td>Better cost/latency profile while retaining multimodal capability.</td></tr>
+        <tr><td>Single-turn text-only transforms</td><td>Qwen 3.6 27B / 35B-A3B</td><td>Still excellent value and reliably strong for many WebBrain tasks.</td></tr>
+      </tbody>
+    </table>
+
+    <h2>How this compares to today's baseline set</h2>
+    <p>The tradeoff is not “best benchmark wins.” For WebBrain, the better question is: <em>which model family gives us the best reliability per dollar across mixed text+vision workflows?</em></p>
+    <p>On that lens, your thesis is solid:</p>
+    <ul>
+      <li><strong>DeepSeek-V4-Pro / DeepSeek-V4-Flash:</strong> very strong text reasoning, but weaker fit when screenshot-grounded understanding is first-class. WebBrain frequently needs direct visual grounding, not just text abstraction.</li>
+      <li><strong>MiniMax M2.7:</strong> also compelling on pure text reasoning and long-context throughput, but not the best fit when we need robust, repeatable multimodal grounding inside browser loops.</li>
+      <li><strong>Qwen 3.6 27B and 35B-A3B:</strong> still best-for-buck anchors and should remain default for many text-dominant routes.</li>
+      <li><strong>Nemotron-3-Nano-Omni:</strong> not too shabby at all; good budget multimodal fallback and worth keeping in the eval matrix.</li>
+    </ul>
+
+    <div class="callout"><strong>Recommendation:</strong> Add MiMo V2.5 Pro and MiMo V2.5 as opt-in providers behind model routing flags. If local inference is too heavy for your hardware budget, run them through <a href="https://openrouter.ai" target="_blank" rel="noopener">OpenRouter</a> first, then decide whether to self-host.</div>
+
+    <h2>Suggested WebBrain eval plan (quick)</h2>
+    <ul>
+      <li>Run 50-task mixed benchmark: visual extraction, click-path planning, form completion, and recovery from ambiguous UI states.</li>
+      <li>Track: task success, retries, hallucinated actions, tool-call efficiency, and token-normalized cost.</li>
+      <li>Route policy: “flash” for first pass, automatic escalate to Pro when uncertainty or retries exceed threshold.</li>
+    </ul>
+
+    <p>If these results hold, MiMo could become the best multimodal addition to the current Qwen-heavy stack.</p>
+  </article>
+  <footer><div>© 2026 WebBrain</div><div><a href="https://github.com/esokullu/webbrain" target="_blank">GitHub</a></div></footer>
+</body>
+</html>
