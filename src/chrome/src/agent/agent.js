@@ -169,20 +169,47 @@ export class Agent {
   /**
    * Add a tab to the "WebBrain" tab group — reused by both the explicit
    * `new_tab` tool and the click handler's target=_blank redirect fallback.
-   * Preserves the source tab's existing group when present so multi-tab
-   * research chains stay visually together.
+   *
+   * We look up the WebBrain group by title within the source tab's
+   * window rather than by source-tab-membership: if the source is in a
+   * user-owned group (e.g. "Dev", "Research"), we don't drag agent-
+   * spawned tabs into that group. The user's own grouping stays intact;
+   * agent outputs live in their own WebBrain group.
+   *
+   * If no WebBrain group exists yet for the window, we create a fresh one
+   * containing only the new tab (NOT the source tab) — leaving the
+   * source where the user put it. Background.js's action.onClicked
+   * handler is the canonical place that opts the source tab into the
+   * group, via `ensureWebBrainGroup`.
    *
    * Returns the group id (or -1 if grouping isn't supported / failed).
    */
   async _addToWebBrainGroup(sourceTab, tabId) {
     if (!chrome.tabGroups || !sourceTab?.id || tabId == null) return -1;
     try {
-      if (typeof sourceTab.groupId === 'number' && sourceTab.groupId >= 0) {
-        await chrome.tabs.group({ groupId: sourceTab.groupId, tabIds: [tabId] });
-        return sourceTab.groupId;
+      // Find an existing WebBrain group in this window, if any.
+      let existing = null;
+      try {
+        const groups = await chrome.tabGroups.query({
+          title: 'WebBrain',
+          windowId: sourceTab.windowId,
+        });
+        if (Array.isArray(groups) && groups.length > 0) existing = groups[0];
+      } catch { /* tabGroups.query unsupported on very old Chromes */ }
+
+      if (existing) {
+        await chrome.tabs.group({ groupId: existing.id, tabIds: [tabId] });
+        return existing.id;
       }
-      const gid = await chrome.tabs.group({ tabIds: [sourceTab.id, tabId] });
-      await chrome.tabGroups.update(gid, { title: 'WebBrain', color: 'blue', collapsed: false });
+
+      // No WebBrain group yet — create one with just the new tab. We
+      // deliberately do NOT include sourceTab here, because if the user
+      // put it in their own "Dev" group, pulling it out is hostile.
+      // The first action.onClicked elsewhere will opt the source tab in.
+      const gid = await chrome.tabs.group({ tabIds: [tabId] });
+      await chrome.tabGroups.update(gid, {
+        title: 'WebBrain', color: 'blue', collapsed: false,
+      });
       return gid;
     } catch (_) { return -1; }
   }

@@ -208,24 +208,19 @@ async function ensureWebBrainGroup(tab) {
     }
 
     if (groupId == null) {
-      if (typeof tab.groupId === 'number' && tab.groupId >= 0) {
-        // Source tab is already in some group. Adopt + rebrand it as
-        // WebBrain instead of fragmenting tabs into a second group.
-        groupId = tab.groupId;
-        try {
-          await chrome.tabGroups.update(groupId, {
-            title: 'WebBrain', color: 'blue', collapsed: false,
-          });
-        } catch { /* user may have permission concerns */ }
-      } else {
-        // Source tab is ungrouped — create a fresh WebBrain group.
-        groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-        try {
-          await chrome.tabGroups.update(groupId, {
-            title: 'WebBrain', color: 'blue', collapsed: false,
-          });
-        } catch { /* ignore styling failure */ }
-      }
+      // Always create a FRESH WebBrain group for this window, even if the
+      // source tab is currently in some other (user-owned) group. The
+      // earlier behaviour adopted the source's existing group and renamed
+      // it to "WebBrain" — surprising for users who had a "Dev" or
+      // "Research" group of their own. Calling chrome.tabs.group with no
+      // groupId moves the source tab out of any old group into the new
+      // one; the user's old group keeps its other tabs untouched.
+      groupId = await chrome.tabs.group({ tabIds: [tab.id] });
+      try {
+        await chrome.tabGroups.update(groupId, {
+          title: 'WebBrain', color: 'blue', collapsed: false,
+        });
+      } catch { /* ignore styling failure */ }
       webBrainGroupByWindow.set(tab.windowId, groupId);
       saveWebBrainGroups();
     } else if (tab.groupId !== groupId) {
