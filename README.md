@@ -160,12 +160,15 @@ The default UI-first rule exists because API actions are invisible (you don't se
 
 ## What's New
 
-### 5.x
+### 6.0.0
 
 - **On-page agent indicator (Chrome).** While the agent is acting on a tab, the page now shows a soft purple inset glow around the viewport plus a "Stop WebBrain" floating button at the bottom — same UX pattern as Claude-for-Chrome. Clicking Stop aborts the run without you having to switch back to the side panel. The indicator hides itself during screenshot capture so it doesn't end up in the images sent to the vision model.
 - **Group-scoped side panel visibility (Chrome).** Clicking the WebBrain action now puts the source tab into a "WebBrain" tab group; the side panel is shown only for tabs in that group. Switch to any tab outside the group → panel hides. Drag the tab out of the group → panel hides. Mirrors how Claude-for-Chrome handles sidebar scope and replaces the older per-tab opt-in Set, which left the panel "sticky" across tab switches.
   - Adds `tabs` and `tabGroups` permissions (Chrome will surface a permissions notice on auto-update).
   - Tabs the agent opens via `new_tab` or `target=_blank` redirects automatically join the same group.
+
+### 5.x
+
 - **Token-conscious screenshots.** All viewport and full-page screenshots are now resized to fit a vision-token budget (≤1568 tokens, ≤1.4 MB base64) before being sent to a vision model — uses CDP-side `clip.scale` for capture-time downscaling, with iterative JPEG-quality fallback (0.75 → 0.10) for the byte ceiling. Pathological full-page captures drop from ~19.6k tokens to ~750.
 - **Multilingual UI** in 5 languages (English, Spanish, French, Turkish, Chinese).
 - **Vision-model split-provider mode.** Pair a fast text-only planner with a separate vision-capable model; screenshots get a structured 6-section caption from the vision model and only the text reaches the planner.
