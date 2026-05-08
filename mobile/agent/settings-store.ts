@@ -18,7 +18,7 @@ export type AgentSettings = {
 export const DEFAULT_SETTINGS: AgentSettings = {
   apiKey: '',
   baseUrl: 'https://api.openai.com/v1',
-  model: 'gpt-4o-mini',
+  model: 'gpt-5.4-mini',
 };
 
 const KEYS = {

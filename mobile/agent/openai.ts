@@ -47,11 +47,11 @@ export type ChatResult = {
 export type OpenAIConfig = {
   apiKey: string;
   baseUrl?: string; // defaults to https://api.openai.com/v1
-  model?: string;   // defaults to gpt-4o-mini
+  model?: string;   // defaults to gpt-5.4-mini
 };
 
 const DEFAULT_BASE = 'https://api.openai.com/v1';
-const DEFAULT_MODEL = 'gpt-4o-mini';
+const DEFAULT_MODEL = 'gpt-5.4-mini';
 
 // gpt-5 / gpt-4.1 / o-series use a different field for max tokens and reject
 // non-default temperature. Detect by model-name regex (mirrors the Chrome

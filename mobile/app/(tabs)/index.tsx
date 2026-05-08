@@ -1,3 +1,4 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useEffect, useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -8,6 +9,7 @@ import {
   TextInput,
   View as RNView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Text, View } from '@/components/Themed';
 import { useColorScheme } from '@/components/useColorScheme';
@@ -17,6 +19,7 @@ export default function ChatScreen() {
   const { messages, working, sendMessage } = useAgent();
   const [draft, setDraft] = useState('');
   const isDark = (useColorScheme() ?? 'light') === 'dark';
+  const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
 
   // Auto-scroll to bottom on new messages — same UX as iMessage / chat apps.
@@ -33,14 +36,20 @@ export default function ChatScreen() {
     setDraft('');
   }
 
+  const chatBg = isDark ? '#0a0a0a' : '#f2f2f7';
+  const inputBarBg = isDark ? '#1c1c1e' : '#ffffff';
+  const inputFieldBg = isDark ? '#2c2c2e' : '#e5e5ea';
+  const borderColor = isDark ? '#2a2a2c' : '#d1d1d6';
+  const canSend = !!draft.trim() && !working;
+
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      style={styles.container}
+      style={[styles.container, { backgroundColor: chatBg }]}
       keyboardVerticalOffset={90}>
       <ScrollView
         ref={scrollRef}
-        style={styles.messages}
+        style={[styles.messages, { backgroundColor: chatBg }]}
         contentContainerStyle={styles.messagesContent}
         keyboardDismissMode="interactive">
         {messages.length === 0 && (
@@ -82,14 +91,18 @@ export default function ChatScreen() {
       <RNView
         style={[
           styles.inputRow,
-          { borderTopColor: isDark ? '#333' : '#ddd' },
+          {
+            backgroundColor: inputBarBg,
+            borderTopColor: borderColor,
+            paddingBottom: 10 + insets.bottom,
+          },
         ]}>
         <TextInput
           style={[
             styles.input,
             {
               color: isDark ? '#fff' : '#000',
-              backgroundColor: isDark ? '#222' : '#f0f0f0',
+              backgroundColor: inputFieldBg,
             },
           ]}
           value={draft}
@@ -100,10 +113,11 @@ export default function ChatScreen() {
           editable={!working}
         />
         <Pressable
-          style={[styles.sendButton, working && styles.sendButtonDisabled]}
+          style={[styles.sendButton, !canSend && styles.sendButtonDisabled]}
           onPress={onSend}
-          disabled={working}>
-          <Text style={styles.sendButtonText}>Send</Text>
+          disabled={!canSend}
+          accessibilityLabel="Send">
+          <FontAwesome name="arrow-up" size={16} color="#fff" />
         </Pressable>
       </RNView>
     </KeyboardAvoidingView>
@@ -132,9 +146,10 @@ const styles = StyleSheet.create({
   toolTextError: { color: '#d33', opacity: 0.85 },
   inputRow: {
     flexDirection: 'row',
-    padding: 8,
+    paddingHorizontal: 14,
+    paddingTop: 10,
     borderTopWidth: StyleSheet.hairlineWidth,
-    gap: 8,
+    gap: 10,
     alignItems: 'flex-end',
   },
   input: {
@@ -146,11 +161,13 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   sendButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 20,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: '#2f95dc',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 4,
   },
-  sendButtonDisabled: { opacity: 0.5 },
-  sendButtonText: { color: '#fff', fontWeight: '600' },
+  sendButtonDisabled: { opacity: 0.35 },
 });

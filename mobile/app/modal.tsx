@@ -102,7 +102,7 @@ export default function SettingsModal() {
           style={[styles.input, { backgroundColor: fieldBg, color: fieldText }]}
           value={draft.model}
           onChangeText={(v) => setDraft({ ...draft, model: v })}
-          placeholder="gpt-4o-mini"
+          placeholder="gpt-5.4-mini"
           placeholderTextColor={placeholder}
           autoCapitalize="none"
           autoCorrect={false}
