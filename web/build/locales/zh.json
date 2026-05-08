@@ -126,9 +126,6 @@
   "compare.row.offline": "完全离线",
   "compare.cell.offline_yes": "是(使用本地 LLM)",
   "compare.cell.offline_no": "否 —— 需要云端",
-  "compare.row.interaction": "页面交互",
-  "compare.cell.content_script": "Content script",
-  "compare.cell.cdp": "Chrome DevTools Protocol",
   "compare.row.self_host": "可自托管",
 
   "compare.row.what_is_it": "是什么?",
@@ -185,6 +182,9 @@
   "faq.firefox.q": "WebBrain 在 Firefox 上能用吗?",
   "faq.firefox.a_html": "能。WebBrain 同时提供 Chrome 版(使用 sidePanel API 的 Manifest V3)和 Firefox 版(使用 sidebar_action 的 Manifest V2)。两个版本功能一致。Firefox 版本可以作为临时附加组件用于开发,也可以发布到 addons.mozilla.org 进行永久安装。",
 
+  "faq.firefox_sidebar_move.q": "我可以像 Chrome 那样把 Firefox 的侧边栏从左边移到右边吗?",
+  "faq.firefox_sidebar_move.a_html": "可以 —— Firefox 的侧边栏默认显示在左侧,但你可以把它切换到右侧。在侧边栏标题栏上右键点击,选择<strong>「将侧边栏移到右侧」</strong>(也可以从菜单栏走<strong>「查看 → 侧边栏 → 将侧边栏移到右侧」</strong>)。重启后位置保持不变。Chrome 的 sidePanel 默认在右侧,且无法由用户从面板本身移动。",
+
   "faq.safe.q": "使用 WebBrain 安全吗?它能修改网页吗?",
   "faq.safe.a_html": "WebBrain 有两种模式:询问模式(默认)只读,无法修改页面上的任何内容。执行模式启用完整的浏览器代理能力(点击、输入、导航),但在启用前需要用户显式确认,并会显示明显的警告横幅。你可以随时通过「停止」按钮停止代理。扩展的源代码在 GitHub 上完全开放供审计。",
 
@@ -193,6 +193,9 @@
 
   "faq.api_mutations.q": "WebBrain 是直接调用 API,还是始终通过界面点击?",
   "faq.api_mutations.a_html": "<p>默认情况下,WebBrain 对任何会创建、修改、删除、发送、提交、发布或购买的操作,<strong>始终通过可见界面进行</strong>。它会导航到页面、填写表单、点击按钮 —— 完全像你一样操作。它拒绝在后台通过 <code>fetch()</code> 直接调用 REST/GraphQL 端点进行变更。这是刻意设计:API 操作是不可见的(你看不到发送了什么),通常需要你可能未配置的单独认证令牌,而且相比于一次可见的误点击,影响范围大得多。UI-first 意味着一切都在屏幕上、在你平时的浏览器会话中、并且可中断。</p><p>对于<strong>读取</strong>数据 —— 获取 README、查找议题、跨站比价、检查状态页 —— WebBrain 会自由地通过 <code>fetch_url</code> 和 <code>research_url</code> 工具发送后台 HTTP 请求。读取不等于操作;它不会改变远程服务上的任何东西,因此不存在同样的安全顾虑。</p><p>如果你希望在某个具体任务上允许 API 变更,请在消息开头输入 <code>/allow-api</code>(可以后跟一段简短的任务描述)。这个按会话生效的覆盖会让 WebBrain 在界面确实失败或不可用时回退到 API 端点,但只要界面可用仍优先使用界面。覆盖启用期间,输入区上方会显示一枚置顶徽章,重置会话后该标志会清除。</p>",
+
+  "faq.lm_studio.q": "我能在 LM Studio 里也用吗?",
+  "faq.lm_studio.a_html": "可以。WebBrain 的只读网络工具 —— <code>fetch_url</code> 和 <code>research_url</code> —— 也作为独立的 <a href=\"https://lmstudio.ai\" target=\"_blank\">LM Studio</a> 插件发布在 <a href=\"https://lmstudio.ai/webbrain/web-tools\" target=\"_blank\">webbrain/web-tools</a>。用 <code>lms clone webbrain/web-tools</code> 安装,然后在任意 LM Studio 聊天里开启 —— 任何支持工具调用的模型都能调用这两个工具,你不需要安装浏览器扩展。纯 Node,无 headless 浏览器。源码:<a href=\"https://github.com/esokullu/webbrain/tree/main/lmstudio-plugin\" target=\"_blank\">lmstudio-plugin/</a>。",
 
   "faq.tab_switch.q": "WebBrain 在某个页面上工作时,我能切换到别的标签吗?",
   "faq.tab_switch.a_html": "<p>在 Chrome 上可以 —— 代理运行在后台 service worker 中,并绑定在启动它的标签上,因此即使你把焦点切到别处,它也会继续在那个特定标签上点击、输入和读取。针对标签的工具(CDP 的点击、输入、导航、截图)在 Chrome 中对后台标签同样有效。任务进行期间,侧边栏会锁定输入,防止你在新标签上意外启动第二个任务 —— 你需要等当前任务完成或手动停止它。需要注意的是,浏览器会限制后台标签上的计时器和动画,因此动画繁多的站点响应可能略慢。</p><p>在 Firefox 上,代理也会继续在其原始标签上运行,但自动截图会受限:Firefox 的截图 API 只能捕获当前活动标签,无法抓取后台的某个具体标签。WebBrain 会识别这一点,并在该轮跳过截图,而不是把一张无关页面的图像喂给模型。代理会继续基于文本上下文进行规划,直到你切回它的标签。</p><p><strong>请避免在代理正在工作的同一标签上主动点击或输入</strong> —— 这会造成你和代理争抢同一页面的竞态条件。切换标签没问题;共同驾驶同一标签则不行。</p>",

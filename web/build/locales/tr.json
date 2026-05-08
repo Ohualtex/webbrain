@@ -126,9 +126,6 @@
   "compare.row.offline": "Tamamen çevrimdışı",
   "compare.cell.offline_yes": "Evet (yerel LLM ile)",
   "compare.cell.offline_no": "Hayır — bulut gerekir",
-  "compare.row.interaction": "Sayfa etkileşimi",
-  "compare.cell.content_script": "İçerik betiği",
-  "compare.cell.cdp": "Chrome DevTools Protocol",
   "compare.row.self_host": "Kendin barındırabilirsin",
 
   "compare.row.what_is_it": "Nedir?",
@@ -185,6 +182,9 @@
   "faq.firefox.q": "WebBrain Firefox'ta çalışıyor mu?",
   "faq.firefox.a_html": "Evet. WebBrain hem Chrome sürümü (sidePanel API'sini kullanan Manifest V3) hem de Firefox sürümüyle (sidebar_action'ı kullanan Manifest V2) birlikte gelir. Her iki sürümün özellikleri aynıdır. Firefox sürümü geliştirme için geçici eklenti olarak yüklenebilir ya da kalıcı kurulum için addons.mozilla.org'da yayımlanabilir.",
 
+  "faq.firefox_sidebar_move.q": "Firefox kenar çubuğunu Chrome'un yan paneli gibi soldan sağa taşıyabilir miyim?",
+  "faq.firefox_sidebar_move.a_html": "Evet — Firefox'un kenar çubuğu varsayılan olarak solda görünür, ancak konumunu değiştirebilirsin. Kenar çubuğunun başlık alanına sağ tıkla ve <strong>Kenar Çubuğunu Sağa Taşı</strong>'yı seç (ya da menü çubuğundan <strong>Görünüm → Kenar Çubuğu → Kenar Çubuğunu Sağa Taşı</strong>'yı kullan). Konum yeniden başlatmalar arasında korunur. Chrome'un sidePanel'i varsayılan olarak sağdadır ve panelin kendisinden kullanıcı tarafından taşınamaz.",
+
   "faq.safe.q": "WebBrain güvenli mi? Web sayfalarını değiştirebilir mi?",
   "faq.safe.a_html": "WebBrain'in iki kipi vardır: Sor kipi (varsayılan) salt okunurdur ve sayfada hiçbir şeyi değiştiremez. Uygula kipi tam tarayıcı ajan yeteneklerini (tıklama, yazma, gezinme) açar, ancak etkinleştirilmeden önce kullanıcıdan açık onay ister ve görünür bir uyarı banner'ı ile gelir. İstediğin an Durdur düğmesiyle ajanı durdurabilirsin. Uzantının kaynak kodu denetim için tamamen GitHub'da açıktır.",
 
@@ -193,6 +193,9 @@
 
   "faq.api_mutations.q": "WebBrain API'leri doğrudan mı çağırır, yoksa her zaman arayüzden mi gider?",
   "faq.api_mutations.a_html": "<p>Varsayılan olarak WebBrain; oluşturan, değiştiren, silen, gönderen, yayınlayan, paylaşan veya satın alan her eylem için <strong>her zaman görünür arayüzden gider</strong>. Sayfaya gider, formu doldurur ve düğmeye tıklar — tam da senin yapacağın gibi. Mutasyonlar için arka planda <code>fetch()</code> ile REST/GraphQL uç noktalarını doğrudan çağırmayı reddeder. Bu kasıtlıdır: API eylemleri görünmezdir (ne gönderildiğini görmezsin), çoğu zaman yapılandırmadığın ayrı yetki jetonları gerektirir ve görünür bir yanlış tıklamaya göre çok daha geniş bir etki alanına sahiptir. UI-first: her şey ekrandadır, olağan tarayıcı oturumundadır ve durdurulabilir.</p><p><strong>Veri okumak</strong> için — bir README alma, issue arama, fiyat karşılaştırma, durum sayfasını kontrol etme — WebBrain, <code>fetch_url</code> ve <code>research_url</code> araçlarıyla arka plan HTTP isteklerini rahatça kullanır. Okumak eylem değildir; uzak bir serviste hiçbir şey değişmez, bu nedenle güvenlik endişeleri burada geçerli değildir.</p><p>Belirli bir görev için API mutasyonlarına özellikle izin vermek istiyorsan, mesajının başına <code>/allow-api</code> yaz (isteğe bağlı olarak kısa bir görev tanımı ekle). Konuşma başına geçerli bu geçersiz kılma, arayüz gerçekten başarısız ya da kullanılamaz olduğunda WebBrain'in API uç noktalarına geri düşmesine izin verir; arayüz çalıştığında yine arayüzü tercih eder. Geçersiz kılma aktifken giriş alanının üstünde yapışkan bir rozet görünür ve konuşma sıfırlandığında bayrak temizlenir.</p>",
+
+  "faq.lm_studio.q": "Bunu LM Studio'da da kullanabilir miyim?",
+  "faq.lm_studio.a_html": "Evet. WebBrain'in salt okunur ağ araçları — <code>fetch_url</code> ve <code>research_url</code> — bağımsız bir <a href=\"https://lmstudio.ai\" target=\"_blank\">LM Studio</a> eklentisi olarak <a href=\"https://lmstudio.ai/webbrain/web-tools\" target=\"_blank\">webbrain/web-tools</a> adresinde de yayınlanır. <code>lms clone webbrain/web-tools</code> ile kur ve herhangi bir LM Studio sohbetinde aç — araç destekleyen herhangi bir model, tarayıcı eklentisini kurmadan bu iki aracı çağırabilir. Saf Node, headless tarayıcı yok. Kaynak: <a href=\"https://github.com/esokullu/webbrain/tree/main/lmstudio-plugin\" target=\"_blank\">lmstudio-plugin/</a>.",
 
   "faq.tab_switch.q": "WebBrain bir sayfada çalışırken başka bir sekmeye geçebilir miyim?",
   "faq.tab_switch.a_html": "<p>Evet, Chrome'da — ajan arka plan service worker'ında çalışır ve başladığı sekmeye bağlıdır; yani odağını başka yere taşısan bile o belirli sekmeyi tıklamaya, yazmaya ve okumaya devam eder. Bir sekmeyi hedefleyen araçlar (CDP ile tıklama, yazma, gezinme, ekran görüntüsü) Chrome'da arka plan sekmelerinde çalışır. Bir görev sürerken yan çubuk girişi kilitler; böylece yeni sekmede kazara ikinci bir görev başlatamazsın — mevcut olanı beklemen ya da durdurman gerekir. Tarayıcılar arka plan sekmelerindeki zamanlayıcıları ve animasyonları yavaşlattığı için ağır animasyonlu siteler biraz daha yavaş tepki verebilir.</p><p>Firefox'ta ajan yine orijinal sekmesinde çalışmaya devam eder, ancak otomatik ekran görüntüleri kısıtlıdır: Firefox'un ekran görüntüsü API'si yalnızca aktif sekmeyi yakalayabilir, arka plandaki belirli bir sekmeyi değil. WebBrain bunu algılar ve alakasız bir sayfanın görüntüsünü modele beslemektense o tur için ekran görüntüsünü atlar. Ajan, sen sekmesine geri dönene dek metin tabanlı bağlamla planlamaya devam eder.</p><p><strong>Ajanın çalıştığı sekmede aktif olarak tıklamaktan ya da yazmaktan kaçın</strong> — aynı sayfa üzerinde senin ve ajanın birbirinizle yarıştığı yarış koşulları doğar. Sekme değiştirmek sorun değil; aynı sekmeyi beraber sürmek sorun.</p>",

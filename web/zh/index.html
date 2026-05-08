@@ -157,7 +157,7 @@
       "name": "我能在 LM Studio 里也用吗?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "可以。WebBrain 的只读网络工具 —— fetch_url 和 research_url —— 也作为独立的 LM Studio 插件发布在 webbrain/web-tools。用 `lms clone webbrain/web-tools` 安装,然后在任意 LM Studio 聊天里开启 —— 任何支持工具调用的模型都能调用这两个工具,你不需要安装浏览器扩展。纯 Node,无 headless 浏览器。"
+        "text": "可以。WebBrain 的只读网络工具 —— fetch_url 和 research_url —— 也作为独立的 LM Studio 插件发布在 webbrain/web-tools。用 lms clone webbrain/web-tools 安装,然后在任意 LM Studio 聊天里开启 —— 任何支持工具调用的模型都能调用这两个工具,你不需要安装浏览器扩展。纯 Node,无 headless 浏览器。源码:lmstudio-plugin/。"
       }
     },
     {
@@ -1459,7 +1459,6 @@
         <tr><td>侧边栏 UI</td><td class="highlight">是</td><td>是</td></tr>
         <tr><td>询问 / 执行 模式</td><td class="highlight">是</td><td>类似</td></tr>
         <tr><td>完全离线</td><td class="highlight">是(使用本地 LLM)</td><td>否 —— 需要云端</td></tr>
-        <tr><td>页面交互</td><td>Content script</td><td>Chrome DevTools Protocol</td></tr>
         <tr><td>可自托管</td><td class="highlight">是</td><td>否</td></tr>
       </tbody>
     </table>
