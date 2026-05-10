@@ -42,6 +42,15 @@ const { sanitizeMarkdownLinks: sanitizeMarkdownLinksFx } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/ui/markdown-link.js').replace(/\\/g, '/')
 );
 
+// loop-bucket.js is pure JS — the URL-family loop-detector bucketing logic
+// lives here so both agent.js and the tests can exercise the same code.
+const { resourceBucket, bucketArgsKey, URL_FAMILY_TOOLS } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/agent/loop-bucket.js').replace(/\\/g, '/')
+);
+const { resourceBucket: resourceBucketFx, bucketArgsKey: bucketArgsKeyFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/agent/loop-bucket.js').replace(/\\/g, '/')
+);
+
 // agent.js imports tools.js and cdp-client.js (which uses chrome.*). We need
 // only the loop-detection helpers, so we extract them via a tiny standalone
 // shim that mirrors the relevant Agent methods. Keep this in sync with
@@ -69,7 +78,11 @@ class LoopDetectorShim {
     return { kind: 'none' };
   }
   _recordCall(tabId, name, args, result) {
-    const argsHash = JSON.stringify(args || {});
+    // Mirror agent.js: URL-family tools bucket by resource identity so
+    // the agent can't escape loop detection by fetching the same file
+    // via 8 different API endpoints. Falls back to exact JSON for other
+    // tools.
+    const argsHash = bucketArgsKey(name, args);
     const errored = !!(result && (result.error || result.success === false));
     const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
     const buf = this.recentCalls.get(tabId) || [];
@@ -851,6 +864,145 @@ test('firefox port registrableDomain matches chrome', () => {
   const samples = ['github.com', 'api.github.com', 'foo.example.co.uk', 'alice.github.io', '127.0.0.1'];
   for (const h of samples) {
     assert.equal(registrableDomainFx(h), registrableDomain(h), `mismatch on ${h}`);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// URL-family loop bucketing (agent/loop-bucket.js)
+// ────────────────────────────────────────────────────────────────────────
+
+console.log('\nURL-family loop bucketing');
+
+test('the 8-way GitHub fetch trap collapses to one bucket', () => {
+  // The exact bug from the trace: agent fetched web/build/locales/en.json
+  // 8 different ways. All should map to the same bucket so the existing
+  // loop detector fires.
+  const variants = [
+    'https://raw.githubusercontent.com/esokullu/WebBrain/main/web/build/locales/en.json',
+    'https://api.github.com/repos/esokullu/WebBrain/contents/web/build/locales/en.json',
+    'https://github.com/esokullu/WebBrain/blob/main/web/build/locales/en.json',
+    'https://github.com/esokullu/WebBrain/raw/main/web/build/locales/en.json',
+    'https://github.com/esokullu/WebBrain/edit/main/web/build/locales/en.json',
+  ];
+  const buckets = variants.map(resourceBucket);
+  const unique = new Set(buckets);
+  assert.equal(unique.size, 1,
+    `expected all variants to collapse to one bucket, got ${unique.size}: ${[...unique].join(' | ')}`);
+});
+
+test('different files in the same repo get different buckets', () => {
+  assert.notEqual(
+    resourceBucket('https://raw.githubusercontent.com/esokullu/WebBrain/main/web/build/locales/en.json'),
+    resourceBucket('https://raw.githubusercontent.com/esokullu/WebBrain/main/web/build/locales/tr.json'),
+  );
+});
+
+test('different repos get different buckets', () => {
+  assert.notEqual(
+    resourceBucket('https://raw.githubusercontent.com/esokullu/WebBrain/main/README.md'),
+    resourceBucket('https://raw.githubusercontent.com/anthropic/skill-rules/main/README.md'),
+  );
+});
+
+test('non-GitHub hosts use last-3-segments backstop', () => {
+  // Same bucket — same path tail
+  assert.equal(
+    resourceBucket('https://example.com/a/b/c/file.json'),
+    resourceBucket('https://example.com/a/b/c/file.json?v=1'),
+  );
+  // Different bucket — different host
+  assert.notEqual(
+    resourceBucket('https://example.com/a/b/file.json'),
+    resourceBucket('https://other.com/a/b/file.json'),
+  );
+});
+
+test('GitHub gist + codeload also normalize to github.com', () => {
+  const a = resourceBucket('https://gist.github.com/user/abc123/raw/file.txt');
+  const b = resourceBucket('https://codeload.github.com/owner/repo/zip/refs/heads/main');
+  assert.match(a, /^github\.com::/);
+  assert.match(b, /^github\.com::/);
+});
+
+test('invalid URL returns input unchanged (graceful fallback)', () => {
+  assert.equal(resourceBucket('not a url'), 'not a url');
+  assert.equal(resourceBucket(''), '');
+  assert.equal(resourceBucket(null), '');
+  assert.equal(resourceBucket(undefined), '');
+});
+
+test('bucketArgsKey: URL-family tools use resource bucket + method', () => {
+  const a = bucketArgsKey('fetch_url', { url: 'https://raw.githubusercontent.com/o/r/main/foo.json' });
+  const b = bucketArgsKey('fetch_url', { url: 'https://api.github.com/repos/o/r/contents/foo.json' });
+  assert.equal(a, b, 'same logical resource → same key');
+  // Method matters: GET ≠ POST.
+  const get = bucketArgsKey('fetch_url', { url: 'https://x.com/a/b/c', method: 'GET' });
+  const post = bucketArgsKey('fetch_url', { url: 'https://x.com/a/b/c', method: 'POST' });
+  assert.notEqual(get, post);
+});
+
+test('bucketArgsKey: non-URL tools fall back to exact JSON args', () => {
+  // click_ax with the same ref_id should match itself
+  assert.equal(
+    bucketArgsKey('click_ax', { ref_id: 'ref_42' }),
+    bucketArgsKey('click_ax', { ref_id: 'ref_42' }),
+  );
+  // Different args → different key
+  assert.notEqual(
+    bucketArgsKey('click_ax', { ref_id: 'ref_42' }),
+    bucketArgsKey('click_ax', { ref_id: 'ref_43' }),
+  );
+});
+
+test('URL_FAMILY_TOOLS contains the expected tool names', () => {
+  // Lock the membership so a future contributor doesn't accidentally
+  // remove fetch_url and silently regress the loop detector.
+  for (const name of ['fetch_url', 'research_url', 'download_file', 'read_downloaded_file']) {
+    assert.ok(URL_FAMILY_TOOLS.has(name), `${name} missing from URL_FAMILY_TOOLS`);
+  }
+});
+
+test('LOOP DETECTOR catches URL-family thrashing (the trace bug)', () => {
+  // Replay a slimmer version of the actual trace: the agent fetches the
+  // same resource via 4 different API URLs. With the old code the loop
+  // detector saw 4 distinct keys and never fired. With the bucketing
+  // it sees the same key 4 times → "repeat" loop on call 3.
+  const d = new LoopDetectorShim();
+  const tabId = 1;
+  const variants = [
+    'https://raw.githubusercontent.com/o/r/main/file.json',
+    'https://api.github.com/repos/o/r/contents/file.json',
+    'https://github.com/o/r/blob/main/file.json',
+    'https://api.github.com/repos/o/r/git/blobs/abc123',
+  ];
+  let triggered = null;
+  for (let i = 0; i < variants.length; i++) {
+    const result = d._checkLoop(tabId, 'fetch_url', { url: variants[i] }, { success: true });
+    if (result.kind !== 'none') { triggered = { i, result }; break; }
+  }
+  assert.ok(triggered, 'expected loop detector to fire on URL-family thrashing');
+  assert.equal(triggered.result.kind, 'nudge', 'first detection should be a nudge');
+  // i=2 means after the 3rd identical (bucketed) call.
+  assert.ok(triggered.i >= 2, `expected detection at call index ≥2, got ${triggered.i}`);
+});
+
+test('firefox loop-bucket matches chrome', () => {
+  const samples = [
+    ['fetch_url', { url: 'https://raw.githubusercontent.com/o/r/main/foo.json' }],
+    ['fetch_url', { url: 'https://api.github.com/repos/o/r/contents/foo.json', method: 'POST' }],
+    ['click_ax', { ref_id: 'ref_42' }],
+    ['fetch_url', { url: 'not a url' }],
+  ];
+  for (const [name, args] of samples) {
+    assert.equal(bucketArgsKeyFx(name, args), bucketArgsKey(name, args), `mismatch on ${name} ${JSON.stringify(args)}`);
+  }
+  for (const url of [
+    'https://github.com/o/r/blob/main/foo.json',
+    'https://example.com/a/b/c',
+    null,
+    'invalid',
+  ]) {
+    assert.equal(resourceBucketFx(url), resourceBucket(url), `mismatch on ${url}`);
   }
 });
 

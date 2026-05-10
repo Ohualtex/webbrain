@@ -184,6 +184,9 @@ export default {
   'tr.conversation.turn_of': 'tour {n} sur {total}',
   'tr.conversation.tooltip': 'Fait partie d\'une conversation à {n} tours ({id}). Ouvrez le run pour naviguer entre les tours.',
 
+  'tr.cost.label': 'Coût :',
+  'tr.cost.tooltip': 'Coût total du LLM rapporté par le fournisseur (USD). Surligné en orange à partir de 0,50 $ sans réponse finale — probablement un run gaspillé.',
+
   'tr.empty.title': 'Aucune exécution sélectionnée.',
   'tr.empty.hint_html': 'Choisissez une exécution à gauche pour voir sa chronologie étape par étape. Cliquez sur <b>Comparer</b> pour choisir deux exécutions et les voir côte à côte.',
 

@@ -184,6 +184,9 @@ export default {
   'tr.conversation.turn_of': 'tur {n}/{total}',
   'tr.conversation.tooltip': '{n} turluk sohbetin parçası ({id}). Turlar arasında gezinmek için çalışmayı aç.',
 
+  'tr.cost.label': 'Maliyet:',
+  'tr.cost.tooltip': 'Sağlayıcının raporladığı toplam LLM maliyeti (USD). Cevap üretmeden ≥ $0.50 harcandıysa turuncuyla vurgulanır — büyük olasılıkla boşa giden bir çalışma.',
+
   'tr.empty.title': 'Seçili çalışma yok.',
   'tr.empty.hint_html': 'Adım adım zaman çizgisini görmek için soldan bir çalışma seç. İki çalışmayı yan yana görmek için <b>Karşılaştır</b>\'a tıkla.',
 

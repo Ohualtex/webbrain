@@ -184,6 +184,9 @@ export default {
   'tr.conversation.turn_of': 'turno {n} de {total}',
   'tr.conversation.tooltip': 'Forma parte de una conversación de {n} turnos ({id}). Abre la ejecución para saltar entre turnos.',
 
+  'tr.cost.label': 'Coste:',
+  'tr.cost.tooltip': 'Coste total del LLM informado por el proveedor (USD). Resaltado en naranja a partir de 0,50 $ sin respuesta final — probablemente una ejecución desperdiciada.',
+
   'tr.empty.title': 'Ninguna ejecución seleccionada.',
   'tr.empty.hint_html': 'Elige una ejecución a la izquierda para ver su línea de tiempo paso a paso. Pulsa <b>Comparar</b> para elegir dos ejecuciones y verlas lado a lado.',
 

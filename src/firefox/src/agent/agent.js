@@ -1,4 +1,5 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
+import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
   fetchUrl,
@@ -63,8 +64,11 @@ export class Agent {
 
   // ---- Loop detection ----
   _recordCall(tabId, name, args, result) {
-    const argsHash = JSON.stringify(args || {});
+    // URL-family tools (fetch_url, research_url, …) bucket by resource
+    // identity so the agent can't escape loop detection by fetching the
+    // same logical file via 8 different API endpoints. See loop-bucket.js.
     const errored = !!(result && (result.error || result.success === false));
+    const argsHash = bucketArgsKey(name, args);
     const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
     const buf = this.recentCalls.get(tabId) || [];
     buf.push({ key, name, ts: Date.now() });
@@ -98,6 +102,50 @@ export class Agent {
     this.loopNudges.delete(tabId);
     this.healthyCallsSinceLoop.delete(tabId);
     this.recentCoordClicks.delete(tabId);
+  }
+
+  /**
+   * Synthesize a transparent summary when the agent hits the step limit
+   * without producing a final answer. See chrome's copy for the rationale.
+   */
+  _buildStepLimitSummary(messages, steps) {
+    const toolCounts = new Map();
+    let lastAssistantText = '';
+    let lastToolCall = null;
+    for (const m of messages) {
+      if (m.role === 'assistant') {
+        if (Array.isArray(m.tool_calls)) {
+          for (const tc of m.tool_calls) {
+            const name = tc?.function?.name || tc?.name;
+            if (name) {
+              toolCounts.set(name, (toolCounts.get(name) || 0) + 1);
+              lastToolCall = { name, args: tc?.function?.arguments || tc?.arguments || '' };
+            }
+          }
+        }
+        if (typeof m.content === 'string' && m.content.trim()) {
+          lastAssistantText = m.content;
+        }
+      }
+    }
+    const sortedTools = [...toolCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([n, c]) => `${n} ×${c}`)
+      .join(', ');
+    const lastActionLine = lastToolCall
+      ? `Last tool attempted: ${lastToolCall.name}${lastToolCall.args ? ' (' + String(lastToolCall.args).slice(0, 120) + ')' : ''}`
+      : '';
+    const lastTextSnippet = lastAssistantText
+      ? `Last thing I said: "${lastAssistantText.slice(0, 280).replace(/\s+/g, ' ').trim()}${lastAssistantText.length > 280 ? '…' : ''}"`
+      : '';
+    return [
+      `[Step limit reached after ${steps} steps without completing the task.`,
+      sortedTools ? `Tools attempted: ${sortedTools}.` : '',
+      lastActionLine,
+      lastTextSnippet,
+      'This usually means: (a) the task is too complex for the current model — try a stronger one, (b) the step limit is too low — raise it in Settings, or (c) the strategy was wrong — try breaking it into smaller parts.]',
+    ].filter(Boolean).join('\n\n');
   }
 
   _checkCoordClickLoop(tabId, x, y) {
@@ -2058,6 +2106,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let steps = 0;
     let finalResponse = '';
     let _traceStatus = 'done';
+    // Tracks whether we've already nudged the model after an empty
+    // (no-content + no-tool-call) response. Prevents an infinite
+    // empty→nudge→empty→nudge cycle.
+    let emptyOutputRecoveryAttempted = false;
 
     this.abortFlags.delete(tabId); // clear any stale abort
 
@@ -2154,6 +2206,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
+      // Reset the empty-output recovery flag whenever the model produces
+      // any signal of life (text or a tool call).
+      if ((result.content && result.content.trim()) || (result.toolCalls && result.toolCalls.length > 0)) {
+        emptyOutputRecoveryAttempted = false;
+      }
+
       // Fallback: if the LLM emitted tool calls as raw text instead of
       // using the structured tool_calls field, try to parse them out.
       if ((!result.toolCalls || result.toolCalls.length === 0) && result.content) {
@@ -2186,20 +2244,41 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         continue;
       }
 
-      // No tool calls — this is the final text response. If the model
-      // returned empty content AND there was a partial assistant text
-      // rendered in a prior step (e.g. the pre-tool "I'll click X" blurb),
-      // DO NOT emit an empty text update — doing so overwrites the rendered
-      // bubble and makes the previously-visible response disappear.
-      finalResponse = result.content || '';
+      // No tool calls. Detect the "empty output" failure mode (no text +
+      // no tool call after non-trivial reasoning) and recover ONCE via a
+      // summary-nudge before giving up.
+      const isEmpty = !result.content || !result.content.trim();
+      if (isEmpty) {
+        if (!emptyOutputRecoveryAttempted) {
+          emptyOutputRecoveryAttempted = true;
+          messages.push({
+            role: 'user',
+            content: '[System nudge: your previous response had neither text nor a tool call. You may have run out of output budget on internal reasoning. In ONE short message, summarize what you accomplished, what you tried, and what blocked you — then stop. Do not start any new tool calls.]',
+          });
+          continue;
+        }
+        finalResponse = '[Agent emitted no output and no tool call, even after a recovery nudge. This usually means the task exceeded the current model\'s capability or context budget. Try a stronger model, raise the step limit in settings, or break the task into smaller parts.]';
+        _traceStatus = 'empty_output';
+        messages.push({ role: 'assistant', content: finalResponse });
+        onUpdate('warning', { message: finalResponse });
+        break;
+      }
+      finalResponse = result.content;
       messages.push({ role: 'assistant', content: finalResponse });
-      if (finalResponse) onUpdate('text', { content: finalResponse });
+      onUpdate('text', { content: finalResponse });
       break;
     }
 
     if (steps >= this.maxSteps) {
       _traceStatus = 'max_steps';
       onUpdate('max_steps_reached', { steps: this.maxSteps });
+      // Auto-done summary so the user sees WHY the run ended instead of
+      // an empty `done` event.
+      if (!finalResponse || !finalResponse.trim()) {
+        finalResponse = this._buildStepLimitSummary(messages, steps);
+        messages.push({ role: 'assistant', content: finalResponse });
+        onUpdate('text', { content: finalResponse });
+      }
     }
 
     return finalResponse;
@@ -2229,6 +2308,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const tools = getToolsForMode(mode);
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
+    // See processMessage — used to break the empty-response→nudge cycle.
+    let emptyOutputRecoveryAttempted = false;
 
     this.abortFlags.delete(tabId);
 
@@ -2315,8 +2396,25 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           continue;
         }
 
-        // No tool calls — final response
+        // No tool calls. Detect the "empty output" failure and recover
+        // once via a summary-nudge; on second empty in a row, give up
+        // with a transparent message instead of returning empty content.
         this._logDebug({ type: 'llm_stream_response', step: steps, content: fullText, toolCalls: null });
+        if (!fullText || !fullText.trim()) {
+          if (!emptyOutputRecoveryAttempted) {
+            emptyOutputRecoveryAttempted = true;
+            messages.push({
+              role: 'user',
+              content: '[System nudge: your previous response had neither text nor a tool call. You may have run out of output budget on internal reasoning. In ONE short message, summarize what you accomplished, what you tried, and what blocked you — then stop. Do not start any new tool calls.]',
+            });
+            continue;
+          }
+          const failMsg = '[Agent emitted no output and no tool call, even after a recovery nudge. This usually means the task exceeded the current model\'s capability or context budget. Try a stronger model, raise the step limit in settings, or break the task into smaller parts.]';
+          messages.push({ role: 'assistant', content: failMsg });
+          onUpdate('warning', { message: failMsg });
+          return failMsg;
+        }
+        emptyOutputRecoveryAttempted = false;
         messages.push({ role: 'assistant', content: fullText });
         return fullText;
 
@@ -2336,6 +2434,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
 
     onUpdate('max_steps_reached', { steps: this.maxSteps });
-    return '[Reached maximum steps limit. You can continue from where I left off.]';
+    // Synthesize a transparent summary of what was attempted instead of
+    // a generic "reached maximum steps" line.
+    const summary = this._buildStepLimitSummary(messages, steps);
+    messages.push({ role: 'assistant', content: summary });
+    onUpdate('text', { content: summary });
+    return summary;
   }
 }

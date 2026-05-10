@@ -44,6 +44,19 @@ function siblingsOf(run) {
   return conversationMap.get(run.conversationId) || [];
 }
 
+/**
+ * Render run cost in USD. Returns '' when the provider didn't report cost
+ * (older runs from before recorder tracked it, providers that don't bill,
+ * BYOK setups without cost data). Sub-cent values get an extra digit so a
+ * $0.003 run isn't rendered as $0.00.
+ */
+function formatCost(value) {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '';
+  if (value < 0.01) return `$${value.toFixed(4)}`;
+  if (value < 1) return `$${value.toFixed(3)}`;
+  return `$${value.toFixed(2)}`;
+}
+
 // ----- List -----------------------------------------------------------------
 
 async function refresh() {
@@ -78,6 +91,7 @@ function renderList() {
     const dur = r.durationMs ? `${(r.durationMs / 1000).toFixed(1)}s` : '—';
     const steps = r.stepCount || 0;
     const tokens = (r.totalInputTokens || 0) + (r.totalOutputTokens || 0);
+    const costStr = formatCost(r.totalCost);
     const cls = [
       'run-item',
       selectedRunId === r.runId ? 'selected' : '',
@@ -88,6 +102,10 @@ function renderList() {
     const convChip = siblings.length > 1
       ? `<span class="conv-chip" title="${escapeAttr(t('tr.conversation.tooltip', { n: siblings.length, id: r.conversationId }))}">🧵 ${siblings.length}</span>`
       : '';
+    // Highlight costly-but-empty runs (≥$0.50 spent with no final text) so
+    // users can spot expensive failures at a glance.
+    const isCostlyFailure = (r.totalCost || 0) >= 0.5 && (!r.finalContent || !r.finalContent.trim());
+    const costClass = isCostlyFailure ? 'cost-warn' : '';
     return `
       <div class="${cls}" data-run-id="${escapeAttr(r.runId)}">
         <div class="run-title"><span class="status-dot ${status}"></span>${escapeHtml(title.slice(0, 120))}${convChip}</div>
@@ -97,6 +115,7 @@ function renderList() {
           <span>${escapeHtml(t(steps === 1 ? 'tr.step' : 'tr.steps_plural', { n: steps }))}</span>
           <span>${dur}</span>
           ${tokens ? `<span>${escapeHtml(t('tr.tokens_short', { n: tokens.toLocaleString() }))}</span>` : ''}
+          ${costStr ? `<span class="${costClass}" title="${escapeAttr(t('tr.cost.tooltip'))}">${escapeHtml(costStr)}</span>` : ''}
         </div>
         <div class="run-meta" style="margin-top:3px;"><span>${started}</span></div>
       </div>
@@ -188,6 +207,7 @@ async function buildRunView(run, events, compact) {
       <span class="stat">${escapeHtml(t('tr.duration.label'))} <b>${run.durationMs ? (run.durationMs / 1000).toFixed(1) + 's' : '—'}</b></span>
       <span class="stat">${escapeHtml(t('tr.intokens.label'))} <b>${(run.totalInputTokens || 0).toLocaleString()}</b></span>
       <span class="stat">${escapeHtml(t('tr.outtokens.label'))} <b>${(run.totalOutputTokens || 0).toLocaleString()}</b></span>
+      ${formatCost(run.totalCost) ? `<span class="stat">${escapeHtml(t('tr.cost.label'))} <b>${escapeHtml(formatCost(run.totalCost))}</b></span>` : ''}
     </div>
     ${renderConversationPanel(run, compact)}
     <div class="run-task">${escapeHtml(run.userMessage || '')}</div>

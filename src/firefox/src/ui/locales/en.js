@@ -189,6 +189,9 @@ export default {
   'tr.conversation.turn_of': 'turn {n} of {total}',
   'tr.conversation.tooltip': 'Part of a {n}-turn conversation ({id}). Open the run to jump between turns.',
 
+  'tr.cost.label': 'Cost:',
+  'tr.cost.tooltip': 'Total LLM cost reported by the provider (USD). Highlighted in orange when ≥ $0.50 with no final answer — likely a wasted run.',
+
   'tr.empty.title': 'No run selected.',
   'tr.empty.hint_html': 'Pick a run from the left to see its step-by-step timeline. Click <b>Compare</b> to pick two runs and view them side-by-side.',
 
