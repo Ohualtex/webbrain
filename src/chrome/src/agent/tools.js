@@ -408,7 +408,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'fetch_url',
-      description: 'Fetch a URL directly from the background and return its text content. Sends the user\'s cookies, so authenticated endpoints (GitHub API, internal tools, signed-in pages) work without any extra setup. Best for: JSON APIs, RSS, plain HTML, raw text files, GitHub raw blobs, REST endpoints. Auto-trims HTML to readable text. NOT good for SPAs that need JS rendering — use research_url for those. Returns ~8000 chars of text.',
+      description: 'Fetch a URL directly from the background and return its text content. Cookies are attached only when the URL shares the registrable domain (eTLD+1) of the active tab — same-site reads work as the signed-in user; cross-site reads are anonymous. Best for: JSON APIs, RSS, plain HTML, raw text files, GitHub raw blobs, REST endpoints. Auto-trims HTML to readable text. NOT good for SPAs that need JS rendering — use research_url for those. Returns up to ~192000 chars of text or ~96000 chars of pretty-printed JSON — generous enough to fit most articles in a single call; if the response was still truncated the result includes `truncated: true` and `originalLength` (re-fetch with section or page-range params, don\'t blindly retry the same URL). DO NOT use fetch_url to read the page the user is currently looking at — call read_page or get_accessibility_tree instead. fetch_url is for content on OTHER URLs.',
       parameters: {
         type: 'object',
         properties: {
@@ -632,6 +632,12 @@ IMPORTANT — Current Page Priority:
 - Read the page before doing anything else.
 - The user is looking at this page for a reason — assume their question is about it unless it is clearly unrelated.
 - Only suggest navigating elsewhere if the current page genuinely has no relevant information.
+
+READING THE CURRENT TAB vs. FETCHING URLS — read this:
+- If the answer lives on the active tab, READ THE TAB. Use \`get_accessibility_tree\` (default) or \`read_page\` (long-form prose). The page content is already loaded — there is nothing to gain by going over the network.
+- DO NOT call \`fetch_url\` or \`research_url\` against the URL of the active tab, the API equivalent of the active tab, or a "renderable" / "raw" / "amp" / "mobile" variant of the active tab's URL. Re-fetching content the user is already looking at is the most common wasted step. Symptom of this antipattern: you fetch a Wikipedia/MediaWiki API URL for the same page the user is on, get a truncated result, then fetch a slightly different variant hoping for more content. Stop and call \`read_page\` instead.
+- \`fetch_url\` and \`research_url\` are for content on OTHER URLs — a referenced article, an API the page links to, a sibling page, a different site entirely.
+- If \`read_page\` truncates or doesn't surface what you need, scroll the tab and re-read; or use \`get_accessibility_tree({ref_id: ...})\` to read a specific subtree. Don't escape to fetch_url to retrieve what's already in the DOM.
 
 Guidelines:
 1. Read the page first (a11y tree by default) to understand the context, then answer the user's question.

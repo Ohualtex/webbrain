@@ -1,4 +1,5 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT } from './tools.js';
+import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
 import { cdpClient } from '../cdp/cdp-client.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
@@ -26,6 +27,7 @@ export class Agent {
     this.providerManager = providerManager;
     this.conversations = new Map(); // tabId -> messages[]
     this.conversationModes = new Map(); // tabId -> 'ask' | 'act'
+    this.conversationIds = new Map(); // tabId -> stable conversationId (regenerated on clearConversation)
     this.hydratedTabs = new Set(); // tabIds we've already pulled from storage
     this.persistTimers = new Map(); // tabId -> debounce handle
     this.abortFlags = new Map(); // tabId -> boolean
@@ -112,8 +114,11 @@ export class Agent {
   // we hard-stop the run with a clear final message.
 
   _recordCall(tabId, name, args, result) {
-    const argsHash = JSON.stringify(args || {});
+    // URL-family tools (fetch_url, research_url, …) bucket by resource
+    // identity so the agent can't escape loop detection by fetching the
+    // same logical file via 8 different API endpoints. See loop-bucket.js.
     const errored = !!(result && (result.error || result.success === false));
+    const argsHash = bucketArgsKey(name, args);
     const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
     const buf = this.recentCalls.get(tabId) || [];
     buf.push({ key, name, ts: Date.now() });
@@ -151,6 +156,53 @@ export class Agent {
     this.loopNudges.delete(tabId);
     this.healthyCallsSinceLoop.delete(tabId);
     this.recentCoordClicks.delete(tabId);
+  }
+
+  /**
+   * Synthesize a transparent summary when the agent hits the step limit
+   * without producing a final answer. Walks the conversation to count
+   * tool usage and surface the last non-empty assistant message and the
+   * last tool call, so the user sees WHY the run ended instead of an
+   * empty `done` event. Pure deterministic — no extra LLM call.
+   */
+  _buildStepLimitSummary(messages, steps) {
+    const toolCounts = new Map();
+    let lastAssistantText = '';
+    let lastToolCall = null;
+    for (const m of messages) {
+      if (m.role === 'assistant') {
+        if (Array.isArray(m.tool_calls)) {
+          for (const tc of m.tool_calls) {
+            const name = tc?.function?.name || tc?.name;
+            if (name) {
+              toolCounts.set(name, (toolCounts.get(name) || 0) + 1);
+              lastToolCall = { name, args: tc?.function?.arguments || tc?.arguments || '' };
+            }
+          }
+        }
+        if (typeof m.content === 'string' && m.content.trim()) {
+          lastAssistantText = m.content;
+        }
+      }
+    }
+    const sortedTools = [...toolCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([n, c]) => `${n} ×${c}`)
+      .join(', ');
+    const lastActionLine = lastToolCall
+      ? `Last tool attempted: ${lastToolCall.name}${lastToolCall.args ? ' (' + String(lastToolCall.args).slice(0, 120) + ')' : ''}`
+      : '';
+    const lastTextSnippet = lastAssistantText
+      ? `Last thing I said: "${lastAssistantText.slice(0, 280).replace(/\s+/g, ' ').trim()}${lastAssistantText.length > 280 ? '…' : ''}"`
+      : '';
+    return [
+      `[Step limit reached after ${steps} steps without completing the task.`,
+      sortedTools ? `Tools attempted: ${sortedTools}.` : '',
+      lastActionLine,
+      lastTextSnippet,
+      'This usually means: (a) the task is too complex for the current model — try a stronger one, (b) the step limit is too low — raise it in Settings, or (c) the strategy was wrong — try breaking it into smaller parts.]',
+    ].filter(Boolean).join('\n\n');
   }
 
   /**
@@ -1176,49 +1228,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // Probe the CSS viewport first so we can either (a) clip exactly
       // to it for pixel-accurate captures, or (b) compute a budget-aware
       // CDP-side scale that downsizes during capture rather than after.
-      //
-      // Expanded diagnostic: pull every plausible width/height signal so a
-      // mismatch between innerWidth and the actually-rendered viewport
-      // shows up in the trace. The Chrome side panel resizing the tab can
-      // race the probe; visualViewport / clientWidth disagreeing with
-      // innerWidth is the smoking gun.
-      const vp = await cdpClient.evaluate(tabId, `(() => {
-        const de = document.documentElement;
-        const vv = window.visualViewport;
-        const lm = window.getComputedStyle ? getComputedStyle(de) : null;
-        return {
-          w: window.innerWidth,
-          h: window.innerHeight,
-          clientW: de ? de.clientWidth : null,
-          clientH: de ? de.clientHeight : null,
-          scrollW: de ? de.scrollWidth : null,
-          scrollH: de ? de.scrollHeight : null,
-          outerW: window.outerWidth,
-          outerH: window.outerHeight,
-          vvW: vv ? vv.width : null,
-          vvH: vv ? vv.height : null,
-          vvScale: vv ? vv.scale : null,
-          dpr: window.devicePixelRatio || 1,
-          screenW: screen.width,
-          screenH: screen.height,
-          screenAvailW: screen.availWidth,
-          screenAvailH: screen.availHeight,
-          scrollX: Math.round(window.scrollX || 0),
-          scrollY: Math.round(window.scrollY || 0),
-          docReady: document.readyState,
-          visibility: document.visibilityState,
-          hasFocus: document.hasFocus(),
-          frame: (() => { try { return window.top === window ? 'top' : 'iframe'; } catch { return 'cross-origin'; } })(),
-          url: location.href,
-          zoom: lm && lm.zoom ? lm.zoom : null,
-        };
-      })()`);
-      const probeVal = vp?.result?.value || {};
-      const cssW = Math.max(1, Math.round(probeVal.w || 1024));
-      const cssH = Math.max(1, Math.round(probeVal.h || 768));
-
-      // Stash for end-of-capture trace note (see below).
-      const _diag = { probe: probeVal, cssW, cssH };
+      const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
+      const cssW = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
+      const cssH = Math.max(1, Math.round(vp?.result?.value?.h || 768));
 
       if (coordAligned) {
         // Pixel-accuracy mode: image pixels must equal CSS pixels so the
@@ -1234,21 +1246,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             clip: { x: 0, y: 0, width: cssW, height: cssH, scale: 1 },
           })
         );
-        if (!shot?.data) {
-          await this._recordViewportDiag(tabId, _diag, null, null, 'coord_aligned', null, 'no shot data');
-          return null;
-        }
-        let alignedDataUrl = `data:image/jpeg;base64,${shot.data}`;
-        const actual = await this._getImageDimensions(alignedDataUrl);
-        if (actual && (actual.width !== cssW || actual.height !== cssH)) {
-          alignedDataUrl = await this._resizeImageToDimensions(alignedDataUrl, cssW, cssH, {
-            mime: 'image/png',
-          });
-        }
-        const shrunk = await this._compressJpegToByteCeiling(alignedDataUrl);
-        const finalDims = await this._getImageDimensions(shrunk) || { width: cssW, height: cssH };
-        await this._recordViewportDiag(tabId, _diag, finalDims.width, finalDims.height, 'coord_aligned', 1, null);
-        return { dataUrl: shrunk, width: finalDims.width, height: finalDims.height, coordAligned: true };
+        if (!shot?.data) return null;
+        const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
+        const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
+        return { dataUrl: shrunk, width: cssW, height: cssH, coordAligned: true };
       }
 
       // Non-coord-aligned mode: pre-compute target dims via the budget
@@ -1265,71 +1266,22 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           clip: { x: 0, y: 0, width: cssW, height: cssH, scale },
         })
       );
-      if (!shot?.data) {
-        await this._recordViewportDiag(tabId, _diag, null, null, 'budget', scale, 'no shot data');
-        return null;
-      }
+      if (!shot?.data) return null;
       const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
 
-      // CDP's clip scale is interpreted against the compositor surface on
-      // some HiDPI setups, so the returned bitmap can be larger than the CSS
-      // target. Decode the actual bitmap and fit that to the vision budget.
-      const fitted = await this._shrinkImageForBudget(rawDataUrl, 0, 0);
-      await this._recordViewportDiag(tabId, _diag, fitted.width, fitted.height, 'budget', scale, null);
+      // CDP-side resize + JPEG q=75 usually fits. Iterative quality
+      // downgrade is the safety net for high-DPR screens where the
+      // captured image can still exceed the base64 ceiling.
+      const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
       return {
-        dataUrl: fitted.dataUrl,
-        width: fitted.width,
-        height: fitted.height,
+        dataUrl: shrunk,
+        width: targetW,
+        height: targetH,
         coordAligned: false,
       };
     } catch (e) {
       return null;
     }
-  }
-
-  /**
-   * Diagnostic helper: re-probe the viewport AFTER capture to detect
-   * any race between the bringToFront/probe sequence and the actual
-   * page layout, then log everything (pre-probe, post-probe, final
-   * image dims, scale) into the trace as a `viewport_diag` note.
-   *
-   * Temporary — added to chase a bug where the captured image is
-   * smaller than the actually-rendered viewport. Remove once root
-   * cause is identified.
-   */
-  async _recordViewportDiag(tabId, diag, finalW, finalH, mode, scale, error) {
-    try {
-      const runId = this.currentRunId.get(tabId);
-      if (!runId) return;
-      // Re-probe after capture so we can compare pre vs post.
-      let postProbe = null;
-      try {
-        const vp2 = await cdpClient.evaluate(tabId, `(() => {
-          const de = document.documentElement;
-          const vv = window.visualViewport;
-          return {
-            w: window.innerWidth, h: window.innerHeight,
-            clientW: de ? de.clientWidth : null, clientH: de ? de.clientHeight : null,
-            vvW: vv ? vv.width : null, vvH: vv ? vv.height : null,
-            dpr: window.devicePixelRatio || 1,
-            hasFocus: document.hasFocus(),
-          };
-        })()`);
-        postProbe = vp2?.result?.value || null;
-      } catch { /* ignore */ }
-      trace.recordNote(runId, null, 'viewport_diag', {
-        mode,
-        scale,
-        error,
-        pre: diag?.probe || null,
-        post: postProbe,
-        cssClip: { w: diag?.cssW || null, h: diag?.cssH || null },
-        finalImage: { w: finalW, h: finalH },
-        deltaInner: postProbe && diag?.probe
-          ? { dw: postProbe.w - diag.probe.w, dh: postProbe.h - diag.probe.h }
-          : null,
-      });
-    } catch { /* never let diagnostics break capture */ }
   }
 
   /**
@@ -1531,50 +1483,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   /**
-   * Decode just enough of a data URL to learn its natural bitmap size.
-   * Uses the browser's decoder instead of hand-parsing JPEG/PNG headers so
-   * this also works if Chrome changes the capture format in the future.
-   */
-  async _getImageDimensions(dataUrl) {
-    try {
-      if (!dataUrl) return null;
-      const resp = await fetch(dataUrl);
-      const blob = await resp.blob();
-      const bmp = await createImageBitmap(blob);
-      return { width: bmp.width, height: bmp.height };
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Force a screenshot to exact output dimensions. Used for coord-aligned
-   * captures because CDP may still return native surface pixels on HiDPI
-   * displays even when the clip is expressed in CSS pixels.
-   */
-  async _resizeImageToDimensions(dataUrl, width, height, { mime = 'image/jpeg', quality = 0.92 } = {}) {
-    try {
-      if (!dataUrl || !width || !height) return dataUrl;
-      const resp = await fetch(dataUrl);
-      const blob = await resp.blob();
-      const bmp = await createImageBitmap(blob);
-      if (bmp.width === width && bmp.height === height) return dataUrl;
-      const canvas = new OffscreenCanvas(width, height);
-      const ctx = canvas.getContext('2d');
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, width, height);
-      const outBlob = await canvas.convertToBlob(
-        mime === 'image/jpeg' ? { type: mime, quality } : { type: mime }
-      );
-      const buf = await outBlob.arrayBuffer();
-      return Agent._bufferToDataUrl(buf, mime);
-    } catch {
-      return dataUrl;
-    }
-  }
-
-  /**
    * If `dataUrl`'s base64 payload is already under `maxBase64Chars`, return
    * it unchanged. Otherwise decode, draw to an OffscreenCanvas, and
    * re-encode as JPEG, iteratively dropping quality from
@@ -1771,6 +1679,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           this.conversationModes.set(tabId, entry.mode);
           this._conversationMode = entry.mode;
         }
+        // Restore the conversationId so traces from before the SW restart
+        // and traces from after it stay grouped together.
+        if (entry.conversationId) {
+          this.conversationIds.set(tabId, entry.conversationId);
+        }
       }
     } catch (e) { /* session storage may be unavailable */ }
   }
@@ -1788,9 +1701,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const messages = this.conversations.get(tabId);
       if (!messages) return;
       const mode = this.conversationModes.get(tabId) || 'ask';
+      const conversationId = this.conversationIds.get(tabId) || null;
       try {
         chrome.storage.session.set({
-          [this._convKey(tabId)]: { mode, messages },
+          [this._convKey(tabId)]: { mode, messages, conversationId },
         }).catch(() => {});
       } catch (e) { /* ignore */ }
     }, 300);
@@ -1886,6 +1800,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       ]);
       this.conversationModes.set(tabId, mode);
       this._conversationMode = mode;
+      // New conversation → mint a new conversationId. Stable for the
+      // lifetime of this conversation (until clearConversation), so every
+      // trace produced from this chat carries the same id and the Traces
+      // viewer can group sibling turns.
+      if (!this.conversationIds.has(tabId)) {
+        this.conversationIds.set(tabId, `conv_${tabId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`);
+      }
     }
     // If mode changed, update the system prompt
     const lastMode = this.conversationModes.get(tabId);
@@ -1906,6 +1827,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   clearConversation(tabId) {
     this.conversations.delete(tabId);
     this.conversationModes.delete(tabId);
+    this.conversationIds.delete(tabId); // next getConversation() mints a fresh id
     this.hydratedTabs.delete(tabId);
     this.apiAllowedTabs.delete(tabId);
     this.apiAllowedInjected.delete(tabId);
@@ -2467,7 +2389,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         let description = '';
         let probe = null;
         let coordAligned = false;
-        let imageDims = null;
         try {
           await cdpClient.attach(tabId);
           await cdpClient.sendCommand(tabId, 'Page.enable');
@@ -2489,16 +2410,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               })
             );
             dataUrl = `data:image/png;base64,${screenshot.data}`;
-            imageDims = await this._getImageDimensions(dataUrl);
-            if (imageDims && (imageDims.width !== cssW || imageDims.height !== cssH)) {
-              dataUrl = await this._resizeImageToDimensions(dataUrl, cssW, cssH, {
-                mime: 'image/png',
-              });
-            }
             description = `Screenshot captured via CDP (${screenshot.data.length} bytes, CSS-pixel aligned for pixel clicks)`;
             // Byte-ceiling fallback only — we don't resize in coord mode.
             dataUrl = await this._compressJpegToByteCeiling(dataUrl);
-            imageDims = await this._getImageDimensions(dataUrl) || { width: cssW, height: cssH };
           } else {
             // Budget-aware mode (default): pick target dims via binary
             // search, ask CDP to capture + scale in one pass, then run
@@ -2514,12 +2428,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               })
             );
             const rawUrl = `data:image/jpeg;base64,${screenshot.data}`;
-            const shrunk = await this._shrinkImageForBudget(rawUrl, 0, 0);
-            dataUrl = shrunk.dataUrl;
-            imageDims = { width: shrunk.width, height: shrunk.height };
-            const resized = imageDims.width !== cssW || imageDims.height !== cssH
-              ? ` (resized tab CSS viewport ${cssW}x${cssH} to bitmap ${imageDims.width}x${imageDims.height} for vision-token budget)`
-              : '';
+            dataUrl = await this._compressJpegToByteCeiling(rawUrl);
+            const resized = scale < 1 ? ` (resized ${cssW}×${cssH} → ${targetW}×${targetH} for vision-token budget)` : '';
             description = `Screenshot captured via CDP (${screenshot.data.length} bytes, JPEG)${resized}`;
           }
         } catch {
@@ -2534,22 +2444,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // decode + resize + recompress via OffscreenCanvas to fit budget.
           const rawUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
           if (!coordAligned) {
-            const shrunk = await this._shrinkImageForBudget(rawUrl, 0, 0);
-            dataUrl = shrunk.dataUrl;
-            imageDims = { width: shrunk.width, height: shrunk.height };
-            description = `Screenshot captured via tabs API (${dataUrl.length} bytes base64, resized to ${shrunk.width}×${shrunk.height})`;
-          } else {
             const cssW = Math.max(1, Math.round(probe?.innerWidth || 1024));
             const cssH = Math.max(1, Math.round(probe?.innerHeight || 768));
-            const actual = await this._getImageDimensions(rawUrl);
-            dataUrl = rawUrl;
-            if (actual && (actual.width !== cssW || actual.height !== cssH)) {
-              dataUrl = await this._resizeImageToDimensions(dataUrl, cssW, cssH, {
-                mime: 'image/png',
-              });
-            }
-            dataUrl = await this._compressJpegToByteCeiling(dataUrl);
-            imageDims = await this._getImageDimensions(dataUrl) || { width: cssW, height: cssH };
+            const shrunk = await this._shrinkImageForBudget(rawUrl, cssW, cssH);
+            dataUrl = shrunk.dataUrl;
+            description = `Screenshot captured via tabs API (${dataUrl.length} bytes base64, resized to ${shrunk.width}×${shrunk.height})`;
+          } else {
+            dataUrl = await this._compressJpegToByteCeiling(rawUrl);
             description = `Screenshot captured via tabs API (${dataUrl.length} bytes base64)`;
           }
         }
@@ -2570,7 +2471,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               method: 'vision_describe',
               description: `[Screenshot described by vision model ${desc.model}]\n${desc.text}`,
               page: probe || undefined,
-              image: imageDims || undefined,
               coordAligned,
             };
           }
@@ -2588,7 +2488,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             method: 'image_attach',
             description,
             page: probe || undefined,
-            image: imageDims || undefined,
             coordAligned,
             _attachImage: dataUrl,
           };
@@ -2741,11 +2640,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
 
     // ─── Network & download tools ─────────────────────────────────────
-    // These run in the background script context with the user's cookies.
-    // They don't touch the active tab so they're safe to call any time.
+    // These run in the background script context. fetchUrl/readDownloadedFile
+    // attach the user's cookies only when the target shares the registrable
+    // domain (eTLD+1) of the active tab — see network-tools.js for the
+    // cookie & redirect policy. They don't touch the active tab DOM, so
+    // they're safe to call any time.
 
     if (name === 'fetch_url') {
-      return await fetchUrl(args.url, args);
+      return await fetchUrl(args.url, args, { tabId });
     }
     if (name === 'research_url') {
       return await researchUrl(args.url, { ...args, sourceTabId: tabId });
@@ -2754,7 +2656,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return await listDownloads(args);
     }
     if (name === 'read_downloaded_file') {
-      return await readDownloadedFile(args.downloadId);
+      return await readDownloadedFile(args.downloadId, { tabId });
     }
     if (name === 'download_resource_from_page') {
       return await downloadResourceFromPage(tabId, args);
@@ -4658,6 +4560,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     let finalResponse = '';
+    // Tracks whether we've already nudged the model after an empty
+    // (no-content + no-tool-call) response. Used by the recovery branch
+    // in the main loop to avoid an infinite empty→nudge→empty→nudge loop.
+    let emptyOutputRecoveryAttempted = false;
 
     this.abortFlags.delete(tabId); // clear any stale abort
     let _traceStatus = 'done'; // updated on early exits
@@ -4674,6 +4580,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       providerClass: provider.constructor.name,
       userMessage: typeof userMessage === 'string' ? userMessage : JSON.stringify(userMessage).slice(0, 2000),
       tabUrl, tabTitle, mode,
+      conversationId: this.conversationIds.get(tabId) || null,
     });
     if (runId) this.currentRunId.set(tabId, runId);
 
@@ -4756,6 +4663,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
 
+      // Reset the empty-output recovery flag whenever the model produces
+      // any signal of life (text or a tool call). The flag is only meant
+      // to prevent ping-pong on consecutive empty responses.
+      if ((result.content && result.content.trim()) || (result.toolCalls && result.toolCalls.length > 0)) {
+        emptyOutputRecoveryAttempted = false;
+      }
+
       // Fallback: if the LLM emitted tool calls as raw text instead of
       // using the structured tool_calls field, try to parse them out.
       if ((!result.toolCalls || result.toolCalls.length === 0) && result.content) {
@@ -4789,20 +4703,50 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         continue;
       }
 
-      // No tool calls — this is the final text response. If the model
-      // returned empty content AND there was a partial assistant text
-      // rendered in a prior step (e.g. the pre-tool "I'll click X" blurb),
-      // DO NOT emit an empty text update — doing so overwrites the rendered
-      // bubble and makes the previously-visible response disappear.
-      finalResponse = result.content || '';
+      // No tool calls. Two sub-cases:
+      //   (a) Model returned non-empty content → genuine final answer.
+      //   (b) Model returned NEITHER content NOR tool calls. This is the
+      //       "model gave up mid-thought" failure mode (often after burning
+      //       its output budget on internal reasoning_tokens). We try to
+      //       recover ONCE by nudging the model to emit a summary; if the
+      //       second attempt also comes back empty we abandon the run with
+      //       a transparent failure message instead of silently recording
+      //       a "done" run with empty content (the previous behavior).
+      const isEmpty = !result.content || !result.content.trim();
+      if (isEmpty) {
+        if (!emptyOutputRecoveryAttempted) {
+          emptyOutputRecoveryAttempted = true;
+          messages.push({
+            role: 'user',
+            content: '[System nudge: your previous response had neither text nor a tool call. You may have run out of output budget on internal reasoning. In ONE short message, summarize what you accomplished, what you tried, and what blocked you — then stop. Do not start any new tool calls.]',
+          });
+          continue; // give the model one more turn to summarize
+        }
+        // Second empty in a row — give up with a transparent message.
+        finalResponse = '[Agent emitted no output and no tool call, even after a recovery nudge. This usually means the task exceeded the current model\'s capability or context budget. Try a stronger model, raise the step limit in settings, or break the task into smaller parts.]';
+        _traceStatus = 'empty_output';
+        messages.push({ role: 'assistant', content: finalResponse });
+        onUpdate('warning', { message: finalResponse });
+        break;
+      }
+      // Genuine final answer — emit and exit.
+      finalResponse = result.content;
       messages.push({ role: 'assistant', content: finalResponse });
-      if (finalResponse) onUpdate('text', { content: finalResponse });
+      onUpdate('text', { content: finalResponse });
       break;
     }
 
     if (steps >= this.maxSteps) {
       onUpdate('max_steps_reached', { steps: this.maxSteps });
       _traceStatus = 'max_steps';
+      // Auto-done: if the loop exited at the step limit without a real
+      // final answer, synthesize a transparent summary so the user sees
+      // WHY the run ended instead of an empty `done` event.
+      if (!finalResponse || !finalResponse.trim()) {
+        finalResponse = this._buildStepLimitSummary(messages, steps);
+        messages.push({ role: 'assistant', content: finalResponse });
+        onUpdate('text', { content: finalResponse });
+      }
     }
 
     this._persist(tabId);
@@ -4833,6 +4777,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const tools = getToolsForMode(mode);
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
+    // See processMessage — used to break the empty-response→nudge cycle.
+    let emptyOutputRecoveryAttempted = false;
 
     this.abortFlags.delete(tabId);
 
@@ -4920,8 +4866,27 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           continue;
         }
 
-        // No tool calls — final response
+        // No tool calls — final response. Detect the "empty output"
+        // failure mode (no text + no tool call after non-trivial reasoning)
+        // and recover once via a summary-nudge before giving up.
         this._logDebug({ type: 'llm_stream_response', step: steps, content: fullText, toolCalls: null });
+        if (!fullText || !fullText.trim()) {
+          if (!emptyOutputRecoveryAttempted) {
+            emptyOutputRecoveryAttempted = true;
+            messages.push({
+              role: 'user',
+              content: '[System nudge: your previous response had neither text nor a tool call. You may have run out of output budget on internal reasoning. In ONE short message, summarize what you accomplished, what you tried, and what blocked you — then stop. Do not start any new tool calls.]',
+            });
+            this._persist(tabId);
+            continue;
+          }
+          const failMsg = '[Agent emitted no output and no tool call, even after a recovery nudge. This usually means the task exceeded the current model\'s capability or context budget. Try a stronger model, raise the step limit in settings, or break the task into smaller parts.]';
+          messages.push({ role: 'assistant', content: failMsg });
+          onUpdate('warning', { message: failMsg });
+          this._persist(tabId);
+          return failMsg;
+        }
+        emptyOutputRecoveryAttempted = false;
         messages.push({ role: 'assistant', content: fullText });
         this._persist(tabId);
         return fullText;
@@ -4945,6 +4910,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     onUpdate('max_steps_reached', { steps: this.maxSteps });
     this._persist(tabId);
-    return '[Reached maximum steps limit. You can continue from where I left off.]';
+    // Synthesize a transparent summary of what was attempted instead of
+    // the generic "reached maximum steps" line. Same helper as the
+    // non-streaming path uses.
+    const summary = this._buildStepLimitSummary(messages, steps);
+    messages.push({ role: 'assistant', content: summary });
+    onUpdate('text', { content: summary });
+    return summary;
   }
 }

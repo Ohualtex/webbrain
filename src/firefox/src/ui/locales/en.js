@@ -109,6 +109,8 @@ export default {
   'st.display.auto_screenshot.every_step': 'Every step',
   'st.display.tracing.label': 'Record traces (for model comparison)',
   'st.display.tracing.desc_html': 'Persist every run (LLM requests, responses, tool calls, screenshots) into local IndexedDB so you can inspect and compare models side-by-side. Opens in a separate Traces tab. Off by default because it adds disk writes per step. <a href="traces.html" target="_blank" style="color:var(--accent);">Open Traces page →</a>',
+  'st.display.allow_local_network.label': 'Allow agent to access local network',
+  'st.display.allow_local_network.desc': 'Lets the agent\'s fetch_url tool reach loopback (127.0.0.1, localhost) and private/RFC1918 addresses (10.x, 192.168.x, 172.16–31.x). Useful for local dev servers, intranet tools, or self-hosted APIs. Off by default — when off, prompt-injected pages can\'t steer the agent into probing your local network. Cloud-metadata addresses (169.254.169.254) and *.internal/*.local hostnames stay blocked even when on.',
   'st.display.notify_sound.label': 'Completion sound',
   'st.display.notify_sound.desc': 'Play a short chime in the side panel when the agent finishes a task. Won\'t play if you cancel the run.',
   'st.display.max_steps.label': 'Max Agent Steps',
@@ -182,6 +184,13 @@ export default {
   'tr.filter.all_models': 'All models',
   'tr.no_match': 'No runs match.',
   'tr.no_task': '(no task)',
+
+  'tr.conversation.label': 'Conversation',
+  'tr.conversation.turn_of': 'turn {n} of {total}',
+  'tr.conversation.tooltip': 'Part of a {n}-turn conversation ({id}). Open the run to jump between turns.',
+
+  'tr.cost.label': 'Cost:',
+  'tr.cost.tooltip': 'Total LLM cost reported by the provider (USD). Highlighted in orange when ≥ $0.50 with no final answer — likely a wasted run.',
 
   'tr.empty.title': 'No run selected.',
   'tr.empty.hint_html': 'Pick a run from the left to see its step-by-step timeline. Click <b>Compare</b> to pick two runs and view them side-by-side.',

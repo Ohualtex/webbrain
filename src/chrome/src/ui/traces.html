@@ -188,6 +188,74 @@
       margin-bottom: 14px;
       flex-wrap: wrap;
     }
+    /* Costly-failure highlight — runs ≥ $0.50 with empty finalContent. */
+    .cost-warn {
+      color: #ff9d4d;
+      font-weight: 500;
+    }
+    /* Conversation grouping — chip on list cards + panel on run view. */
+    .conv-chip {
+      display: inline-block;
+      margin-left: 6px;
+      padding: 1px 6px;
+      border-radius: 8px;
+      background: var(--bg3);
+      color: var(--text2);
+      font-size: 10px;
+      font-weight: 500;
+      vertical-align: middle;
+    }
+    .conv-panel {
+      margin: 10px 0 14px;
+      padding: 8px 10px;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+    }
+    .conv-panel-label {
+      font-size: 11px;
+      color: var(--text2);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+    }
+    .conv-turns {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .conv-turn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      color: var(--text2);
+      font-size: 11px;
+      cursor: pointer;
+      max-width: 280px;
+      font-family: inherit;
+    }
+    .conv-turn:hover { background: var(--bg3); color: var(--text); }
+    .conv-turn.current {
+      background: rgba(108,99,255,0.18);
+      border-color: var(--accent);
+      color: var(--text);
+      cursor: default;
+    }
+    .conv-turn-n {
+      color: var(--text3);
+      font-family: ui-monospace, monospace;
+      font-size: 10px;
+    }
+    .conv-turn-msg {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 230px;
+    }
     .stat {
       font-size: 11px;
       color: var(--text2);

@@ -24,6 +24,39 @@ const { getActiveAdapter, listAdapters } = await import(
   'file://' + path.join(ROOT, 'src/chrome/src/agent/adapters.js').replace(/\\/g, '/')
 );
 
+// network-tools.js references chrome.* inside a try/catch at module load, so
+// it imports cleanly under Node — the storage init silently no-ops and
+// validateFetchUrl / registrableDomain are pure functions.
+const { validateFetchUrl, registrableDomain } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/network/network-tools.js').replace(/\\/g, '/')
+);
+const { validateFetchUrl: validateFetchUrlFx, registrableDomain: registrableDomainFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/network/network-tools.js').replace(/\\/g, '/')
+);
+
+// markdown-link.js is pure JS with no DOM / chrome.* deps.
+const { sanitizeLink, sanitizeMarkdownLinks } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/ui/markdown-link.js').replace(/\\/g, '/')
+);
+const { sanitizeMarkdownLinks: sanitizeMarkdownLinksFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/ui/markdown-link.js').replace(/\\/g, '/')
+);
+
+// loop-bucket.js is pure JS — the URL-family loop-detector bucketing logic
+// lives here so both agent.js and the tests can exercise the same code.
+const { resourceBucket, bucketArgsKey, URL_FAMILY_TOOLS } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/agent/loop-bucket.js').replace(/\\/g, '/')
+);
+const { resourceBucket: resourceBucketFx, bucketArgsKey: bucketArgsKeyFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/agent/loop-bucket.js').replace(/\\/g, '/')
+);
+
+// bump-version.mjs is the version-bump CLI but exports its pure helpers
+// for testing. The CLI body is guarded so importing it is side-effect-free.
+const { bumpSemver, rewriteVersionInJsonText } = await import(
+  'file://' + path.join(ROOT, 'scripts/bump-version.mjs').replace(/\\/g, '/')
+);
+
 // agent.js imports tools.js and cdp-client.js (which uses chrome.*). We need
 // only the loop-detection helpers, so we extract them via a tiny standalone
 // shim that mirrors the relevant Agent methods. Keep this in sync with
@@ -51,7 +84,11 @@ class LoopDetectorShim {
     return { kind: 'none' };
   }
   _recordCall(tabId, name, args, result) {
-    const argsHash = JSON.stringify(args || {});
+    // Mirror agent.js: URL-family tools bucket by resource identity so
+    // the agent can't escape loop detection by fetching the same file
+    // via 8 different API endpoints. Falls back to exact JSON for other
+    // tools.
+    const argsHash = bucketArgsKey(name, args);
     const errored = !!(result && (result.error || result.success === false));
     const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
     const buf = this.recentCalls.get(tabId) || [];
@@ -539,6 +576,536 @@ test('existing dims under caps stay within the monotonic bound', () => {
     assert.ok(ow <= iw, `w grew: ${iw}→${ow}`);
     assert.ok(oh <= ih, `h grew: ${ih}→${oh}`);
     assert.ok(estimateImageTokens(ow, oh, 28) <= 1568, `tokens over cap for ${iw}×${ih} → ${ow}×${oh}`);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Markdown link sanitizer
+// ────────────────────────────────────────────────────────────────────────
+
+console.log('\nmarkdown link sanitizer');
+
+test('safe https link produces an <a> with rel=noopener', () => {
+  const out = sanitizeMarkdownLinks('see [example](https://example.com/a?b=c)');
+  assert.match(out, /<a href="https:\/\/example\.com\/a\?b=c" target="_blank" rel="noopener noreferrer">example<\/a>/);
+});
+
+test('Wikipedia URL with balanced parens round-trips', () => {
+  // The bug fix for the [^)]+ pre-existing limitation. URLs with one level
+  // of nested parens (Wikipedia disambiguation, MDN, Apple docs, …) must
+  // survive the regex without truncation.
+  const out = sanitizeMarkdownLinks('[JS](https://en.wikipedia.org/wiki/JavaScript_(programming_language))');
+  assert.match(out, /href="https:\/\/en\.wikipedia\.org\/wiki\/JavaScript_\(programming_language\)"/);
+});
+
+test('javascript: URL renders as text only (no <a>)', () => {
+  const out = sanitizeMarkdownLinks('[click](javascript:alert(document.cookie))');
+  assert.ok(!/<a /.test(out), `expected no <a> tag, got: ${out}`);
+  assert.ok(out.startsWith('click'), `expected label "click" at start, got: ${out}`);
+});
+
+test('data: URL renders as text only (no <a>)', () => {
+  const out = sanitizeMarkdownLinks('[x](data:text/html,<script>alert(1)</script>)');
+  assert.ok(!/<a /.test(out), `expected no <a> tag, got: ${out}`);
+});
+
+test('vbscript: URL renders as text only (no <a>)', () => {
+  const out = sanitizeMarkdownLinks('[x](vbscript:msgbox(1))');
+  assert.ok(!/<a /.test(out), `expected no <a> tag, got: ${out}`);
+});
+
+test('file:// URL renders as text only (no <a>)', () => {
+  const out = sanitizeMarkdownLinks('[x](file:///etc/passwd)');
+  assert.ok(!/<a /.test(out));
+});
+
+test('attribute breakout payload — quote escapes, no extra attributes', () => {
+  // The exact payload from the original XSS finding. The trailing `)` ends
+  // the markdown link match; the captured href is `" onmouseover="alert(1`
+  // which is not http/https/mailto, so it renders as plain text.
+  const out = sanitizeMarkdownLinks('[x](" onmouseover="alert(1))');
+  assert.ok(!/<a /.test(out), `expected no <a> tag, got: ${out}`);
+});
+
+test('https URL with embedded quote is escaped, not broken out of', () => {
+  // The href DOES start with https:, so we emit an <a>, but the `"` inside
+  // the URL must be entity-escaped so the attribute closes at the right place.
+  const out = sanitizeMarkdownLinks('[x](https://x" onerror="alert(1)/)');
+  // The whole captured URL stays inside the href attribute as &quot;…
+  // No new attribute (onerror=) should appear outside the href value.
+  const tagMatch = out.match(/<a\s+href="([^"]*)"\s+([^>]*)>/);
+  assert.ok(tagMatch, `expected <a> tag, got: ${out}`);
+  assert.ok(!/onerror=/i.test(tagMatch[2]), `injected attribute leaked: ${tagMatch[2]}`);
+  assert.match(tagMatch[1], /&quot;/);
+});
+
+test('relative URL (anchor) produces an <a>', () => {
+  const out = sanitizeMarkdownLinks('[top](#section)');
+  assert.match(out, /<a href="#section"/);
+});
+
+test('relative URL (path) produces an <a>', () => {
+  const out = sanitizeMarkdownLinks('[home](/path)');
+  assert.match(out, /<a href="\/path"/);
+});
+
+test('mailto: produces an <a>', () => {
+  const out = sanitizeMarkdownLinks('[mail me](mailto:a@b.com)');
+  assert.match(out, /<a href="mailto:a@b\.com"/);
+});
+
+test('schemeless / no-recognized-form renders as text only', () => {
+  const out = sanitizeMarkdownLinks('[x](no-scheme-here)');
+  assert.ok(!/<a /.test(out));
+});
+
+test('sanitizeLink helper handles null/undefined href safely', () => {
+  // Defense-in-depth — should never throw.
+  assert.equal(sanitizeLink('label', null), 'label');
+  assert.equal(sanitizeLink('label', undefined), 'label');
+  assert.equal(sanitizeLink('label', ''), 'label');
+});
+
+test('firefox port has the same sanitizer behavior', () => {
+  // Spot-check the Firefox copy is in sync — it's a literal copy today,
+  // but if it ever diverges we want to know.
+  const inputs = [
+    '[ok](https://example.com)',
+    '[bad](javascript:alert(1))',
+    '[wiki](https://en.wikipedia.org/wiki/Foo_(bar))',
+  ];
+  for (const inp of inputs) {
+    assert.equal(
+      sanitizeMarkdownLinksFx(inp),
+      sanitizeMarkdownLinks(inp),
+      `firefox sanitizer diverged on input: ${inp}`,
+    );
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// validateFetchUrl — the agent's network gate
+// ────────────────────────────────────────────────────────────────────────
+
+console.log('\nfetch URL validator');
+
+// Helper: shorthand expectation.
+function expectReject(url, opts) {
+  const r = validateFetchUrl(url, opts);
+  assert.equal(r.ok, false, `${url} (allowLocal=${!!opts?.allowLocalNetwork}) should reject — got ${JSON.stringify(r)}`);
+}
+function expectAccept(url, opts) {
+  const r = validateFetchUrl(url, opts);
+  assert.equal(r.ok, true, `${url} (allowLocal=${!!opts?.allowLocalNetwork}) should accept — got ${JSON.stringify(r)}`);
+}
+
+test('rejects non-http schemes (javascript:, data:, file:, ftp:)', () => {
+  expectReject('javascript:alert(1)');
+  expectReject('data:text/plain,foo');
+  expectReject('file:///etc/passwd');
+  expectReject('ftp://example.com/');
+});
+
+test('rejects cloud metadata hostnames regardless of allowLocal', () => {
+  for (const allowLocal of [false, true]) {
+    expectReject('http://metadata.google.internal/', { allowLocalNetwork: allowLocal });
+    expectReject('http://metadata.aws.internal/', { allowLocalNetwork: allowLocal });
+    expectReject('http://metadata.azure.com/', { allowLocalNetwork: allowLocal });
+  }
+});
+
+test('rejects *.internal and *.local regardless of allowLocal', () => {
+  for (const allowLocal of [false, true]) {
+    expectReject('http://corp-jenkins.internal/', { allowLocalNetwork: allowLocal });
+    expectReject('http://router.local/', { allowLocalNetwork: allowLocal });
+  }
+});
+
+test('rejects 169.254.169.254 (cloud metadata IP) regardless of allowLocal', () => {
+  for (const allowLocal of [false, true]) {
+    expectReject('http://169.254.169.254/latest/meta-data/', { allowLocalNetwork: allowLocal });
+  }
+});
+
+test('rejects CGNAT 100.64/10 regardless of allowLocal', () => {
+  expectReject('http://100.64.0.1/');
+  expectReject('http://100.127.255.255/');
+  expectAccept('http://100.128.0.1/'); // outside CGNAT
+});
+
+test('rejects multicast/reserved (≥224) and 0/8', () => {
+  expectReject('http://224.0.0.1/');
+  expectReject('http://255.255.255.255/');
+  expectReject('http://0.0.0.0/');
+});
+
+test('localhost / loopback / RFC1918 — relaxable via allowLocalNetwork', () => {
+  // Default = blocked.
+  expectReject('http://localhost:8080/');
+  expectReject('http://127.0.0.1/');
+  expectReject('http://10.1.2.3/');
+  expectReject('http://172.16.0.1/');
+  expectReject('http://172.31.255.255/');
+  expectReject('http://192.168.1.1/');
+  // 172.32 is outside RFC1918 — accepted.
+  expectAccept('http://172.32.0.1/');
+  // With the toggle on — accepted.
+  expectAccept('http://localhost:8080/', { allowLocalNetwork: true });
+  expectAccept('http://127.0.0.1/', { allowLocalNetwork: true });
+  expectAccept('http://10.1.2.3/', { allowLocalNetwork: true });
+  expectAccept('http://192.168.1.1/', { allowLocalNetwork: true });
+  expectAccept('http://172.20.0.1/', { allowLocalNetwork: true });
+});
+
+test('IPv6 — link-local always blocked, loopback/unique-local relaxable', () => {
+  // Always-blocked: link-local fe80::/10 and unspecified ::
+  expectReject('http://[fe80::1]/');
+  expectReject('http://[fe80::1]/', { allowLocalNetwork: true });
+  expectReject('http://[::]/');
+  expectReject('http://[::]/', { allowLocalNetwork: true });
+  // Relaxable: ::1 and fc00::/7
+  expectReject('http://[::1]/');
+  expectAccept('http://[::1]/', { allowLocalNetwork: true });
+  expectReject('http://[fc00::1]/');
+  expectAccept('http://[fc00::1]/', { allowLocalNetwork: true });
+  expectReject('http://[fd12:3456::1]/');
+  expectAccept('http://[fd12:3456::1]/', { allowLocalNetwork: true });
+  // Public IPv6 always allowed.
+  expectAccept('http://[2001:db8::1]/');
+});
+
+test('IPv4-mapped IPv6 (::ffff:V4) is decoded and re-validated', () => {
+  // The URL parser normalizes ::ffff:127.0.0.1 → ::ffff:7f00:1, so the
+  // validator must handle the hex form too.
+  expectReject('http://[::ffff:127.0.0.1]/');
+  expectAccept('http://[::ffff:127.0.0.1]/', { allowLocalNetwork: true });
+  expectReject('http://[::ffff:10.0.0.1]/');
+  expectAccept('http://[::ffff:10.0.0.1]/', { allowLocalNetwork: true });
+  expectReject('http://[::ffff:169.254.169.254]/'); // metadata even when toggled
+  expectReject('http://[::ffff:169.254.169.254]/', { allowLocalNetwork: true });
+  expectAccept('http://[::ffff:8.8.8.8]/'); // public v4 mapped
+});
+
+test('public hosts always accepted', () => {
+  expectAccept('https://example.com/');
+  expectAccept('https://api.github.com/repos/');
+  expectAccept('http://example.com/');
+});
+
+test('invalid URL strings are rejected', () => {
+  expectReject('not a url');
+  expectReject('://no-scheme');
+  expectReject('http://');
+});
+
+test('firefox port validator agrees with chrome on a sample of cases', () => {
+  // Sanity check that the two ports stay in sync. Pick one case from each
+  // category — full coverage runs against the chrome copy above.
+  const samples = [
+    ['javascript:alert(1)', false, false],
+    ['http://169.254.169.254/', false, false],
+    ['http://localhost/', false, false],
+    ['http://localhost/', true, true],
+    ['http://[fe80::1]/', true, false],
+    ['https://example.com/', false, true],
+  ];
+  for (const [url, allowLocal, expectOk] of samples) {
+    const opts = { allowLocalNetwork: allowLocal };
+    const cr = validateFetchUrl(url, opts);
+    const fr = validateFetchUrlFx(url, opts);
+    assert.equal(cr.ok, fr.ok, `chrome/firefox disagree on ${url} (allowLocal=${allowLocal})`);
+    assert.equal(cr.ok, expectOk, `wrong result for ${url} (allowLocal=${allowLocal})`);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// registrableDomain — eTLD+1 extractor for cookie policy
+// ────────────────────────────────────────────────────────────────────────
+
+console.log('\nregistrable domain');
+
+test('subdomains collapse to the registrable domain', () => {
+  assert.equal(registrableDomain('github.com'), 'github.com');
+  assert.equal(registrableDomain('api.github.com'), 'github.com');
+  assert.equal(registrableDomain('www.api.github.com'), 'github.com');
+  assert.equal(registrableDomain('mail.google.com'), 'google.com');
+  assert.equal(registrableDomain('docs.google.com'), 'google.com');
+});
+
+test('known multi-label ccTLDs get +1 label', () => {
+  assert.equal(registrableDomain('example.co.uk'), 'example.co.uk');
+  assert.equal(registrableDomain('foo.example.co.uk'), 'example.co.uk');
+  assert.equal(registrableDomain('foo.bar.example.co.uk'), 'example.co.uk');
+  assert.equal(registrableDomain('shop.example.com.au'), 'example.com.au');
+});
+
+test('known multi-tenant hosting suffixes get +1 label', () => {
+  // GitHub Pages: each user is a separate registrable domain.
+  assert.equal(registrableDomain('alice.github.io'), 'alice.github.io');
+  assert.equal(registrableDomain('bob.github.io'), 'bob.github.io');
+  assert.notEqual(registrableDomain('alice.github.io'), registrableDomain('bob.github.io'));
+  // Netlify, Vercel, Cloudflare Pages similarly.
+  assert.equal(registrableDomain('my-site.netlify.app'), 'my-site.netlify.app');
+  assert.equal(registrableDomain('app.vercel.app'), 'app.vercel.app');
+});
+
+test('IP literals returned as-is', () => {
+  assert.equal(registrableDomain('127.0.0.1'), '127.0.0.1');
+  assert.equal(registrableDomain('192.168.1.1'), '192.168.1.1');
+  assert.equal(registrableDomain('::1'), '::1');
+  assert.equal(registrableDomain('fe80::1'), 'fe80::1');
+});
+
+test('edge cases (empty / single label)', () => {
+  assert.equal(registrableDomain(''), '');
+  assert.equal(registrableDomain('localhost'), 'localhost');
+});
+
+test('case-insensitive — same registrable domain', () => {
+  assert.equal(registrableDomain('GitHub.com'), 'github.com');
+  assert.equal(registrableDomain('API.GitHub.COM'), 'github.com');
+});
+
+test('firefox port registrableDomain matches chrome', () => {
+  const samples = ['github.com', 'api.github.com', 'foo.example.co.uk', 'alice.github.io', '127.0.0.1'];
+  for (const h of samples) {
+    assert.equal(registrableDomainFx(h), registrableDomain(h), `mismatch on ${h}`);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// URL-family loop bucketing (agent/loop-bucket.js)
+// ────────────────────────────────────────────────────────────────────────
+
+console.log('\nURL-family loop bucketing');
+
+test('the 8-way GitHub fetch trap collapses to one bucket', () => {
+  // The exact bug from the trace: agent fetched web/build/locales/en.json
+  // 8 different ways. All should map to the same bucket so the existing
+  // loop detector fires.
+  const variants = [
+    'https://raw.githubusercontent.com/esokullu/WebBrain/main/web/build/locales/en.json',
+    'https://api.github.com/repos/esokullu/WebBrain/contents/web/build/locales/en.json',
+    'https://github.com/esokullu/WebBrain/blob/main/web/build/locales/en.json',
+    'https://github.com/esokullu/WebBrain/raw/main/web/build/locales/en.json',
+    'https://github.com/esokullu/WebBrain/edit/main/web/build/locales/en.json',
+  ];
+  const buckets = variants.map(resourceBucket);
+  const unique = new Set(buckets);
+  assert.equal(unique.size, 1,
+    `expected all variants to collapse to one bucket, got ${unique.size}: ${[...unique].join(' | ')}`);
+});
+
+test('different files in the same repo get different buckets', () => {
+  assert.notEqual(
+    resourceBucket('https://raw.githubusercontent.com/esokullu/WebBrain/main/web/build/locales/en.json'),
+    resourceBucket('https://raw.githubusercontent.com/esokullu/WebBrain/main/web/build/locales/tr.json'),
+  );
+});
+
+test('different repos get different buckets', () => {
+  assert.notEqual(
+    resourceBucket('https://raw.githubusercontent.com/esokullu/WebBrain/main/README.md'),
+    resourceBucket('https://raw.githubusercontent.com/anthropic/skill-rules/main/README.md'),
+  );
+});
+
+test('non-GitHub hosts use last-3-segments backstop', () => {
+  // Same bucket — same path tail
+  assert.equal(
+    resourceBucket('https://example.com/a/b/c/file.json'),
+    resourceBucket('https://example.com/a/b/c/file.json?v=1'),
+  );
+  // Different bucket — different host
+  assert.notEqual(
+    resourceBucket('https://example.com/a/b/file.json'),
+    resourceBucket('https://other.com/a/b/file.json'),
+  );
+});
+
+test('GitHub gist + codeload also normalize to github.com', () => {
+  const a = resourceBucket('https://gist.github.com/user/abc123/raw/file.txt');
+  const b = resourceBucket('https://codeload.github.com/owner/repo/zip/refs/heads/main');
+  assert.match(a, /^github\.com::/);
+  assert.match(b, /^github\.com::/);
+});
+
+test('invalid URL returns input unchanged (graceful fallback)', () => {
+  assert.equal(resourceBucket('not a url'), 'not a url');
+  assert.equal(resourceBucket(''), '');
+  assert.equal(resourceBucket(null), '');
+  assert.equal(resourceBucket(undefined), '');
+});
+
+test('bucketArgsKey: URL-family tools use resource bucket + method', () => {
+  const a = bucketArgsKey('fetch_url', { url: 'https://raw.githubusercontent.com/o/r/main/foo.json' });
+  const b = bucketArgsKey('fetch_url', { url: 'https://api.github.com/repos/o/r/contents/foo.json' });
+  assert.equal(a, b, 'same logical resource → same key');
+  // Method matters: GET ≠ POST.
+  const get = bucketArgsKey('fetch_url', { url: 'https://x.com/a/b/c', method: 'GET' });
+  const post = bucketArgsKey('fetch_url', { url: 'https://x.com/a/b/c', method: 'POST' });
+  assert.notEqual(get, post);
+});
+
+test('bucketArgsKey: non-URL tools fall back to exact JSON args', () => {
+  // click_ax with the same ref_id should match itself
+  assert.equal(
+    bucketArgsKey('click_ax', { ref_id: 'ref_42' }),
+    bucketArgsKey('click_ax', { ref_id: 'ref_42' }),
+  );
+  // Different args → different key
+  assert.notEqual(
+    bucketArgsKey('click_ax', { ref_id: 'ref_42' }),
+    bucketArgsKey('click_ax', { ref_id: 'ref_43' }),
+  );
+});
+
+test('URL_FAMILY_TOOLS contains the expected tool names', () => {
+  // Lock the membership so a future contributor doesn't accidentally
+  // remove fetch_url and silently regress the loop detector.
+  for (const name of ['fetch_url', 'research_url', 'download_file', 'read_downloaded_file']) {
+    assert.ok(URL_FAMILY_TOOLS.has(name), `${name} missing from URL_FAMILY_TOOLS`);
+  }
+});
+
+test('LOOP DETECTOR catches URL-family thrashing (the trace bug)', () => {
+  // Replay a slimmer version of the actual trace: the agent fetches the
+  // same resource via 4 different API URLs. With the old code the loop
+  // detector saw 4 distinct keys and never fired. With the bucketing
+  // it sees the same key 4 times → "repeat" loop on call 3.
+  const d = new LoopDetectorShim();
+  const tabId = 1;
+  const variants = [
+    'https://raw.githubusercontent.com/o/r/main/file.json',
+    'https://api.github.com/repos/o/r/contents/file.json',
+    'https://github.com/o/r/blob/main/file.json',
+    'https://api.github.com/repos/o/r/git/blobs/abc123',
+  ];
+  let triggered = null;
+  for (let i = 0; i < variants.length; i++) {
+    const result = d._checkLoop(tabId, 'fetch_url', { url: variants[i] }, { success: true });
+    if (result.kind !== 'none') { triggered = { i, result }; break; }
+  }
+  assert.ok(triggered, 'expected loop detector to fire on URL-family thrashing');
+  assert.equal(triggered.result.kind, 'nudge', 'first detection should be a nudge');
+  // i=2 means after the 3rd identical (bucketed) call.
+  assert.ok(triggered.i >= 2, `expected detection at call index ≥2, got ${triggered.i}`);
+});
+
+test('firefox loop-bucket matches chrome', () => {
+  const samples = [
+    ['fetch_url', { url: 'https://raw.githubusercontent.com/o/r/main/foo.json' }],
+    ['fetch_url', { url: 'https://api.github.com/repos/o/r/contents/foo.json', method: 'POST' }],
+    ['click_ax', { ref_id: 'ref_42' }],
+    ['fetch_url', { url: 'not a url' }],
+  ];
+  for (const [name, args] of samples) {
+    assert.equal(bucketArgsKeyFx(name, args), bucketArgsKey(name, args), `mismatch on ${name} ${JSON.stringify(args)}`);
+  }
+  for (const url of [
+    'https://github.com/o/r/blob/main/foo.json',
+    'https://example.com/a/b/c',
+    null,
+    'invalid',
+  ]) {
+    assert.equal(resourceBucketFx(url), resourceBucket(url), `mismatch on ${url}`);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────────────
+// Version bumping (scripts/bump-version.mjs)
+// ────────────────────────────────────────────────────────────────────────
+
+console.log('\nversion bump');
+
+test('default kind is patch', () => {
+  assert.equal(bumpSemver('7.0.0'), '7.0.1');
+  assert.equal(bumpSemver('1.2.3'), '1.2.4');
+});
+
+test('explicit patch / minor / major', () => {
+  assert.equal(bumpSemver('7.0.0', 'patch'), '7.0.1');
+  assert.equal(bumpSemver('7.0.0', 'minor'), '7.1.0');
+  assert.equal(bumpSemver('7.0.0', 'major'), '8.0.0');
+});
+
+test('minor and major reset lower components', () => {
+  // The semver standard: bumping minor zeroes patch; bumping major
+  // zeroes both minor and patch. Lock that behavior in.
+  assert.equal(bumpSemver('7.4.9', 'minor'), '7.5.0');
+  assert.equal(bumpSemver('7.4.9', 'major'), '8.0.0');
+});
+
+test('explicit MAJOR.MINOR.PATCH override', () => {
+  assert.equal(bumpSemver('7.0.0', '7.2.3'), '7.2.3');
+  assert.equal(bumpSemver('7.0.0', '10.0.0'), '10.0.0');
+});
+
+test('rejects bad current version', () => {
+  assert.throws(() => bumpSemver('not-a-version', 'patch'), /not MAJOR\.MINOR\.PATCH/);
+  assert.throws(() => bumpSemver('1.2', 'patch'), /not MAJOR\.MINOR\.PATCH/);
+  assert.throws(() => bumpSemver('1.2.3.4', 'patch'), /not MAJOR\.MINOR\.PATCH/);
+  assert.throws(() => bumpSemver('1.2.3-beta', 'patch'), /not MAJOR\.MINOR\.PATCH/);
+});
+
+test('rejects bad bump kind', () => {
+  assert.throws(() => bumpSemver('7.0.0', 'huge'), /Unknown bump kind/);
+  assert.throws(() => bumpSemver('7.0.0', ''), /Unknown bump kind/);
+});
+
+test('rewriteVersionInJsonText: replaces only the version field, not other matching strings', () => {
+  // A pathological JSON that mentions the version string in a description
+  // or comment-like field should NOT be touched by the rewrite.
+  const before = `{
+  "name": "webbrain",
+  "version": "7.0.0",
+  "description": "Released after 7.0.0 era; supersedes 7.0.0 tools."
+}`;
+  const after = rewriteVersionInJsonText(before, '7.0.0', '7.0.1');
+  assert.match(after, /"version": "7\.0\.1"/);
+  // The description still mentions 7.0.0 — it must not have been munged.
+  assert.match(after, /Released after 7\.0\.0 era/);
+  assert.match(after, /supersedes 7\.0\.0 tools/);
+});
+
+test('rewriteVersionInJsonText: replaceAll handles package-lock.json shape', () => {
+  // package-lock.json carries "version" twice — top-level and in
+  // packages[""]. Both must update.
+  const before = `{
+  "name": "webbrain",
+  "version": "7.0.0",
+  "lockfileVersion": 3,
+  "packages": {
+    "": {
+      "name": "webbrain",
+      "version": "7.0.0"
+    }
+  }
+}`;
+  const after = rewriteVersionInJsonText(before, '7.0.0', '7.0.1', { replaceAll: true });
+  assert.equal((after.match(/"version": "7\.0\.1"/g) || []).length, 2);
+  assert.ok(!after.includes('"version": "7.0.0"'), `stale version remained: ${after}`);
+});
+
+test('rewriteVersionInJsonText: returns input unchanged when oldVersion not present', () => {
+  const before = '{"version": "8.0.0"}';
+  const after = rewriteVersionInJsonText(before, '7.0.0', '7.0.1');
+  assert.equal(after, before);
+});
+
+test('rewriteVersionInJsonText: tolerates varied whitespace in JSON', () => {
+  // Whether the JSON uses 2 spaces, tabs, or compact form, the
+  // version-property pattern should still match.
+  const samples = [
+    '{"version":"7.0.0"}',
+    '{"version": "7.0.0"}',
+    '{ "version" : "7.0.0" }',
+    '{\n\t"version":\t"7.0.0"\n}',
+  ];
+  for (const before of samples) {
+    const after = rewriteVersionInJsonText(before, '7.0.0', '7.0.1');
+    assert.ok(after.includes('"7.0.1'), `failed to update: ${before}`);
+    assert.ok(!after.includes('"7.0.0'), `stale version remained: ${after}`);
   }
 });
 

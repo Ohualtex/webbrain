@@ -105,6 +105,8 @@ export default {
   'st.display.auto_screenshot.every_step': 'En cada paso',
   'st.display.tracing.label': 'Registrar trazas (para comparar modelos)',
   'st.display.tracing.desc_html': 'Guarda cada ejecución (peticiones al LLM, respuestas, llamadas a herramientas, capturas) en IndexedDB local para que puedas inspeccionar y comparar modelos lado a lado. Se abre en una pestaña de Trazas aparte. Desactivado por defecto porque añade escrituras en disco por paso. <a href="traces.html" target="_blank" style="color:var(--accent);">Abrir página de Trazas →</a>',
+  'st.display.allow_local_network.label': 'Permitir al agente acceder a la red local',
+  'st.display.allow_local_network.desc': 'Permite que la herramienta fetch_url del agente alcance direcciones loopback (127.0.0.1, localhost) y privadas/RFC1918 (10.x, 192.168.x, 172.16–31.x). Útil para servidores de desarrollo locales, herramientas de intranet o APIs auto-alojadas. Desactivado por defecto — cuando está desactivado, páginas con inyección de prompt no pueden dirigir al agente a sondear tu red local. Las direcciones de metadatos en la nube (169.254.169.254) y los nombres de host *.internal/*.local siguen bloqueados incluso cuando está activado.',
   'st.display.notify_sound.label': 'Sonido al terminar',
   'st.display.notify_sound.desc': 'Reproduce un tono corto en el panel lateral cuando el agente termina una tarea. No suena si cancelas la ejecución.',
   'st.display.max_steps.label': 'Pasos máximos del agente',
@@ -177,6 +179,13 @@ export default {
   'tr.filter.all_models': 'Todos los modelos',
   'tr.no_match': 'Ninguna ejecución coincide.',
   'tr.no_task': '(sin tarea)',
+
+  'tr.conversation.label': 'Conversación',
+  'tr.conversation.turn_of': 'turno {n} de {total}',
+  'tr.conversation.tooltip': 'Forma parte de una conversación de {n} turnos ({id}). Abre la ejecución para saltar entre turnos.',
+
+  'tr.cost.label': 'Coste:',
+  'tr.cost.tooltip': 'Coste total del LLM informado por el proveedor (USD). Resaltado en naranja a partir de 0,50 $ sin respuesta final — probablemente una ejecución desperdiciada.',
 
   'tr.empty.title': 'Ninguna ejecución seleccionada.',
   'tr.empty.hint_html': 'Elige una ejecución a la izquierda para ver su línea de tiempo paso a paso. Pulsa <b>Comparar</b> para elegir dos ejecuciones y verlas lado a lado.',

@@ -105,6 +105,8 @@ export default {
   'st.display.auto_screenshot.every_step': '每一步',
   'st.display.tracing.label': '记录轨迹（用于模型对比）',
   'st.display.tracing.desc_html': '将每次运行（LLM 请求、响应、工具调用、截图）持久化到本地 IndexedDB，以便并排查看和对比模型。在独立的轨迹页打开。因为每步都会写盘，默认关闭。<a href="traces.html" target="_blank" style="color:var(--accent);">打开轨迹页 →</a>',
+  'st.display.allow_local_network.label': '允许代理访问本地网络',
+  'st.display.allow_local_network.desc': '允许代理的 fetch_url 工具访问回环（127.0.0.1、localhost）和私有/RFC1918 地址（10.x、192.168.x、172.16–31.x）。用于本地开发服务器、内网工具或自托管 API。默认关闭 — 关闭时，含 prompt 注入的页面无法引导代理探测你的本地网络。即使开启，云元数据地址（169.254.169.254）和 *.internal/*.local 主机名仍然会被阻止。',
   'st.display.notify_sound.label': '完成提示音',
   'st.display.notify_sound.desc': '代理完成任务时在侧边栏播放短促的提示音。取消运行则不播放。',
   'st.display.max_steps.label': '代理最大步骤数',
@@ -177,6 +179,13 @@ export default {
   'tr.filter.all_models': '全部模型',
   'tr.no_match': '没有匹配的运行。',
   'tr.no_task': '（无任务）',
+
+  'tr.conversation.label': '对话',
+  'tr.conversation.turn_of': '第 {n} 轮 / 共 {total} 轮',
+  'tr.conversation.tooltip': '属于一个 {n} 轮对话（{id}）。打开运行以在各轮之间跳转。',
+
+  'tr.cost.label': '费用：',
+  'tr.cost.tooltip': '提供商报告的 LLM 总费用（美元）。当 ≥ $0.50 但没有最终回答时，会以橙色高亮 — 可能是一次浪费的运行。',
 
   'tr.empty.title': '未选中任何运行。',
   'tr.empty.hint_html': '从左侧选一个运行以查看其逐步时间线。点击<b>对比</b>选择两次运行并排查看。',

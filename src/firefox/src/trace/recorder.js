@@ -100,6 +100,11 @@ export async function startRun(meta) {
     const runId = meta.runId || `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     const record = {
       runId,
+      // Stable per-conversation id so the Traces UI can group sibling runs
+      // (= turns of the same chat). Set by the agent from its conversationIds
+      // map keyed by tabId. Older runs have null here — viewer treats those
+      // as singletons.
+      conversationId: meta.conversationId || null,
       startedAt: Date.now(),
       endedAt: null,
       durationMs: null,
@@ -248,8 +253,10 @@ export async function endRun(runId, { status = 'done', finalContent = null } = {
   if (!(await tracingEnabled())) return;
   try {
     const db = await openDB();
-    // Tally usage from events
-    let totalIn = 0, totalOut = 0, stepCount = 0;
+    // Tally usage from events. `totalCost` is the sum of `usage.cost`
+    // across all llm_response events — providers report this in their
+    // native units (OpenRouter & OpenAI: USD).
+    let totalIn = 0, totalOut = 0, totalCost = 0, stepCount = 0;
     await new Promise((resolve) => {
       const idx = tx(db, ['events'], 'readonly').objectStore('events').index('runId');
       const req = idx.openCursor(IDBKeyRange.only(runId));
@@ -260,7 +267,11 @@ export async function endRun(runId, { status = 'done', finalContent = null } = {
         if (ev.kind === 'llm_response') {
           stepCount = Math.max(stepCount, ev.data?.step || 0);
           const u = ev.data?.usage;
-          if (u) { totalIn += u.prompt_tokens || 0; totalOut += u.completion_tokens || 0; }
+          if (u) {
+            totalIn += u.prompt_tokens || 0;
+            totalOut += u.completion_tokens || 0;
+            if (typeof u.cost === 'number' && Number.isFinite(u.cost)) totalCost += u.cost;
+          }
         }
         c.continue();
       };
@@ -275,6 +286,7 @@ export async function endRun(runId, { status = 'done', finalContent = null } = {
       existing.stepCount = stepCount;
       existing.totalInputTokens = totalIn;
       existing.totalOutputTokens = totalOut;
+      existing.totalCost = totalCost;
       await promisifyReq(tx(db, ['runs']).objectStore('runs').put(existing));
     }
   } catch (e) {

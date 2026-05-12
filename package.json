@@ -1,6 +1,6 @@
 {
   "name": "webbrain",
-  "version": "6.1.0",
+  "version": "7.0.0",
   "description": "Open-source AI browser agent — chat with pages, automate tasks, multi-provider LLM support.",
   "private": true,
   "type": "module",
@@ -9,7 +9,8 @@
     "test:fixtures": "node test/fixtures/run.mjs",
     "test:anonymous": "node test/anonymous/run.mjs",
     "build:web": "node web/build/build.mjs",
-    "build:zip": "node scripts/build-zip.mjs"
+    "build:zip": "node scripts/build-zip.mjs",
+    "bump": "node scripts/bump-version.mjs"
   },
   "devDependencies": {
     "playwright": "^1.48.0"
