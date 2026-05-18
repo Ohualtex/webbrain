@@ -1467,6 +1467,48 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             error: 'Cannot capture screenshot: this tab is not the active tab in its window. Switch to the tab to take a screenshot, or use a different tool.',
           };
         }
+        // Probe the page for layout + text-volume hints BEFORE capture.
+        // documentTextChars + visibleTextChars let the model detect cases
+        // where a JPEG looks blank (mid-lazy-load) but the page actually
+        // has thousands of chars of text — the trace where scroll'd CNN
+        // misread "blank screenshot" as "page is empty".
+        let probe = null;
+        try {
+          const probeCode = `
+            (() => {
+              let documentTextChars = 0;
+              let visibleTextChars = 0;
+              try { documentTextChars = (document.body && document.body.innerText || '').length; } catch (e) {}
+              try {
+                const sels = 'p, h1, h2, h3, h4, h5, h6, li, td, blockquote, article, section, [role="article"]';
+                const els = document.querySelectorAll(sels);
+                const vw = window.innerWidth, vh = window.innerHeight;
+                for (let i = 0; i < els.length; i++) {
+                  const r = els[i].getBoundingClientRect();
+                  if (r.bottom < 0 || r.top > vh) continue;
+                  if (r.right < 0 || r.left > vw) continue;
+                  if (r.width === 0 || r.height === 0) continue;
+                  visibleTextChars += (els[i].innerText || '').length;
+                  if (visibleTextChars > 20000) break;
+                }
+              } catch (e) {}
+              return {
+                url: location.href,
+                title: document.title || '',
+                readyState: document.readyState,
+                scrollX: Math.round(window.scrollX || 0),
+                scrollY: Math.round(window.scrollY || 0),
+                innerWidth: window.innerWidth,
+                innerHeight: window.innerHeight,
+                scrollHeight: Math.round((document.documentElement && document.documentElement.scrollHeight) || document.body.scrollHeight || 0),
+                documentTextChars,
+                visibleTextChars,
+              };
+            })()
+          `;
+          const probeResults = await browser.tabs.executeScript(tabId, { code: probeCode });
+          probe = (probeResults && probeResults[0]) || null;
+        } catch (_) { /* probe failures are non-fatal */ }
         const rawUrl = await this._withIndicatorsHidden(tabId, () =>
           browser.tabs.captureVisibleTab(tab.windowId, {
             format: 'png',
@@ -1495,6 +1537,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               success: true,
               method: 'vision_describe',
               description: `[Screenshot described by vision model ${desc.model}]\n${desc.text}`,
+              page: probe || undefined,
             };
           }
         }
@@ -1506,6 +1549,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             success: true,
             method: 'image_attach',
             description,
+            page: probe || undefined,
             _attachImage: dataUrl,
           };
         }
@@ -1674,7 +1718,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               return { success: false, error: 'SocialMediaDownloader did not load on this page (likely a page CSP block).' };
             }
             try {
-              const urls = await window.SocialMediaDownloader.run(${JSON.stringify(opts)});
+              const runResult = await window.SocialMediaDownloader.run(${JSON.stringify(opts)});
+              // v4: run() now returns { urls, stats }. Tolerate older
+              // injections still returning just the URL array.
+              const urls = Array.isArray(runResult)
+                ? runResult
+                : (runResult && runResult.urls) || [];
+              const stats = (runResult && runResult.stats) || null;
               const profile = window.SocialMediaDownloader._activeProfile().name;
               // Total bytes the document_start MSE recorder captured for
               // this page. Feeds the recommendation builder so we can
@@ -1691,11 +1741,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               const recommendation = window.SocialMediaDownloader._buildRecommendation({
                 urls, profile, mseBytes, pageUrl: location.href,
               });
+              // Honest per-status counts so the agent doesn't claim
+              // 713 downloads when popup-blocking killed all but one.
               return {
                 success: true,
                 site: profile,
                 mode: ${JSON.stringify(opts.mode)},
                 count: urls.length,
+                triggeredCount: stats ? stats.triggered : urls.length,
+                completedCount: stats ? stats.completed : null,
+                openedInTabCount: stats ? stats.openedInTab : null,
+                failedCount: stats ? stats.failed : null,
+                failures: stats ? stats.failures : [],
                 urls: urls.slice(0, 50),
                 mseBytes,
                 recommendation,

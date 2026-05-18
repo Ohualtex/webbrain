@@ -716,11 +716,32 @@
         return { ...sliceTreePage(output, lines, effMaxChars, page), viewport };
       }
       // For 'visible' / 'interactive', truncate gracefully on overflow —
-      // small models prefer a partial tree to a hard error. For explicit
-      // maxChars (caller opted in), keep the stricter error behaviour.
+      // small models prefer a partial tree to a hard error. For 'all'
+      // with an explicit maxChars (caller opted in), we used to return a
+      // hard error + empty pageContent, which wasted a round-trip every
+      // time. Now we degrade in two steps:
+      //   1. Slice the first effMaxChars worth of nodes and return that,
+      //      with `autoDegraded:true` + `truncated:true` + `hasMore:true`
+      //      so the caller knows to either accept the slice or call again
+      //      with a smaller maxDepth / a refId anchor.
+      //   2. Only return a hard error when even the first page would be
+      //      empty (chunkSize too small).
       if (effMaxChars != null && output.length > effMaxChars) {
         if (filter && filter !== 'all' && maxChars == null) {
           return { ...sliceTreePage(output, lines, effMaxChars, page), viewport };
+        }
+        const sliced = sliceTreePage(output, lines, effMaxChars, page);
+        if (sliced.pageContent && !sliced.pageContent.startsWith('[tree page')) {
+          let hint = `Tree was ${output.length} chars; auto-sliced to fit ${effMaxChars}. `;
+          if (sliced.hasMore) {
+            hint += `Call again with page:${sliced.nextPage} for the next slice, OR pass a smaller maxDepth (e.g. ${Math.max(3, (opts.maxDepth || 15) - 5)}) or a refId to anchor on a specific subtree.`;
+          }
+          return {
+            ...sliced,
+            viewport,
+            autoDegraded: true,
+            notice: hint,
+          };
         }
         let hint = `Output exceeds ${effMaxChars} character limit (${output.length} characters). `;
         if (refId) {

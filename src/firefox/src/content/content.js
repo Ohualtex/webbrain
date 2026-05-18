@@ -10,28 +10,110 @@
 
   /**
    * Extract readable text content from the page.
+   *
+   * Returns `{text, textSource, isArticlePage}`. `text` is the article
+   * body (or fallback). `textSource` is the CSS selector that matched.
+   * `isArticlePage` is true when the page self-declares as an article
+   * via og:type, schema.org, or <article>. The model uses both flags
+   * to decide whether the article body is complete (and stop chasing
+   * more content via fetch_url / scroll / a11y-tree).
+   *
+   * Pass `{includeChrome:true}` to skip nav/header/footer/aside/ad-slot
+   * stripping inside the chosen container — e.g. when the user is asking
+   * ABOUT the nav, footer, cookie banner, etc.
    */
-  function getPageText() {
-    // Try to get article/main content first
-    const selectors = ['article', 'main', '[role="main"]', '.content', '#content'];
-    for (const sel of selectors) {
-      const el = document.querySelector(sel);
-      if (el && el.innerText.trim().length > 200) {
-        return el.innerText.trim();
+  function getPageText(opts) {
+    const includeChrome = !!(opts && opts.includeChrome);
+
+    const ARTICLE_SELECTORS = [
+      '[itemprop="articleBody"]',
+      'article [class*="article-body" i]',
+      'article [class*="article__content" i]',
+      'article [class*="article__body" i]',
+      'article [class*="story-body" i]',
+      'article [class*="post-content" i]',
+      'article [class*="entry-content" i]',
+      '[role="article"]',
+      'article',
+      'main article',
+      '.article-body, .article__body, .article__content',
+      '.post-content, .entry-content, .story-body, .story-content',
+      'main',
+      '[role="main"]',
+      '.content',
+      '#content',
+    ];
+
+    const CHROME_DROP_SELECTORS = [
+      'nav', 'header', 'footer', 'aside',
+      '[role="navigation"]', '[role="banner"]',
+      '[role="contentinfo"]', '[role="complementary"]',
+      'script', 'style', 'noscript', 'iframe', 'svg',
+      '[aria-hidden="true"]',
+      '[class*="advertisement" i]', '[class*="ad-slot" i]',
+      '[class*="ad-container" i]',
+      '[class*="newsletter" i][class*="signup" i]',
+      '[class*="newsletter-promo" i]',
+      '[class*="social-share" i]', '[class*="share-tools" i]',
+      '[class*="related-articles" i]', '[class*="recommended" i]',
+      '[class*="more-stories" i]', '[class*="paid-content" i]',
+      '[class*="cookie-banner" i]', '[id*="cookie-banner" i]',
+      '[class*="onetrust" i]',
+    ];
+
+    const stripChrome = root => {
+      if (includeChrome || !root) return root;
+      let clone;
+      try { clone = root.cloneNode(true); }
+      catch { return root; }
+      for (const sel of CHROME_DROP_SELECTORS) {
+        try { clone.querySelectorAll(sel).forEach(n => n.remove()); }
+        catch { /* invalid selector — skip */ }
+      }
+      return clone;
+    };
+
+    let textSource = 'body';
+    let isArticlePage = false;
+    try {
+      isArticlePage = !!(
+        document.querySelector('meta[property="og:type"][content="article"]') ||
+        document.querySelector('meta[name="article:published_time"]') ||
+        document.querySelector('[itemtype*="Article" i]') ||
+        document.querySelector('article')
+      );
+    } catch { /* malformed selector engines */ }
+
+    for (const sel of ARTICLE_SELECTORS) {
+      let el;
+      try { el = document.querySelector(sel); } catch { continue; }
+      if (!el) continue;
+      const cleaned = stripChrome(el);
+      const txt = (cleaned && cleaned.innerText ? cleaned.innerText : '').trim();
+      if (txt.length > 300) {
+        textSource = sel;
+        return { text: txt, textSource, isArticlePage };
       }
     }
-    return document.body.innerText.trim();
+    const fallback = stripChrome(document.body);
+    textSource = includeChrome ? 'body (raw)' : 'body (chrome-stripped)';
+    const text = (fallback && fallback.innerText ? fallback.innerText : '').trim();
+    return { text, textSource, isArticlePage };
   }
 
   /**
    * Get page metadata.
    */
-  function getPageInfo() {
+  function getPageInfo(params) {
+    const t = getPageText(params || {});
     return {
       url: window.location.href,
       title: document.title,
       description: document.querySelector('meta[name="description"]')?.content || '',
-      text: getPageText(),
+      text: t.text,
+      textSource: t.textSource,
+      isArticlePage: t.isArticlePage,
+      includeChrome: !!(params && params.includeChrome),
       links: Array.from(document.querySelectorAll('a[href]')).slice(0, 100).map(a => ({
         text: a.innerText.trim().slice(0, 100),
         href: a.href,
@@ -50,7 +132,8 @@
     };
   }
 
-  function getPageInfoFull() {
+  function getPageInfoFull(params) {
+    const t = getPageText(params || {});
     const getShadowContent = (root = document) => {
       const shadowContent = [];
       const hosts = root.querySelectorAll('*');
@@ -73,7 +156,10 @@
       url: window.location.href,
       title: document.title,
       description: document.querySelector('meta[name="description"]')?.content || '',
-      text: getPageText(),
+      text: t.text,
+      textSource: t.textSource,
+      isArticlePage: t.isArticlePage,
+      includeChrome: !!(params && params.includeChrome),
       links: Array.from(document.querySelectorAll('a[href]')).slice(0, 100).map(a => ({
         text: a.innerText.trim().slice(0, 100),
         href: a.href,
@@ -1102,8 +1188,8 @@
     if (msg.target !== 'content') return;
 
     const handlers = {
-      'get_page_info': () => getPageInfo(),
-      'get_page_info_cdp': () => getPageInfoFull(),
+      'get_page_info': () => getPageInfo(msg.params || {}),
+      'get_page_info_cdp': () => getPageInfoFull(msg.params || {}),
       'get_interactive_elements': () => getInteractiveElements(),
       'get_interactive_elements_cdp': () => getInteractiveElementsFull(),
       'click': () => clickElement(msg.params || {}),

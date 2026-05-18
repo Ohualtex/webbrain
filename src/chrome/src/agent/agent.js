@@ -1361,6 +1361,33 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       const probe = await cdpClient.evaluate(tabId, `
         (() => {
           const mem = (performance && performance.memory) ? performance.memory : null;
+          // documentTextChars: total visible text on the page. Cheap and
+          // definitive — when this is in the thousands but the JPEG looks
+          // blank, the model can recognize that the screenshot is stale /
+          // mid-lazy-load rather than the page being empty (which is what
+          // trace 2 misread on CNN's slow-loading article).
+          // visibleTextChars: sampled text from block-level elements whose
+          // bbox intersects the current viewport. Bounded so a giant page
+          // doesn't make the probe expensive.
+          let documentTextChars = 0;
+          let visibleTextChars = 0;
+          try {
+            documentTextChars = (document.body && document.body.innerText || '').length;
+          } catch (e) {}
+          try {
+            const sels = 'p, h1, h2, h3, h4, h5, h6, li, td, blockquote, article, section, [role="article"]';
+            const els = document.querySelectorAll(sels);
+            const vw = window.innerWidth, vh = window.innerHeight;
+            for (let i = 0; i < els.length; i++) {
+              const el = els[i];
+              const r = el.getBoundingClientRect();
+              if (r.bottom < 0 || r.top > vh) continue;
+              if (r.right < 0 || r.left > vw) continue;
+              if (r.width === 0 || r.height === 0) continue;
+              visibleTextChars += (el.innerText || '').length;
+              if (visibleTextChars > 20000) break;
+            }
+          } catch (e) {}
           return {
             url: location.href,
             title: document.title || '',
@@ -1372,8 +1399,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             scrollY: Math.round(window.scrollY || 0),
             innerWidth: window.innerWidth,
             innerHeight: window.innerHeight,
+            scrollHeight: Math.round((document.documentElement && document.documentElement.scrollHeight) || document.body.scrollHeight || 0),
             dpr: window.devicePixelRatio || 1,
             jsHeapMb: mem ? Math.round(mem.usedJSHeapSize / 1048576) : null,
+            documentTextChars,
+            visibleTextChars,
           };
         })()
       `);
@@ -3077,7 +3107,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               return { success: false, error: 'SocialMediaDownloader did not load on this page (likely a page CSP block).' };
             }
             try {
-              const urls = await window.SocialMediaDownloader.run(runOpts);
+              const runResult = await window.SocialMediaDownloader.run(runOpts);
+              // v4: run() now returns { urls, stats }. Earlier callers
+              // got just the URL array — handle both shapes so a stale
+              // injection in another extension realm doesn't blow up.
+              const urls = Array.isArray(runResult)
+                ? runResult
+                : (runResult && runResult.urls) || [];
+              const stats = (runResult && runResult.stats) || null;
               const profile = window.SocialMediaDownloader._activeProfile().name;
               // Total bytes the document_start MSE recorder captured
               // for this page (zero if not on a supported social host
@@ -3095,11 +3132,24 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               const recommendation = window.SocialMediaDownloader._buildRecommendation({
                 urls, profile, mseBytes, pageUrl: location.href,
               });
+              // Honest per-status counts so the agent can detect cases
+              // where 713 URLs were "found" but only 1 file actually
+              // downloaded (popup-blocking after the first new-tab
+              // fallback). `triggeredCount` is what we attempted;
+              // `completedCount` is what we successfully fetched and
+              // handed to <a download>; `openedInTabCount` opened a new
+              // tab as a last resort (uncertain — verify with
+              // list_downloads); `failedCount` is hard errors.
               return {
                 success: true,
                 site: profile,
                 mode: runOpts.mode,
                 count: urls.length,
+                triggeredCount: stats ? stats.triggered : urls.length,
+                completedCount: stats ? stats.completed : null,
+                openedInTabCount: stats ? stats.openedInTab : null,
+                failedCount: stats ? stats.failed : null,
+                failures: stats ? stats.failures : [],
                 urls: urls.slice(0, 50),
                 mseBytes,
                 recommendation,

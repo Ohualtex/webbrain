@@ -194,9 +194,19 @@ window.SocialMediaDownloader = (() => {
   const SITE_PROFILES = {
     facebook: {
       match: () => /(?:^|\.)facebook\.com$/i.test(location.hostname),
+      // Single-viewer pages: /photo/, /photo.php?, /videos/ (NOT /photos/ —
+      // that is the album grid, handled by isGallery below).
       isSingle: () =>
-        /\/photo(?:\.php)?\/?(?:\?|$)|\/photos\/|\/videos\//i
+        /\/photo(?:\.php)?\/?(?:\?|$)|\/videos\//i
           .test(location.pathname + location.search),
+      // Gallery / album list page — a grid of photo thumbnails rather
+      // than a single open viewer. `/photos/?tab=album`, `/<page>/photos`,
+      // etc. We pick this up so collect('all') uses gallerySel and the
+      // urlFilter, instead of scanning the whole document and hauling in
+      // the page logo, nav avatars, suggested-pages ads, etc.
+      isGallery: () =>
+        /\/photos(?:\/|$|\?)/i.test(location.pathname + location.search) &&
+        !/\/photo(?:\.php)?\/?(?:\?|$)/i.test(location.pathname + location.search),
       // Narrow to the actual media container — NOT the whole [role="dialog"]
       // (which also wraps comments, reactions, emoji pickers, etc.)
       mainSel:
@@ -205,6 +215,14 @@ window.SocialMediaDownloader = (() => {
         '[data-visualcompletion="media-vc-image"], ' +
         '[role="dialog"] [data-visualcompletion="media-vc-image"], ' +
         '[role="dialog"] img[data-imgperflogname]',  // FB tags the main photo
+      // Each album thumbnail is a `<a href="/photo/?fbid=…">` wrapping an
+      // `<img>`. Scoping to that link pattern excludes the page profile
+      // pic, cover photo, nav avatars, ads, and the "Suggested for you"
+      // strip — all of which the v3 'all' mode was sweeping in.
+      gallerySel:
+        'a[href*="/photo/?fbid="] img, ' +
+        'a[href*="/photo.php?fbid="] img, ' +
+        'a[href*="/photo/"][href*="set="] img',
       exclude: [
         '[role="banner"]', '[role="navigation"]',
         '[aria-label*="profile photo" i]',
@@ -218,7 +236,32 @@ window.SocialMediaDownloader = (() => {
         '[aria-label*="Comment" i]',
         '[aria-label*="Reactions" i]',
         'header', 'nav', 'aside', 'svg'
-      ]
+      ],
+      // Per-profile URL filter — strips known non-content patterns from
+      // the candidate list AFTER DOM extraction. Facebook embeds a size
+      // tag in the `stp=…` query param of every CDN URL: e.g. `…s80x80…`
+      // is an avatar or icon thumbnail, `…s552x414…` is a real album
+      // image. Anything under ~300×300 is almost never user content.
+      urlFilter: url => {
+        // Static Facebook chrome (logo, fb_icon, sprite, emoji).
+        if (/\/(fb_icon|rsrc\.php|emoji\.php|reactions|favicon)/i.test(url)) return false;
+        // stp= contains the size slug; pull width × height when present.
+        const stp = /[?&]stp=([^&]+)/i.exec(url);
+        if (stp) {
+          // Match the LAST size slug (FB chains transforms separated by `_`)
+          const sizes = [...stp[1].matchAll(/_s(\d+)x(\d+)/gi)];
+          if (sizes.length) {
+            const last = sizes[sizes.length - 1];
+            const w = parseInt(last[1], 10), h = parseInt(last[2], 10);
+            if (w && h && w < 300 && h < 300) return false;
+          }
+          // Tiny-crop variants (cp0_dst-jpg_s80x80) also signal thumbs.
+          if (/\bp\d+x\d+\b/i.test(stp[1]) && /_s(?:80|96|120|144|160|180|200|240)x/i.test(stp[1])) {
+            return false;
+          }
+        }
+        return true;
+      },
     },
 
     instagram: {
@@ -1036,8 +1079,40 @@ window.SocialMediaDownloader = (() => {
     else if (mode === 'all') useMain = false;
     else useMain = profile.isSingle();   // auto
 
+    // Gallery / album list page: scoped extraction beats a whole-document
+    // sweep. Without this, an album with N photos returns N + nav avatars
+    // + page logo + suggested-content thumbnails — the trace that found
+    // 713 "photos" on a Twonks album was 90%+ chrome.
+    const useGallery =
+      !useMain &&
+      typeof profile.gallerySel === 'string' &&
+      typeof profile.isGallery === 'function' &&
+      profile.isGallery();
+
     let urls;
-    if (useMain) {
+    if (useGallery) {
+      const galleryUrls = [];
+      const galleryEls = document.querySelectorAll(profile.gallerySel);
+      galleryEls.forEach(el => {
+        if (isExcluded(el, excluded)) return;
+        // Pull the img directly so we don't accidentally bring in
+        // sibling overlay icons that share the link's <a> ancestor.
+        extractFromRoot(el, excluded).forEach(u => galleryUrls.push(u));
+        if (el.tagName === 'IMG' || el.tagName === 'VIDEO' || el.tagName === 'SOURCE') {
+          [el.currentSrc, el.src, el.poster,
+           el.getAttribute('src'), el.getAttribute('poster')]
+            .forEach(u => {
+              u = absoluteUrl(u);
+              if (isMediaUrl(u)) galleryUrls.push(u);
+            });
+          parseSrcset(el.getAttribute('srcset')).forEach(u => {
+            u = absoluteUrl(u);
+            if (isMediaUrl(u)) galleryUrls.push(u);
+          });
+        }
+      });
+      urls = [...new Set(galleryUrls)];
+    } else if (useMain) {
       // 1) og:image / og:video — what the site declares as THE media
       const ogUrls = [];
       document.querySelectorAll(`
@@ -1091,9 +1166,20 @@ window.SocialMediaDownloader = (() => {
 
     const upgraded = preferHighQuality(urls);
     const { dashUrls, passthrough, groups } = groupRedditDash(upgraded);
-    const finalUrls = [...dashUrls, ...passthrough]
+    let finalUrls = [...dashUrls, ...passthrough]
       .sort((a, b) => scoreUrl(b) - scoreUrl(a));
-    return { urls: finalUrls, profile, mode: useMain ? 'main' : 'all',
+    // Per-profile URL filter — keeps the avatars / icons / sprite assets
+    // out of the final list even when they slipped past DOM exclusion.
+    // Facebook puts a size slug in `stp=…` (e.g. `_s80x80` for an avatar
+    // vs `_s552x414` for a real album thumbnail); the FB profile uses
+    // that to drop anything under ~300×300. Other profiles can opt in.
+    if (typeof profile.urlFilter === 'function') {
+      finalUrls = finalUrls.filter(u => {
+        try { return profile.urlFilter(u); } catch { return true; }
+      });
+    }
+    return { urls: finalUrls, profile,
+             mode: useGallery ? 'gallery' : (useMain ? 'main' : 'all'),
              dashGroups: groups };
   };
 
@@ -1151,19 +1237,31 @@ window.SocialMediaDownloader = (() => {
     setTimeout(() => URL.revokeObjectURL(u), 7000);
   };
 
+  // Status taxonomy returned by download():
+  //   'completed'    — bytes were fetched and an <a download> click fired,
+  //                    so the browser is committed to writing the file.
+  //   'opened-in-tab'— we could not fetch the bytes (blob: URL or CORS
+  //                    blocked) and opened the source in a new tab as a
+  //                    last resort. The browser may or may not save anything,
+  //                    and popup-blocking kills the SECOND such call onwards.
+  //   'failed'       — HLS stitch or some other hard error; nothing was
+  //                    triggered. Includes a `reason` string for the caller.
   const download = async (url, filename) => {
     url = clean(url);
     if (/\.m3u8(\?|#|$)/i.test(url)) {
       try {
         const blob = await stitchHls(url);
         triggerBlobDownload(blob, filename.replace(/\.[^.]+$/, '') + '.ts');
-        return;
-      } catch (e) { console.warn('HLS stitch failed:', e); }
+        return { status: 'completed', filename };
+      } catch (e) {
+        console.warn('HLS stitch failed:', e);
+        return { status: 'failed', filename, reason: `HLS stitch: ${e && e.message || e}` };
+      }
     }
     if (url.startsWith('blob:')) {
       console.warn('Blob URL — opening in new tab:', url);
       window.open(url, '_blank');
-      return;
+      return { status: 'opened-in-tab', filename, reason: 'blob URL — cannot be fetched programmatically' };
     }
     // Try in order: credentialed, anonymous, open-in-tab.
     // Credentialed is needed for signed CDN URLs (fbcdn, cdninstagram);
@@ -1174,18 +1272,23 @@ window.SocialMediaDownloader = (() => {
       { credentials: 'include', mode: 'cors' },
       { credentials: 'omit',    mode: 'cors' }
     ];
+    let lastErr = null;
     for (const init of fetchAttempts) {
       try {
         const res = await fetch(url, init);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         triggerBlobDownload(await res.blob(), filename);
-        return;
-      } catch (_) { /* try next */ }
+        return { status: 'completed', filename };
+      } catch (e) { lastErr = e; }
     }
     console.warn('All fetches failed (CDN sends no CORS headers). Opening in new tab — right-click → Save image as:', url);
     const a = document.createElement('a');
     a.href = url; a.target = '_blank'; a.rel = 'noopener';
     document.body.appendChild(a); a.click(); a.remove();
+    return {
+      status: 'opened-in-tab', filename,
+      reason: `fetch blocked (${lastErr && lastErr.message || 'CORS'}) — opened in new tab`,
+    };
   };
 
   // ---------- Public API ----------
@@ -1203,6 +1306,17 @@ window.SocialMediaDownloader = (() => {
       : list(mode);
     const selected = urls.slice(0, limit);
     console.log(`[SMD] downloading ${selected.length} of ${urls.length}`);
+    // Track per-status counts so the calling tool can report honestly to
+    // the agent. Before this we returned only the URL list, which made it
+    // look like a 713-URL run completed 713 downloads when in practice
+    // popup-blocking kills the new-tab fallback after the first hit.
+    const stats = {
+      triggered: selected.length,
+      completed: 0,
+      openedInTab: 0,
+      failed: 0,
+      failures: [], // first ~5 failures only — keeps payload small
+    };
     let i = 1;
     for (const url of selected) {
       const isVideo = /\.(mp4|mov|m4v|webm|m3u8|ts)(\?|#|$)/i.test(url)
@@ -1210,17 +1324,34 @@ window.SocialMediaDownloader = (() => {
         || /v\.redd\.it/.test(url);
       const ext = getExt(url) || (isVideo ? '.mp4' : '.jpg');
       const filename = `${filenameSafe(prefix)}_${isVideo ? 'video' : 'photo'}_${String(i).padStart(3, '0')}${ext}`;
-      await download(url, filename);
+      let r;
+      try {
+        r = await download(url, filename);
+      } catch (e) {
+        r = { status: 'failed', filename, reason: (e && e.message) || String(e) };
+      }
+      if (r.status === 'completed') stats.completed++;
+      else if (r.status === 'opened-in-tab') {
+        stats.openedInTab++;
+        if (stats.failures.length < 5) stats.failures.push({ filename, url, reason: r.reason });
+      } else {
+        stats.failed++;
+        if (stats.failures.length < 5) stats.failures.push({ filename, url, reason: r.reason });
+      }
       await sleep(delayBetweenDownloads);
       i++;
     }
-    console.log('[SMD] done.');
-    return selected;
+    console.log(`[SMD] done. completed=${stats.completed} opened-in-tab=${stats.openedInTab} failed=${stats.failed}`);
+    return { urls: selected, stats };
   };
 
-  // single() now uses main-content mode and returns the top item
-  const single = async opts =>
-    run(Object.assign({ mode: 'main', limit: 1 }, opts || {}));
+  // single() now uses main-content mode and returns the top item.
+  // Returns just the URL array (not {urls, stats}) to keep the DevTools-
+  // console contract documented at the top of this file.
+  const single = async opts => {
+    const r = await run(Object.assign({ mode: 'main', limit: 1 }, opts || {}));
+    return r && r.urls ? r.urls : r;
+  };
 
   return {
     run, single, list, scrollAndCollect,

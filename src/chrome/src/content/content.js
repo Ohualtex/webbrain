@@ -988,16 +988,100 @@
     });
   }
 
-  function getPageInfoFull() {
-    const getText = () => {
-      const selectors = ['article', 'main', '[role="main"]', '.content', '#content'];
-      for (const sel of selectors) {
-        const el = document.querySelector(sel);
-        if (el && el.innerText.trim().length > 200) {
-          return el.innerText.trim();
-        }
+  function getPageInfoFull(params) {
+    // `includeChrome:true` opts out of nav/footer/aside stripping. Default
+    // false because the original behaviour (full body.innerText) bloated
+    // article reads with sitemap / cookie-banner / newsletter chrome and
+    // truncated the actual article body off the end. Set to true when the
+    // user is asking ABOUT the navigation, footer, cookie banner, etc.
+    const includeChrome = !!(params && params.includeChrome);
+
+    // Article-priority selectors in roughly increasing specificity. The
+    // first selector with >300 chars of visible text wins. Standard
+    // semantic tags first (article, [role="article"], itemprop), then
+    // common site-builder patterns (.article-body, .post-content, etc.),
+    // then layout fallbacks (main, .content).
+    const ARTICLE_SELECTORS = [
+      '[itemprop="articleBody"]',
+      'article [class*="article-body" i]',
+      'article [class*="article__content" i]',
+      'article [class*="article__body" i]',
+      'article [class*="story-body" i]',
+      'article [class*="post-content" i]',
+      'article [class*="entry-content" i]',
+      '[role="article"]',
+      'article',
+      'main article',
+      '.article-body, .article__body, .article__content',
+      '.post-content, .entry-content, .story-body, .story-content',
+      'main',
+      '[role="main"]',
+      '.content',
+      '#content',
+    ];
+
+    // Inside the chosen container, prune nav/footer/aside/ads/comments
+    // BEFORE measuring text length. CNN, NYT, etc. all wrap newsletter
+    // signups, related-articles widgets, and ad slots inside <article>,
+    // which used to push the real article body off the end of the
+    // truncation window.
+    const CHROME_DROP_SELECTORS = [
+      'nav', 'header', 'footer', 'aside',
+      '[role="navigation"]', '[role="banner"]',
+      '[role="contentinfo"]', '[role="complementary"]',
+      'script', 'style', 'noscript', 'iframe', 'svg',
+      '[aria-hidden="true"]',
+      '[class*="advertisement" i]', '[class*="ad-slot" i]',
+      '[class*="ad-container" i]', '[id*="ad-" i][id*="-slot" i]',
+      '[class*="newsletter" i][class*="signup" i]',
+      '[class*="newsletter-promo" i]',
+      '[class*="social-share" i]', '[class*="share-tools" i]',
+      '[class*="related-articles" i]', '[class*="recommended" i]',
+      '[class*="more-stories" i]', '[class*="paid-content" i]',
+      '[class*="comments" i][class*="section" i]',
+      '[class*="cookie-banner" i]', '[id*="cookie-banner" i]',
+      '[class*="onetrust" i]',
+    ];
+
+    const stripChrome = root => {
+      if (includeChrome || !root) return root;
+      // Clone so we never mutate the live page DOM.
+      let clone;
+      try { clone = root.cloneNode(true); }
+      catch { return root; }
+      for (const sel of CHROME_DROP_SELECTORS) {
+        try { clone.querySelectorAll(sel).forEach(n => n.remove()); }
+        catch { /* invalid selector on some browsers — skip */ }
       }
-      return document.body.innerText.trim();
+      return clone;
+    };
+
+    // Tells the caller why this page was treated as an article. Models can
+    // use this to decide "I have the article body, stop fetching more".
+    let textSource = 'body';
+    let isArticlePage = false;
+    try {
+      isArticlePage = !!(
+        document.querySelector('meta[property="og:type"][content="article"]') ||
+        document.querySelector('meta[name="article:published_time"]') ||
+        document.querySelector('[itemtype*="Article" i]') ||
+        document.querySelector('article')
+      );
+    } catch { /* malformed selector engines — ignore */ }
+
+    const getText = () => {
+      for (const sel of ARTICLE_SELECTORS) {
+        let el;
+        try { el = document.querySelector(sel); } catch { continue; }
+        if (!el) continue;
+        const cleaned = stripChrome(el);
+        const txt = (cleaned && cleaned.innerText ? cleaned.innerText : '').trim();
+        if (txt.length > 300) { textSource = sel; return txt; }
+      }
+      // Whole-body fallback: still strip chrome unless the caller opted in.
+      const fallback = stripChrome(document.body);
+      textSource = includeChrome ? 'body (raw)' : 'body (chrome-stripped)';
+      return (fallback && fallback.innerText ? fallback.innerText : '').trim();
     };
 
     const getShadowContent = (root = document) => {
@@ -1018,11 +1102,21 @@
       return shadowContent;
     };
 
+    const text = getText();
     return {
       url: window.location.href,
       title: document.title,
       description: document.querySelector('meta[name="description"]')?.content || '',
-      text: getText(),
+      text,
+      // Tells the model where this text came from. When `textSource` is a
+      // real article selector and `isArticlePage` is true, the model can
+      // assume it has the complete article body and stop fetching more
+      // (the long tail of fetch_url / scroll cycles in trace 2 happened
+      // because the model couldn't tell the article had ended vs. been
+      // truncated). `includeChrome` reports the effective option.
+      textSource,
+      isArticlePage,
+      includeChrome,
       links: Array.from(document.querySelectorAll('a[href]')).slice(0, 100).map(a => ({
         text: a.innerText.trim().slice(0, 100),
         href: a.href,
@@ -1155,7 +1249,7 @@
 
     const handlers = {
       'get_page_info': () => getPageInfo(),
-      'get_page_info_cdp': () => getPageInfoFull(),
+      'get_page_info_cdp': () => getPageInfoFull(msg.params || {}),
       'get_interactive_elements': () => getInteractiveElements(),
       'get_interactive_elements_cdp': () => getInteractiveElementsFull(),
       'click': () => clickElement(msg.params || {}),

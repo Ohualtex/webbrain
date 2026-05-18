@@ -593,26 +593,95 @@ export class CDPClient {
 
   /**
    * Read page content with full DOM access.
+   *
+   * Mirrors `getPageInfoFull` in content.js — article-priority selectors,
+   * nav/footer/aside/ads stripped inside the chosen container, and a
+   * `textSource` / `isArticlePage` hint so the model can recognize when
+   * it has the complete article body and stop chasing more.
+   *
+   * Pass `{ includeChrome: true }` to opt out of stripping (e.g. when the
+   * user is asking about the nav, footer, cookie banner, etc.).
    */
-  async readPage(tabId) {
+  async readPage(tabId, opts = {}) {
+    const includeChrome = !!opts.includeChrome;
     const pageInfo = await this.evaluate(tabId, `
-      (() => {
-        const getText = () => {
-          const selectors = ['article', 'main', '[role="main"]', '.content', '#content'];
-          for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el && el.innerText.trim().length > 200) {
-              return el.innerText.trim();
-            }
+      ((includeChrome) => {
+        const ARTICLE_SELECTORS = [
+          '[itemprop="articleBody"]',
+          'article [class*="article-body" i]',
+          'article [class*="article__content" i]',
+          'article [class*="article__body" i]',
+          'article [class*="story-body" i]',
+          'article [class*="post-content" i]',
+          'article [class*="entry-content" i]',
+          '[role="article"]',
+          'article',
+          'main article',
+          '.article-body, .article__body, .article__content',
+          '.post-content, .entry-content, .story-body, .story-content',
+          'main',
+          '[role="main"]',
+          '.content',
+          '#content',
+        ];
+        const CHROME_DROP_SELECTORS = [
+          'nav', 'header', 'footer', 'aside',
+          '[role="navigation"]', '[role="banner"]',
+          '[role="contentinfo"]', '[role="complementary"]',
+          'script', 'style', 'noscript', 'iframe', 'svg',
+          '[aria-hidden="true"]',
+          '[class*="advertisement" i]', '[class*="ad-slot" i]',
+          '[class*="ad-container" i]',
+          '[class*="newsletter" i][class*="signup" i]',
+          '[class*="newsletter-promo" i]',
+          '[class*="social-share" i]', '[class*="share-tools" i]',
+          '[class*="related-articles" i]', '[class*="recommended" i]',
+          '[class*="more-stories" i]', '[class*="paid-content" i]',
+          '[class*="cookie-banner" i]', '[id*="cookie-banner" i]',
+          '[class*="onetrust" i]',
+        ];
+        const stripChrome = (root) => {
+          if (includeChrome || !root) return root;
+          let clone;
+          try { clone = root.cloneNode(true); } catch (e) { return root; }
+          for (const sel of CHROME_DROP_SELECTORS) {
+            try { clone.querySelectorAll(sel).forEach(n => n.remove()); } catch (e) {}
           }
-          return document.body.innerText.trim();
+          return clone;
+        };
+        let textSource = 'body';
+        let isArticlePage = false;
+        try {
+          isArticlePage = !!(
+            document.querySelector('meta[property="og:type"][content="article"]') ||
+            document.querySelector('meta[name="article:published_time"]') ||
+            document.querySelector('[itemtype*="Article" i]') ||
+            document.querySelector('article')
+          );
+        } catch (e) {}
+        const getText = () => {
+          for (const sel of ARTICLE_SELECTORS) {
+            let el;
+            try { el = document.querySelector(sel); } catch (e) { continue; }
+            if (!el) continue;
+            const cleaned = stripChrome(el);
+            const txt = (cleaned && cleaned.innerText ? cleaned.innerText : '').trim();
+            if (txt.length > 300) { textSource = sel; return txt; }
+          }
+          const fallback = stripChrome(document.body);
+          textSource = includeChrome ? 'body (raw)' : 'body (chrome-stripped)';
+          return (fallback && fallback.innerText ? fallback.innerText : '').trim();
         };
 
+        const text = getText();
         return {
           url: window.location.href,
           title: document.title,
           description: document.querySelector('meta[name="description"]')?.content || '',
-          text: getText(),
+          text,
+          textSource,
+          isArticlePage,
+          includeChrome,
           links: Array.from(document.querySelectorAll('a[href]')).slice(0, 100).map(a => ({
             text: a.innerText.trim().slice(0, 100),
             href: a.href,
@@ -640,7 +709,7 @@ export class CDPClient {
             visible: iframe.offsetWidth > 0 && iframe.offsetHeight > 0,
           })),
         };
-      })()
+      })(${JSON.stringify(includeChrome)})
     `);
 
     return pageInfo?.result?.value || pageInfo;

@@ -205,6 +205,71 @@ def test_facebook(page, js_path, sdir):
 
 
 @register
+def test_facebook_gallery(page, js_path, sdir):
+    """Album/gallery page — must detect gallery mode and strip avatars/logos/ads.
+
+    Regression for the trace that returned 713 "photos" on an FB album,
+    of which 700+ were page chrome (fb_icon, profile avatars in nav, ad
+    creatives, suggested-content thumbnails sized 80×80 or 240×240).
+    The new collect() routes /photos pages through `gallerySel` (album
+    thumbnail links only) and applies `urlFilter` to drop <300×300 size
+    slugs in `stp=...` plus known static assets like fb_icon/rsrc.php.
+    """
+    r = TestResult(site="facebook_gallery", url="https://www.facebook.com/NASA/photos", passed=False)
+    _safe_goto(page, r.url); time.sleep(4)
+    logged_out = page.locator('input[name="email"]').count() > 0
+    inject_smd(page, js_path)
+    data = collect_smd(page, "all")
+    if "error" in data:
+        r.error = data["error"]; r.screenshot_path = _screenshot(page, sdir, "facebook_gallery"); return r
+
+    urls = data.get("urls", [])
+    r.profile_detected = data.get("profile"); r.url_count = len(urls)
+    r.sample_urls = [u[:90] for u in urls[:3]]
+    r.needs_login = logged_out
+
+    # Sentinel URLs that the old whole-document sweep used to drag in.
+    # Real album thumbnails on FB look like:
+    #   …/v/t39.30808-6/<id>.jpg?stp=c0.135.1638.1638a_cp6_dst-jpg_s552x414_tt6&…
+    # Avatars / nav icons / ads use much smaller size slugs:
+    #   …/v/t39.30808-6/<id>.jpg?stp=cp0_dst-jpg_s80x80_tt6&…
+    chrome_leaks = [
+        u for u in urls if (
+            "fb_icon" in u
+            or "/rsrc.php/" in u
+            or "/emoji.php/" in u
+            # any size slug below ~240×240 is almost never user content
+            or any(s in u for s in ("_s80x80", "_s96x96", "_s120x120",
+                                     "_s144x144", "_s160x160", "_s180x180",
+                                     "_s200x200", "_s240x240"))
+        )
+    ]
+
+    r.assertions = [
+        f"profile == 'facebook' (got: {r.profile_detected})",
+        f"mode == 'gallery' (got: {data.get('mode')}) - gallery-only filter routed",
+        f"chrome leaks (avatars/icons/sprites) == 0 (got: {len(chrome_leaks)})",
+        ("logged in: gallery URL count 5..500"
+         if not logged_out else "logged out: just profile + gallery-mode detection"),
+    ]
+    if r.profile_detected != "facebook":
+        r.failures.append("wrong profile")
+    if data.get("mode") != "gallery":
+        r.failures.append("/photos page did not route through gallery selector")
+    if chrome_leaks:
+        r.failures.append(f"chrome leak: {len(chrome_leaks)} avatar/icon URLs slipped past urlFilter")
+    if not logged_out:
+        if not (5 <= len(urls) <= 500):
+            r.failures.append(f"unexpected gallery URL count {len(urls)}")
+    r.passed = not r.failures and not logged_out
+    if logged_out:
+        r.notes = "Use CDP attach or --setup. Filter coverage only verifiable when logged in."
+    if not r.passed and not logged_out:
+        r.screenshot_path = _screenshot(page, sdir, "facebook_gallery")
+    return r
+
+
+@register
 def test_linkedin(page, js_path, sdir):
     r = TestResult(site="linkedin", url="https://www.linkedin.com/company/nasa/posts/", passed=False)
     _safe_goto(page, r.url); time.sleep(4)

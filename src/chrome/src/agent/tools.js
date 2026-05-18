@@ -8,7 +8,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'get_accessibility_tree',
-      description: 'PREFERRED page-reading tool. Returns the page as a flat, indented text representation of its accessibility tree. Each kept node is one line of the form `role "accessible name" [ref_id] href="..." type="..." placeholder="..."`. Indentation shows hierarchy. ref_ids are STABLE across calls — re-use them in click_ax / type_ax. If the result is truncated, request the next page before scrolling to find a visible control. Use this first; read_page is a prose fallback for long-form articles only.',
+      description: 'PREFERRED page-reading tool. Returns the page as a flat, indented text representation of its accessibility tree. Each kept node is one line of the form `role "accessible name" [ref_id] href="..." type="..." placeholder="..."`. Indentation shows hierarchy. ref_ids are STABLE across calls — re-use them in click_ax / type_ax. If the result is truncated (`truncated:true`, `hasMore:true`), call again with `page:` set to `nextPage` to read the next slice before scrolling. When you pass an explicit `maxChars` and the tree is larger, the tool now AUTO-SLICES to fit and sets `autoDegraded:true` + a `notice` field explaining how to continue — so a single oversized call no longer wastes a round-trip with empty pageContent. Use this first; read_page is a prose fallback for long-form articles only.',
       parameters: {
         type: 'object',
         properties: {
@@ -73,10 +73,15 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'read_page',
-      description: 'Read the current page as PROSE — title, URL, visible text, links, forms. LEGACY read path; prefer get_accessibility_tree for UI tasks. Use read_page only when the user is asking about long-form text content (articles, READMEs, documentation). NOTE: if the current tab is a PDF (URL ends in .pdf or content-type is application/pdf), this call auto-redirects to read_pdf since Chrome\'s PDF viewer is a chrome-extension:// page that we cannot scrape via DOM.',
+      description: 'Read the current page as PROSE — title, URL, visible text, links, forms. LEGACY read path; prefer get_accessibility_tree for UI tasks. Use read_page only when the user is asking about long-form text content (articles, READMEs, documentation). RESULT SHAPE: `text` is the article body (nav/header/footer/aside/ads stripped by default); `textSource` is the CSS selector that produced the body (or "body (chrome-stripped)" / "body (raw)" when no article container matched); `isArticlePage` is true when the page declares itself as an article via og:type, article:published_time, schema.org Article, or `<article>`. When `isArticlePage:true` AND `textSource` is a real article selector, you HAVE the complete article body — do not chase more content with fetch_url / scroll / get_accessibility_tree. NOTE: if the current tab is a PDF (URL ends in .pdf or content-type is application/pdf), this call auto-redirects to read_pdf since Chrome\'s PDF viewer is a chrome-extension:// page that we cannot scrape via DOM.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          includeChrome: {
+            type: 'boolean',
+            description: 'Include nav / header / footer / aside / ad-slot text in the body. Default false — when the user asks about article/README content you almost never want this. Set true only when the user is asking ABOUT the navigation menu, footer links, cookie banner, advertisement, etc.',
+          },
+        },
         required: [],
       },
     },
@@ -114,7 +119,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'screenshot',
-      description: 'Capture a screenshot of the visible area of the current tab. Returns a base64-encoded PNG image. Default: native device resolution — higher visual fidelity, better for reading small text. IMPORTANT: at native resolution on HiDPI displays, image pixels are NOT CSS pixels, so you CANNOT read (X,Y) from the image and pass them to click({x,y}). If you plan to pixel-click, pass `coord_aligned: true` to force a CSS-pixel-aligned capture where image pixel (X,Y) maps exactly to click(x:X, y:Y). Better: prefer click_ax({ref_id}) after get_accessibility_tree — avoids coordinate math entirely.',
+      description: 'Capture a screenshot of the visible area of the current tab. Returns a base64-encoded PNG image. Default: native device resolution — higher visual fidelity, better for reading small text. IMPORTANT: at native resolution on HiDPI displays, image pixels are NOT CSS pixels, so you CANNOT read (X,Y) from the image and pass them to click({x,y}). If you plan to pixel-click, pass `coord_aligned: true` to force a CSS-pixel-aligned capture where image pixel (X,Y) maps exactly to click(x:X, y:Y). Better: prefer click_ax({ref_id}) after get_accessibility_tree — avoids coordinate math entirely. The result\'s `page` field reports `documentTextChars` (total visible text on the page) and `visibleTextChars` (text in the current viewport). If the screenshot LOOKS blank but `documentTextChars` is in the thousands, the page is not empty — your image is stale mid-lazy-load (ads, hero images, fonts still arriving). Wait or call read_page / get_accessibility_tree instead of declaring the page empty.',
       parameters: {
         type: 'object',
         properties: {
@@ -560,7 +565,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'download_social_media',
-      description: 'One-shot media downloader for major social sites: Facebook, Instagram, X/Twitter, LinkedIn, Reddit, Pinterest, YouTube (thumbnails only). Auto-detects the active site, picks the main photo/video on single-content pages (/photo/, /p/, /reel/, /status/.../photo/, /pin/, /comments/), or every media item on feeds when scroll:true. Handles per-site DOM quirks, upgrades to max resolution (X name=orig, Pinterest /originals/), pairs Reddit DASH video+audio, stitches HLS (incl. AES-128 encrypted), and falls back to opening in a new tab when a CDN blocks CORS. PREFER this over execute_js / download_file / download_resource_from_page whenever the user asks to "download this image/video", "save this photo", "grab the media" on a supported site — it is a single call instead of figuring DOM selectors out manually. Files land in the browser Downloads folder; call list_downloads afterwards to confirm. RESULT SHAPE: may include a `recommendation` object ({kind, message}) when the in-browser path cannot fully handle the request (YouTube DRM video, MSE blob with nothing buffered yet, unsupported site, empty result). When present, relay `recommendation.message` verbatim to the user — it names the right external CLI tool (yt-dlp or gallery-dl) and includes a copy-pasteable command.',
+      description: 'One-shot media downloader for major social sites: Facebook, Instagram, X/Twitter, LinkedIn, Reddit, Pinterest, YouTube (thumbnails only). Auto-detects the active site, picks the main photo/video on single-content pages (/photo/, /p/, /reel/, /status/.../photo/, /pin/, /comments/), or every media item on feeds when scroll:true. Handles per-site DOM quirks, upgrades to max resolution (X name=orig, Pinterest /originals/), pairs Reddit DASH video+audio, stitches HLS (incl. AES-128 encrypted), and falls back to opening in a new tab when a CDN blocks CORS. PREFER this over execute_js / download_file / download_resource_from_page whenever the user asks to "download this image/video", "save this photo", "grab the media" on a supported site — it is a single call instead of figuring DOM selectors out manually. Files land in the browser Downloads folder; call list_downloads afterwards to confirm. RESULT SHAPE: `count` is total URLs found; `triggeredCount` is how many we tried to download; `completedCount` is how many were successfully fetched-and-saved; `openedInTabCount` are URLs the browser blocked from direct fetch (we opened them in a new tab — popup-blocking usually kills these AFTER the first one, so a count > 1 here means most did NOT actually save); `failedCount` are hard errors. ALWAYS report honestly: if `completedCount` is much smaller than `count`, say so — do not claim "downloads in progress in the background"; the run is fully synchronous and what is not in `completedCount` is not coming. May also include a `recommendation` object ({kind, message}) when the in-browser path cannot fully handle the request (YouTube DRM video, MSE blob with nothing buffered yet, unsupported site, empty result). When present, relay `recommendation.message` verbatim to the user — it names the right external CLI tool (yt-dlp or gallery-dl) and includes a copy-pasteable command.',
       parameters: {
         type: 'object',
         properties: {
