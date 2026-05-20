@@ -33,6 +33,12 @@ async function loadSiteAdapters() {
 }
 loadSiteAdapters();
 
+async function loadStrictSecretMode() {
+  const stored = await chrome.storage.local.get('strictSecretMode');
+  if (stored.strictSecretMode != null) agent.strictSecretMode = !!stored.strictSecretMode;
+}
+loadStrictSecretMode();
+
 // Profile auto-fill: user-provided text (name, email, etc.) that gets
 // appended to the system prompt when enabled. Plaintext in storage —
 // security warning lives in the settings UI.
@@ -73,6 +79,12 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.useSiteAdapters) {
     agent.useSiteAdapters = changes.useSiteAdapters.newValue;
     refreshPrompts = true;
+  }
+  if (changes.strictSecretMode) {
+    agent.strictSecretMode = !!changes.strictSecretMode.newValue;
+    // The setting only flips the `done` tool description and the credential
+    // note text — both are rebuilt at turn-start, so no system-prompt
+    // refresh is needed. (System prompt content itself doesn't change.)
   }
   if (changes.profileEnabled) {
     agent.profileEnabled = !!changes.profileEnabled.newValue;
@@ -489,6 +501,20 @@ async function handleMessage(msg, sender) {
       const tabId = msg.tabId || sender.tab?.id;
       if (tabId) agent.abort(tabId);
       return { ok: true };
+    }
+
+    case 'clarify_response': {
+      // Side panel posts the user's answer to a pending clarify() tool
+      // call. The agent's executeTool() handler is awaiting this exact
+      // (tabId, clarifyId) pair and resumes the run when we resolve it.
+      const tabId = msg.tabId || sender.tab?.id;
+      if (!tabId) return { ok: false, error: 'No tab ID' };
+      const clarifyId = String(msg.clarifyId || '');
+      const answer = String(msg.answer || '').trim();
+      if (!clarifyId) return { ok: false, error: 'clarifyId required' };
+      if (!answer) return { ok: false, error: 'answer required' };
+      const matched = agent.submitClarifyResponse(tabId, clarifyId, answer, msg.source || 'user');
+      return { ok: matched, matched };
     }
 
     case 'get_debug_log': {

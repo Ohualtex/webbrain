@@ -6,7 +6,7 @@ import { t, getLocale, setLocale, LANGUAGES } from './i18n.js';
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '7.1.0';
+const EXT_VERSION = '7.2.1';
 
 const providersContainer = document.getElementById('providers');
 const verboseToggle = document.getElementById('toggle-verbose');
@@ -17,6 +17,7 @@ const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 const notifySoundToggle = document.getElementById('toggle-notify-sound');
 const tracingToggle = document.getElementById('toggle-tracing');
+const strictSecretToggle = document.getElementById('toggle-strict-secret');
 const allowLocalNetworkToggle = document.getElementById('toggle-allow-local-network');
 const accountSection = document.getElementById('account-section');
 const visionBaseUrlInput = document.getElementById('vision-base-url');
@@ -74,7 +75,7 @@ async function init() {
   renderAuthSection();
 
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'tracingEnabled', 'agentAllowLocalNetwork']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork']);
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   maxStepsRange.value = stored.maxAgentSteps || 60;
@@ -83,6 +84,9 @@ async function init() {
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   notifySoundToggle.checked = stored.notifySound ?? true; // on by default
   tracingToggle.checked = stored.tracingEnabled === true; // off by default
+  if (strictSecretToggle) {
+    strictSecretToggle.checked = stored.strictSecretMode === true; // off by default
+  }
   if (allowLocalNetworkToggle) {
     allowLocalNetworkToggle.checked = stored.agentAllowLocalNetwork === true; // off by default
   }
@@ -203,6 +207,12 @@ notifySoundToggle.addEventListener('change', () => {
 tracingToggle.addEventListener('change', () => {
   chrome.storage.local.set({ tracingEnabled: tracingToggle.checked });
 });
+
+if (strictSecretToggle) {
+  strictSecretToggle.addEventListener('change', () => {
+    chrome.storage.local.set({ strictSecretMode: strictSecretToggle.checked });
+  });
+}
 
 if (allowLocalNetworkToggle) {
   allowLocalNetworkToggle.addEventListener('change', () => {

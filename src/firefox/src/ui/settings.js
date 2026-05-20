@@ -6,7 +6,7 @@ import { t, getLocale, setLocale, LANGUAGES } from './i18n.js';
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '7.1.0';
+const EXT_VERSION = '7.2.1';
 
 const providersContainer = document.getElementById('providers');
 const verboseToggle = document.getElementById('toggle-verbose');
@@ -16,6 +16,7 @@ const stepsValueLabel = document.getElementById('steps-value');
 const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 const tracingToggle = document.getElementById('toggle-tracing');
+const strictSecretToggle = document.getElementById('toggle-strict-secret');
 const allowLocalNetworkToggle = document.getElementById('toggle-allow-local-network');
 const accountSection = document.getElementById('account-section');
 const visionBaseUrlInput = document.getElementById('vision-base-url');
@@ -72,7 +73,7 @@ async function init() {
   renderAuthSection();
 
   // Load display settings
-  const stored = await browser.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'tracingEnabled', 'agentAllowLocalNetwork']);
+  const stored = await browser.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork']);
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   maxStepsRange.value = stored.maxAgentSteps || 60;
@@ -80,6 +81,7 @@ async function init() {
   if (autoScreenshotSelect) autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   if (siteAdaptersToggle) siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   if (tracingToggle) tracingToggle.checked = stored.tracingEnabled === true;
+  if (strictSecretToggle) strictSecretToggle.checked = stored.strictSecretMode === true; // off by default
   if (allowLocalNetworkToggle) allowLocalNetworkToggle.checked = stored.agentAllowLocalNetwork === true;
 
   // Load vision model config
@@ -193,6 +195,10 @@ siteAdaptersToggle?.addEventListener('change', () => {
 
 tracingToggle?.addEventListener('change', () => {
   browser.storage.local.set({ tracingEnabled: tracingToggle.checked });
+});
+
+strictSecretToggle?.addEventListener('change', () => {
+  browser.storage.local.set({ strictSecretMode: strictSecretToggle.checked });
 });
 
 allowLocalNetworkToggle?.addEventListener('change', () => {

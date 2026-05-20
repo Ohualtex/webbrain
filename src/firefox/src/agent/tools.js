@@ -297,13 +297,39 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'done',
-      description: 'Signal that the task is FULLY complete. Only call this when you have successfully accomplished the user\'s request OR have exhausted every reasonable alternative (at least 3-4 different approaches). Provide a summary of what was accomplished. Do NOT call this prematurely — keep trying different strategies if the current one fails.',
+      description: 'Signal that the task is FULLY complete. Only call this when you have successfully accomplished the user\'s request OR have exhausted every reasonable alternative (at least 3-4 different approaches). Provide a summary of what was accomplished. Do NOT call this prematurely — keep trying different strategies if the current one fails. Credentials hygiene: when summarizing, prefer generic references ("logged in with the provided password", "API key updated") over echoing the literal value — keeps summaries tidy and avoids needlessly persisting secrets in trace logs. If the user explicitly asked you to show them a value (a recovery code, an API key on the page, etc.), including the value IS the answer and you should include it.',
       parameters: {
         type: 'object',
         properties: {
-          summary: { type: 'string', description: 'Summary of what was accomplished' },
+          summary: { type: 'string', description: 'Summary of what was accomplished.' },
         },
         required: ['summary'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'clarify',
+      description: 'Pause the run and ask the user a clarifying question. The run resumes when the user answers; the tool result is the user\'s reply. USE ONLY WHEN MATERIALLY AMBIGUOUS — when the task cannot be resolved by reading the page, when a wrong guess would cost the user real time/money/data, or when the user\'s request has two equally-likely interpretations that lead to different actions (e.g. "my API key" on a site with WP REST app-passwords AND multiple plugin keys). DO NOT use as a confidence crutch: do not call before every step, do not call to confirm tool calls that are clearly correct, do not call instead of doing the obvious thing. Prefer doing the most-likely interpretation and reporting it in `done.summary` for trivial ambiguities. Each clarify call breaks user flow; budget at most 1-2 per run.',
+      parameters: {
+        type: 'object',
+        properties: {
+          question: {
+            type: 'string',
+            description: 'The question to show the user. One sentence, plain English. Frame it as a real either/or, not "is this OK?" — e.g. "Did you mean the WordPress REST API application password, or a specific plugin\'s API key?" not "Should I proceed?"',
+          },
+          options: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Optional list of 2-4 suggested answers shown as buttons. The user can also type a custom answer. Omit if the question is genuinely open-ended.',
+          },
+          reason: {
+            type: 'string',
+            description: 'Optional one-sentence justification for why you cannot decide on your own. The user sees this — be honest ("I see Rank Math Content AI and Jetpack settings pages, both have API key fields" beats "I need more info").',
+          },
+        },
+        required: ['question'],
       },
     },
   },
@@ -532,7 +558,7 @@ export const AGENT_TOOLS = [
  */
 export const ASK_ONLY_TOOLS = [
   'read_page', 'read_pdf', 'screenshot', 'get_interactive_elements', 'scroll',
-  'extract_data', 'get_selection', 'done',
+  'extract_data', 'get_selection', 'clarify', 'done',
   'fetch_url', 'research_url', 'list_downloads',
 ];
 
@@ -543,13 +569,37 @@ export const ASK_ONLY_TOOLS = [
 export const AGENT_TOOL_NAMES = new Set(AGENT_TOOLS.map(t => t.function.name));
 
 /**
- * Get tools filtered by mode.
+ * Strict-mode replacement for the `done` tool. See chrome/agent/tools.js for
+ * the rationale — webbrain runs as a personal-computer tool so the default
+ * is LOOSE (tidy summaries, but quote secrets when the user asks). Strict
+ * mode is opt-in via Settings → "Strict secret handling".
  */
-export function getToolsForMode(mode) {
-  if (mode === 'ask') {
-    return AGENT_TOOLS.filter(t => ASK_ONLY_TOOLS.includes(t.function.name));
-  }
-  return AGENT_TOOLS; // act mode gets everything
+const DONE_TOOL_STRICT = {
+  type: 'function',
+  function: {
+    name: 'done',
+    description: 'Signal that the task is FULLY complete. Only call this when you have successfully accomplished the user\'s request OR have exhausted every reasonable alternative (at least 3-4 different approaches). Provide a summary of what was accomplished. Do NOT call this prematurely — keep trying different strategies if the current one fails. CREDENTIALS (strict mode is ON): never include passwords, API keys, tokens, OTPs, recovery codes, application-password strings, or any value the user typed into a password field — in the summary. Refer to them generically ("logged in with the provided credentials", "API key updated", "OTP submitted") even if the user explicitly asked you to display the value: in strict mode the answer is "I filled the field with the value you provided" or "the API key on this page is in the field labeled X", not the literal string. This rule applies even if the user typed the value directly into the chat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'Summary of what was accomplished. Must NOT contain credentials, passwords, API keys, tokens, OTPs, or any secret the user provided or that you read from a password field.' },
+      },
+      required: ['summary'],
+    },
+  },
+};
+
+/**
+ * Get tools filtered by mode.
+ *
+ * `opts.strictSecretMode` swaps in the strict `done` description.
+ */
+export function getToolsForMode(mode, opts = {}) {
+  const base = (mode === 'ask')
+    ? AGENT_TOOLS.filter(t => ASK_ONLY_TOOLS.includes(t.function.name))
+    : AGENT_TOOLS;
+  if (!opts.strictSecretMode) return base;
+  return base.map(t => (t.function.name === 'done' ? DONE_TOOL_STRICT : t));
 }
 
 export const SYSTEM_PROMPT_ASK = `You are WebBrain, a helpful AI browser assistant running in Ask mode.
@@ -571,6 +621,7 @@ Available tools:
 - scroll: Scroll the page to see more content
 - extract_data: Extract tables, headings, or images
 - get_selection: Get highlighted text
+- clarify: Ask the user a question and wait for their answer. Use ONLY when the request is materially ambiguous (e.g. two equally-likely interpretations that lead to different answers). Do NOT use on every step.
 - done: Signal task completion
 
 IMPORTANT — Current Page Priority:
@@ -623,6 +674,7 @@ Available tools:
 - get_selection: Get highlighted text
 - execute_js: Run custom JavaScript
 - new_tab: Open a new tab
+- clarify: Pause and ask the user a question. Use ONLY for material ambiguity that you cannot resolve by reading the page (e.g. "my API key" on a site with multiple plugins that each have one). Do NOT use to confirm correct actions; do NOT call before every step. Budget 1-2 per run, max.
 - done: Signal task completion
 - verify_form: Verify form fields before submitting
 - scratchpad_write: Pin a note in context that survives summarization (use on long tasks to remember download IDs, file paths, progress, plans)

@@ -1,5 +1,6 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT } from './tools.js';
 import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
+import { isCredentialField, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
 import { cdpClient } from '../cdp/cdp-client.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
@@ -47,6 +48,17 @@ export class Agent {
     // universal preamble rides along with the base system prompt.
     this.useSiteAdapters = true;
 
+    // Strict secret-handling mode. When true, the `done` tool description
+    // adds a hard prohibition on quoting credentials in summaries and the
+    // post-set_field credential note tells the model to never echo the
+    // value. When false (the default — this is a personal-computer tool,
+    // not a third-party deployment), the model gets soft hygiene guidance
+    // ("prefer generic phrasing unless the user asks for the value") but
+    // can quote credentials when the user explicitly asks for them ("show
+    // me my recovery codes", "what's my API key on this page"). Toggle
+    // lives in Settings → "Strict secret handling". Loaded in background.js.
+    this.strictSecretMode = false;
+
     // Profile auto-fill: when enabled, the user's profile text (name,
     // email, throwaway password, etc.) is appended to the system prompt
     // so the agent can fill signup forms without asking every time.
@@ -85,6 +97,13 @@ export class Agent {
     // model can see which element it last touched. Lives for the tab's
     // lifetime; overwritten on each ax interaction, cleared on tab close.
     this._lastInteractionRect = new Map(); // tabId -> { x, y, w, h, ts }
+    // Pending clarify() tool calls awaiting user input. Keyed by tabId →
+    // (clarifyId → {resolve, reject}). The clarify tool returns a Promise
+    // that resolves when the user submits a response via the side panel
+    // (background.js routes `clarify_response` to submitClarifyResponse).
+    // abort() and clearConversation() cancel all pending clarifications so
+    // the agent loop doesn't deadlock.
+    this._pendingClarifications = new Map();
     // Cache for `_isPdfTab` — the URL-pattern check is sync and free,
     // but the HEAD fallback for "Content-Type: application/pdf at a
     // URL that doesn't end in .pdf" costs a round-trip. We cache the
@@ -695,7 +714,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
       onUpdate('tool_call', { name: fnName, args: fnArgs });
       const _toolStart = Date.now();
-      const toolResult = await this.executeTool(tabId, fnName, fnArgs);
+      const toolResult = await this.executeTool(tabId, fnName, fnArgs, onUpdate);
       const _toolLatency = Date.now() - _toolStart;
       onUpdate('tool_result', { name: fnName, result: toolResult });
       const _runIdForTool = this.currentRunId.get(tabId);
@@ -1746,6 +1765,35 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    */
   abort(tabId) {
     this.abortFlags.set(tabId, true);
+    this._cancelClarifications(tabId, 'aborted by user');
+  }
+
+  /**
+   * Resolve a pending clarify() tool call with the user's answer. Called by
+   * background.js when the side panel posts `clarify_response`.
+   * Returns true if a matching pending clarification was found.
+   */
+  submitClarifyResponse(tabId, clarifyId, answer, source = 'user') {
+    const tabPending = this._pendingClarifications.get(tabId);
+    if (!tabPending) return false;
+    const entry = tabPending.get(clarifyId);
+    if (!entry) return false;
+    try { entry.resolve({ answer, source }); } catch {}
+    return true;
+  }
+
+  /**
+   * Cancel every pending clarify() on a tab. Used by abort() and
+   * clearConversation() to keep the agent loop from deadlocking when the
+   * user bails out mid-question.
+   */
+  _cancelClarifications(tabId, reason) {
+    const tabPending = this._pendingClarifications.get(tabId);
+    if (!tabPending) return;
+    for (const [, entry] of tabPending) {
+      try { entry.resolve({ cancelled: true, reason }); } catch {}
+    }
+    this._pendingClarifications.delete(tabId);
   }
 
   /**
@@ -1855,6 +1903,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * Clear conversation for a tab.
    */
   clearConversation(tabId) {
+    this._cancelClarifications(tabId, 'conversation cleared');
     this.conversations.delete(tabId);
     this.conversationModes.delete(tabId);
     this.conversationIds.delete(tabId); // next getConversation() mints a fresh id
@@ -2340,8 +2389,56 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   /**
    * Execute a tool call by dispatching to the content script or chrome APIs.
+   *
+   * `onUpdate` is optional and only consumed by tools that need to talk back
+   * to the side panel mid-call (currently just `clarify`, which pauses and
+   * waits for a user response). All other tools ignore it.
    */
-  async executeTool(tabId, name, args) {
+  async executeTool(tabId, name, args, onUpdate = null) {
+    // clarify: pause the run and wait for the user to answer. This tool does
+    // NOT touch the page — it's a meta-action that bridges agent ↔ user.
+    // The handler resolves when background.js routes the user's response via
+    // submitClarifyResponse(), or when abort/clearConversation cancels.
+    if (name === 'clarify') {
+      const question = String(args?.question || '').trim();
+      if (!question) {
+        return { success: false, error: 'clarify: `question` is required (a single sentence asking the user something specific).' };
+      }
+      const options = Array.isArray(args?.options)
+        ? args.options.map(s => String(s).slice(0, 200)).filter(Boolean).slice(0, 4)
+        : [];
+      const reason = args?.reason ? String(args.reason).slice(0, 300) : null;
+      const clarifyId = `clr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+      const tabPending = this._pendingClarifications.get(tabId) || new Map();
+      this._pendingClarifications.set(tabId, tabPending);
+
+      const responsePromise = new Promise((resolve) => {
+        tabPending.set(clarifyId, { resolve, ts: Date.now() });
+      });
+
+      if (typeof onUpdate === 'function') {
+        try {
+          onUpdate('clarify', { clarifyId, question, options, reason });
+        } catch { /* UI emit must never break the run */ }
+      }
+
+      const response = await responsePromise;
+      tabPending.delete(clarifyId);
+      if (tabPending.size === 0) this._pendingClarifications.delete(tabId);
+
+      if (response && response.cancelled) {
+        return { success: false, cancelled: true, reason: response.reason || 'clarify cancelled' };
+      }
+      const answer = String(response?.answer || '').trim();
+      return {
+        success: true,
+        answer,
+        source: response?.source || 'user',
+        note: 'This is a direct reply from the user. Treat it as authoritative for the question you asked; do not re-ask. Continue the task with this answer in mind.',
+      };
+    }
+
     // Tools handled by the background/service worker
     if (name === 'navigate') {
       let rawUrl = String(args.url || '').trim();
@@ -4479,6 +4576,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         params: args,
       });
       this._recordInteractionRect(tabId, name, response);
+      this._annotateCredentialField(name, response);
       return response;
     } catch (e) {
       // Content script might not be injected — try injecting it.
@@ -4496,11 +4594,48 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           params: args,
         });
         this._recordInteractionRect(tabId, name, response);
+        this._annotateCredentialField(name, response);
         return response;
       } catch (e2) {
         return { error: `Failed to communicate with page: ${e2.message}` };
       }
     }
+  }
+
+  /**
+   * If a successful set_field touched a credential/secret field, append a
+   * note to the tool result so the model is reminded not to echo the value
+   * in subsequent text/summaries. Detection lives in credential-fields.js
+   * (pure ESM, node-testable). Content scripts ship `fieldMeta`; we apply
+   * the policy here so the regex stays in one place.
+   */
+  _annotateCredentialField(toolName, response) {
+    if (toolName !== 'set_field') return;
+    if (!response || !response.success || !response.fieldMeta) return;
+    try {
+      const det = isCredentialField(response.fieldMeta);
+      if (!det.sensitive) return;
+      // Always set the flag — useful for trace review and downstream tooling
+      // — but only emit a model-facing `note` in STRICT mode. Rationale:
+      //  (1) webbrain runs small local models (qwen 3-30B class). They handle
+      //      "do X unless Y" instructions poorly — the loose hint either
+      //      collapses into a hard rule (the bug we're trying to avoid) or
+      //      gets ignored. Mid-run nuance buys us little and risks misfires.
+      //  (2) The done.summary tool description already carries the hygiene
+      //      hint, fired at point-of-use (when the model writes the summary).
+      //      A set_field note fires potentially many turns earlier and is
+      //      usually forgotten by summary time on small-model contexts.
+      //  (3) Saves ~80 tokens per credential field in contexts already
+      //      running near the budget on local models.
+      // In STRICT mode we DO emit, because the user has explicitly asked for
+      // paranoid behaviour throughout the run.
+      response.sensitiveField = true;
+      response.sensitiveReason = det.reason;
+      response.strictSecretMode = !!this.strictSecretMode;
+      if (this.strictSecretMode) {
+        response.note = CREDENTIAL_NOTE_STRICT;
+      }
+    } catch { /* never let detection failure break the tool call */ }
   }
 
   /**
@@ -4675,7 +4810,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode);
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     let finalResponse = '';
@@ -4893,7 +5028,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode);
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     // See processMessage — used to break the empty-response→nudge cycle.

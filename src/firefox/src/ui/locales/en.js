@@ -49,6 +49,11 @@ export default {
   'sp.continue_bar': 'Reached the step limit ({steps} steps). Want me to keep going?',
   'sp.continue_btn': 'Continue',
 
+  'sp.clarify.submit': 'Send',
+  'sp.clarify.input_placeholder': 'Type your answer…',
+  'sp.clarify.input_placeholder_with_options': 'Or type a different answer…',
+  'sp.clarify.your_answer': 'Your answer:',
+
   'sp.step.details': 'details',
   'sp.step.input_label': 'Input',
   'sp.step.result_label': 'Result',
@@ -109,6 +114,8 @@ export default {
   'st.display.auto_screenshot.every_step': 'Every step',
   'st.display.tracing.label': 'Record traces (for model comparison)',
   'st.display.tracing.desc_html': 'Persist every run (LLM requests, responses, tool calls, screenshots) into local IndexedDB so you can inspect and compare models side-by-side. Opens in a separate Traces tab. Off by default because it adds disk writes per step. <a href="traces.html" target="_blank" style="color:var(--accent);">Open Traces page →</a>',
+  'st.display.strict_secret.label': 'Strict secret handling',
+  'st.display.strict_secret.desc': 'Refuse to quote credentials (passwords, API keys, tokens, OTPs) in summaries or assistant text — even when you explicitly ask for them. Useful if you regularly share trace files or screen-share. Off by default: webbrain runs in your own browser, so by default the agent shows you values you ask for and just keeps `done` summaries tidy.',
   'st.display.allow_local_network.label': 'Allow agent to access local network',
   'st.display.allow_local_network.desc': 'Lets the agent\'s fetch_url tool reach loopback (127.0.0.1, localhost) and private/RFC1918 addresses (10.x, 192.168.x, 172.16–31.x). Useful for local dev servers, intranet tools, or self-hosted APIs. Off by default — when off, prompt-injected pages can\'t steer the agent into probing your local network. Cloud-metadata addresses (169.254.169.254) and *.internal/*.local hostnames stay blocked even when on.',
   'st.display.notify_sound.label': 'Completion sound',
