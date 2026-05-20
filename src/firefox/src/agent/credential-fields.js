@@ -34,11 +34,17 @@ export const SENSITIVE_NAME_RE = /pwd|password|passwd|secret|token|api[-_\s]?key
 
 export const SENSITIVE_AUTOCOMPLETE_RE = /^(current-password|new-password|one-time-code)$/i;
 
-// Loose note (default — webbrain is a personal-computer tool, the user is
-// the principal). Tells the model "this was a credential, prefer generic
-// phrasing in summaries by default — but if the user asks for the value
-// you can show it." Closes the trace-tidiness hole without making the
-// product refuse legitimate "show me my API key" requests.
+// Loose note — defined but agent.js does NOT currently emit it. Rationale:
+// webbrain's primary audience runs small local models (qwen / phi / similar,
+// 3-30B class) which handle conditional instructions ("do X unless Y")
+// poorly. The loose note collapsed into a hard rule on some models and got
+// ignored on others — net negative. We kept the constant exported because
+// (a) the parity test relies on it staying in sync between chrome/firefox,
+// and (b) if someone wants to re-introduce a soft hint (maybe gated on
+// model size or a separate setting) the vetted wording is right here.
+// The hygiene message itself still lives in the `done.summary` tool
+// description, fired at point-of-use when the model writes the summary —
+// that's the one model surface where the hint reliably lands.
 export const CREDENTIAL_NOTE_LOOSE = "You just filled a sensitive field (password / API key / token / OTP / similar). The value is in the conversation history above if you need to reference it. By default, prefer generic phrasing in `done` summaries and intermediate prose ('the password', 'the provided API key') — that keeps trace logs and the side-panel transcript tidy. If the user explicitly asks you to show, quote, or display the value, do so: that's the answer they wanted.";
 
 // Strict note — opt-in via Settings → "Strict secret handling". Use this

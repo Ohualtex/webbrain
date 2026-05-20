@@ -1,6 +1,6 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT } from './tools.js';
 import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
-import { isCredentialField, CREDENTIAL_NOTE_LOOSE, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
+import { isCredentialField, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
 import { cdpClient } from '../cdp/cdp-client.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
@@ -4614,11 +4614,26 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!response || !response.success || !response.fieldMeta) return;
     try {
       const det = isCredentialField(response.fieldMeta);
-      if (det.sensitive) {
-        response.note = this.strictSecretMode ? CREDENTIAL_NOTE_STRICT : CREDENTIAL_NOTE_LOOSE;
-        response.sensitiveField = true;
-        response.sensitiveReason = det.reason;
-        response.strictSecretMode = !!this.strictSecretMode;
+      if (!det.sensitive) return;
+      // Always set the flag — useful for trace review and downstream tooling
+      // — but only emit a model-facing `note` in STRICT mode. Rationale:
+      //  (1) webbrain runs small local models (qwen 3-30B class). They handle
+      //      "do X unless Y" instructions poorly — the loose hint either
+      //      collapses into a hard rule (the bug we're trying to avoid) or
+      //      gets ignored. Mid-run nuance buys us little and risks misfires.
+      //  (2) The done.summary tool description already carries the hygiene
+      //      hint, fired at point-of-use (when the model writes the summary).
+      //      A set_field note fires potentially many turns earlier and is
+      //      usually forgotten by summary time on small-model contexts.
+      //  (3) Saves ~80 tokens per credential field in contexts already
+      //      running near the budget on local models.
+      // In STRICT mode we DO emit, because the user has explicitly asked for
+      // paranoid behaviour throughout the run.
+      response.sensitiveField = true;
+      response.sensitiveReason = det.reason;
+      response.strictSecretMode = !!this.strictSecretMode;
+      if (this.strictSecretMode) {
+        response.note = CREDENTIAL_NOTE_STRICT;
       }
     } catch { /* never let detection failure break the tool call */ }
   }

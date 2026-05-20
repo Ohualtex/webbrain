@@ -1,6 +1,6 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
 import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
-import { isCredentialField, CREDENTIAL_NOTE_LOOSE, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
+import { isCredentialField, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
   fetchUrl,
@@ -2185,11 +2185,18 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (!response || !response.success || !response.fieldMeta) return;
     try {
       const det = isCredentialField(response.fieldMeta);
-      if (det.sensitive) {
-        response.note = this.strictSecretMode ? CREDENTIAL_NOTE_STRICT : CREDENTIAL_NOTE_LOOSE;
-        response.sensitiveField = true;
-        response.sensitiveReason = det.reason;
-        response.strictSecretMode = !!this.strictSecretMode;
+      if (!det.sensitive) return;
+      // Always set the flag — useful for trace review and downstream tooling
+      // — but only emit a model-facing `note` in STRICT mode. See chrome/
+      // agent.js for rationale: mid-run nuanced hints confuse small models;
+      // the done.summary description already carries the hygiene hint at
+      // point-of-use. Strict mode is the explicit opt-in for paranoid
+      // behaviour throughout the run.
+      response.sensitiveField = true;
+      response.sensitiveReason = det.reason;
+      response.strictSecretMode = !!this.strictSecretMode;
+      if (this.strictSecretMode) {
+        response.note = CREDENTIAL_NOTE_STRICT;
       }
     } catch { /* never let detection failure break the tool call */ }
   }
