@@ -549,12 +549,19 @@ function wrapCollapsibleCard(id, config, isActive, bodyHtml) {
 
   const header = document.createElement('div');
   header.className = 'provider-header provider-header-clickable';
+  // Model name appears in the collapsed header as small mono-font text — the
+  // headline question for any AI tool is "what model is this set to?", and
+  // making the user expand the card to find out is bad UX. Empty model (e.g.
+  // LM Studio defaults to whatever's loaded) just renders nothing rather
+  // than a placeholder.
+  const modelStr = (config.model && String(config.model).trim()) || '';
   header.innerHTML = `
     <div class="provider-header-left">
       <span class="provider-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
       <span class="provider-name">${escapeHtml(config.label || id)}</span>
       <span class="provider-type">${escapeHtml(config.type)}</span>
       ${config.category ? `<span class="provider-category-badge provider-category-${escapeHtml(config.category)}">${escapeHtml(config.category)}</span>` : ''}
+      ${modelStr ? `<span class="provider-model" title="${escapeHtml(modelStr)}">${escapeHtml(modelStr)}</span>` : ''}
     </div>
     ${isActive ? `<span style="color:var(--accent);font-size:11px;font-weight:600">${escapeHtml(t('st.providers.active'))}</span>` : ''}
   `;

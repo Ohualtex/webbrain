@@ -135,6 +135,21 @@
     .provider-category-cloud  { background: rgba(108, 99, 255, 0.15); color: #a8a3ff; }
     .provider-category-router { background: rgba(255, 152, 0, 0.15); color: #ffc870; }
 
+    /* Configured model — shown in the collapsed-card header so the user can
+       see at a glance which model is set for each provider. Mono font
+       signals "this is an identifier", and dimming keeps it from competing
+       with the provider's own name. max-width + ellipsis so long
+       OpenRouter-style names don't push the active-indicator off the row. */
+    .provider-model {
+      color: var(--text2);
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      max-width: 240px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .provider-filter-bar {
       display: flex;
       gap: 6px;
