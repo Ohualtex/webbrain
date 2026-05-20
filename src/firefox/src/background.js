@@ -33,6 +33,12 @@ async function loadSiteAdapters() {
 }
 loadSiteAdapters();
 
+async function loadStrictSecretMode() {
+  const stored = await browser.storage.local.get('strictSecretMode');
+  if (stored.strictSecretMode != null) agent.strictSecretMode = !!stored.strictSecretMode;
+}
+loadStrictSecretMode();
+
 async function loadProfile() {
   const stored = await browser.storage.local.get(['profileEnabled', 'profileText']);
   if (stored.profileEnabled != null) agent.profileEnabled = !!stored.profileEnabled;
@@ -60,6 +66,11 @@ browser.storage.onChanged.addListener((changes) => {
   if (changes.useSiteAdapters) {
     agent.useSiteAdapters = changes.useSiteAdapters.newValue;
     refreshPrompts = true;
+  }
+  if (changes.strictSecretMode) {
+    agent.strictSecretMode = !!changes.strictSecretMode.newValue;
+    // The setting only flips the `done` tool description and the credential
+    // note text — both rebuild at turn-start, so no system-prompt refresh.
   }
   if (changes.profileEnabled) {
     agent.profileEnabled = !!changes.profileEnabled.newValue;

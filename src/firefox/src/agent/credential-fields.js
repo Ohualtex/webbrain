@@ -34,7 +34,24 @@ export const SENSITIVE_NAME_RE = /pwd|password|passwd|secret|token|api[-_\s]?key
 
 export const SENSITIVE_AUTOCOMPLETE_RE = /^(current-password|new-password|one-time-code)$/i;
 
-export const CREDENTIAL_NOTE = "You just filled a sensitive field (password / API key / token / OTP / similar). Do NOT quote this value in any subsequent assistant text, tool-call arguments, or `done` summaries — including when summarizing what you did. Refer to it generically: 'the password', 'the provided API key', 'the OTP', 'the credential the user gave'. This applies even though the user may have typed the value directly into the chat.";
+// Loose note (default — webbrain is a personal-computer tool, the user is
+// the principal). Tells the model "this was a credential, prefer generic
+// phrasing in summaries by default — but if the user asks for the value
+// you can show it." Closes the trace-tidiness hole without making the
+// product refuse legitimate "show me my API key" requests.
+export const CREDENTIAL_NOTE_LOOSE = "You just filled a sensitive field (password / API key / token / OTP / similar). The value is in the conversation history above if you need to reference it. By default, prefer generic phrasing in `done` summaries and intermediate prose ('the password', 'the provided API key') — that keeps trace logs and the side-panel transcript tidy. If the user explicitly asks you to show, quote, or display the value, do so: that's the answer they wanted.";
+
+// Strict note — opt-in via Settings → "Strict secret handling". Use this
+// when the user regularly shares trace files or screen-shares and wants a
+// hard guarantee that secrets never appear in summaries. The model refuses
+// to quote credentials in any assistant text in this mode, even when
+// asked.
+export const CREDENTIAL_NOTE_STRICT = "You just filled a sensitive field (password / API key / token / OTP / similar). STRICT MODE IS ON: do NOT quote this value in any subsequent assistant text, tool-call arguments, or `done` summaries — including when the user explicitly asks you to show it. Refer to it generically: 'the password', 'the provided API key', 'the OTP', 'the credential the user gave'. If the user wants to see the value, the answer is 'I filled the field' or 'the value is in the form on this page', not the literal string. This applies even though the user may have typed the value directly into the chat.";
+
+// Back-compat: existing tests reference CREDENTIAL_NOTE. Keep it as an
+// alias for the loose variant (the new default). The strict variant is
+// surfaced explicitly via CREDENTIAL_NOTE_STRICT when the setting is on.
+export const CREDENTIAL_NOTE = CREDENTIAL_NOTE_LOOSE;
 
 /**
  * @param {{tag?:string, type?:string, name?:string, id?:string,

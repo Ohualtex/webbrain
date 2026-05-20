@@ -1,6 +1,6 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT } from './tools.js';
 import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
-import { isCredentialField, CREDENTIAL_NOTE } from './credential-fields.js';
+import { isCredentialField, CREDENTIAL_NOTE_LOOSE, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
   fetchUrl,
@@ -41,6 +41,9 @@ export class Agent {
     // signup forms). Loaded in background.js and refreshed live on change.
     this.profileEnabled = false;
     this.profileText = '';
+    // Strict secret-handling mode — see chrome/agent.js for rationale.
+    // Default off; user opts in via Settings → "Strict secret handling".
+    this.strictSecretMode = false;
     this.recentCalls = new Map();
     this.loopNudges = new Map();
     this.healthyCallsSinceLoop = new Map();
@@ -2183,9 +2186,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       const det = isCredentialField(response.fieldMeta);
       if (det.sensitive) {
-        response.note = CREDENTIAL_NOTE;
+        response.note = this.strictSecretMode ? CREDENTIAL_NOTE_STRICT : CREDENTIAL_NOTE_LOOSE;
         response.sensitiveField = true;
         response.sensitiveReason = det.reason;
+        response.strictSecretMode = !!this.strictSecretMode;
       }
     } catch { /* never let detection failure break the tool call */ }
   }
@@ -2333,7 +2337,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     messages.push(enriched);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode);
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     let finalResponse = '';
@@ -2537,7 +2541,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     messages.push(enriched);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode);
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     // See processMessage — used to break the empty-response→nudge cycle.

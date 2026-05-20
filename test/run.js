@@ -57,15 +57,32 @@ const { bumpSemver, rewriteVersionInJsonText, rewriteVersionByAnchor, isReleaseB
   'file://' + path.join(ROOT, 'scripts/bump-version.mjs').replace(/\\/g, '/')
 );
 
+// tools.js — pure ESM. We import getToolsForMode from each side so we can
+// verify the strict/loose `done` description swap.
+const { getToolsForMode: getToolsForModeCh } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/agent/tools.js').replace(/\\/g, '/')
+);
+const { getToolsForMode: getToolsForModeFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/agent/tools.js').replace(/\\/g, '/')
+);
+
 // credential-fields.js — pure ESM detector, no DOM. Both chrome and
-// firefox copies are imported so we assert the regex doesn't drift.
-const { isCredentialField, SENSITIVE_NAME_RE, CREDENTIAL_NOTE } = await import(
+// firefox copies are imported so we assert the regex + notes don't drift.
+const {
+  isCredentialField,
+  SENSITIVE_NAME_RE,
+  CREDENTIAL_NOTE,
+  CREDENTIAL_NOTE_LOOSE,
+  CREDENTIAL_NOTE_STRICT,
+} = await import(
   'file://' + path.join(ROOT, 'src/chrome/src/agent/credential-fields.js').replace(/\\/g, '/')
 );
 const {
   isCredentialField: isCredentialFieldFx,
   SENSITIVE_NAME_RE: SENSITIVE_NAME_RE_FX,
   CREDENTIAL_NOTE: CREDENTIAL_NOTE_FX,
+  CREDENTIAL_NOTE_LOOSE: CREDENTIAL_NOTE_LOOSE_FX,
+  CREDENTIAL_NOTE_STRICT: CREDENTIAL_NOTE_STRICT_FX,
 } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/agent/credential-fields.js').replace(/\\/g, '/')
 );
@@ -1225,6 +1242,64 @@ test('parity: chrome and firefox copies are identical', () => {
   assert.equal(SENSITIVE_NAME_RE.source, SENSITIVE_NAME_RE_FX.source);
   assert.equal(SENSITIVE_NAME_RE.flags, SENSITIVE_NAME_RE_FX.flags);
   assert.equal(CREDENTIAL_NOTE, CREDENTIAL_NOTE_FX);
+  assert.equal(CREDENTIAL_NOTE_LOOSE, CREDENTIAL_NOTE_LOOSE_FX);
+  assert.equal(CREDENTIAL_NOTE_STRICT, CREDENTIAL_NOTE_STRICT_FX);
+});
+
+test('default CREDENTIAL_NOTE is the loose variant (personal-tool default)', () => {
+  // Webbrain runs on the user\'s own machine; loose is the default so users
+  // can ask "show me my API key" and have it work. Strict is opt-in via
+  // Settings → "Strict secret handling".
+  assert.equal(CREDENTIAL_NOTE, CREDENTIAL_NOTE_LOOSE);
+  assert.notEqual(CREDENTIAL_NOTE_LOOSE, CREDENTIAL_NOTE_STRICT);
+});
+
+test('loose note permits quoting on explicit user request; strict forbids', () => {
+  // Sanity checks on the rhetorical posture — not exact wording. The loose
+  // note must mention that the user can ask for the value; the strict note
+  // must say no.
+  assert.match(CREDENTIAL_NOTE_LOOSE, /user .*explicit|explicit.*user|if the user/i);
+  assert.match(CREDENTIAL_NOTE_LOOSE, /show|quote|display/i);
+  assert.match(CREDENTIAL_NOTE_STRICT, /do NOT|never/i);
+  assert.match(CREDENTIAL_NOTE_STRICT, /strict/i);
+});
+
+test('getToolsForMode: default `done` description is the loose hygiene hint', () => {
+  for (const getTools of [getToolsForModeCh, getToolsForModeFx]) {
+    const tools = getTools('act');
+    const done = tools.find(t => t.function.name === 'done');
+    assert.ok(done, '`done` tool must be present in act mode');
+    assert.match(done.function.description, /hygiene|tidy|prefer generic/i);
+    // Loose default must NOT contain hard prohibition language.
+    assert.doesNotMatch(done.function.description, /Must NOT contain|never include passwords/);
+    // Summary param description stays minimal in loose mode.
+    assert.equal(done.function.parameters.properties.summary.description, 'Summary of what was accomplished.');
+  }
+});
+
+test('getToolsForMode: strictSecretMode swaps in the strict `done` description', () => {
+  for (const getTools of [getToolsForModeCh, getToolsForModeFx]) {
+    const loose = getTools('act');
+    const strict = getTools('act', { strictSecretMode: true });
+    const looseDone = loose.find(t => t.function.name === 'done');
+    const strictDone = strict.find(t => t.function.name === 'done');
+    assert.notEqual(looseDone.function.description, strictDone.function.description);
+    assert.match(strictDone.function.description, /strict mode|never include passwords|Must NOT/i);
+    assert.match(strictDone.function.parameters.properties.summary.description, /Must NOT contain/);
+    // Other tools must be untouched.
+    const looseNames = loose.map(t => t.function.name).sort();
+    const strictNames = strict.map(t => t.function.name).sort();
+    assert.deepEqual(looseNames, strictNames);
+  }
+});
+
+test('getToolsForMode: strictSecretMode works in ask mode too', () => {
+  for (const getTools of [getToolsForModeCh, getToolsForModeFx]) {
+    const strict = getTools('ask', { strictSecretMode: true });
+    const done = strict.find(t => t.function.name === 'done');
+    assert.ok(done, '`done` must be available in ask mode');
+    assert.match(done.function.description, /strict mode/i);
+  }
 });
 
 test('detects <input type="password">', () => {

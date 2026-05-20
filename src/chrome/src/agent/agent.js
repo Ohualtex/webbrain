@@ -1,6 +1,6 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT } from './tools.js';
 import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
-import { isCredentialField, CREDENTIAL_NOTE } from './credential-fields.js';
+import { isCredentialField, CREDENTIAL_NOTE_LOOSE, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
 import { cdpClient } from '../cdp/cdp-client.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
 import {
@@ -47,6 +47,17 @@ export class Agent {
     // _enrichUserMessageWithCurrentPage because they're URL-specific; the
     // universal preamble rides along with the base system prompt.
     this.useSiteAdapters = true;
+
+    // Strict secret-handling mode. When true, the `done` tool description
+    // adds a hard prohibition on quoting credentials in summaries and the
+    // post-set_field credential note tells the model to never echo the
+    // value. When false (the default — this is a personal-computer tool,
+    // not a third-party deployment), the model gets soft hygiene guidance
+    // ("prefer generic phrasing unless the user asks for the value") but
+    // can quote credentials when the user explicitly asks for them ("show
+    // me my recovery codes", "what's my API key on this page"). Toggle
+    // lives in Settings → "Strict secret handling". Loaded in background.js.
+    this.strictSecretMode = false;
 
     // Profile auto-fill: when enabled, the user's profile text (name,
     // email, throwaway password, etc.) is appended to the system prompt
@@ -4604,9 +4615,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       const det = isCredentialField(response.fieldMeta);
       if (det.sensitive) {
-        response.note = CREDENTIAL_NOTE;
+        response.note = this.strictSecretMode ? CREDENTIAL_NOTE_STRICT : CREDENTIAL_NOTE_LOOSE;
         response.sensitiveField = true;
         response.sensitiveReason = det.reason;
+        response.strictSecretMode = !!this.strictSecretMode;
       }
     } catch { /* never let detection failure break the tool call */ }
   }
@@ -4783,7 +4795,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode);
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     let finalResponse = '';
@@ -5001,7 +5013,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode);
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     // See processMessage — used to break the empty-response→nudge cycle.

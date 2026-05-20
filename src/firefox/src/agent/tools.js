@@ -297,11 +297,11 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'done',
-      description: 'Signal that the task is FULLY complete. Only call this when you have successfully accomplished the user\'s request OR have exhausted every reasonable alternative (at least 3-4 different approaches). Provide a summary of what was accomplished. Do NOT call this prematurely — keep trying different strategies if the current one fails. CREDENTIALS: never include passwords, API keys, tokens, OTPs, recovery codes, application-password strings, or any value the user typed into a password field — in the summary. Refer to them generically ("logged in with the provided credentials", "API key updated", "OTP submitted"). This rule applies even if the user typed the value directly into the chat: the summary is rendered to the user and persisted to trace logs that may be shared.',
+      description: 'Signal that the task is FULLY complete. Only call this when you have successfully accomplished the user\'s request OR have exhausted every reasonable alternative (at least 3-4 different approaches). Provide a summary of what was accomplished. Do NOT call this prematurely — keep trying different strategies if the current one fails. Credentials hygiene: when summarizing, prefer generic references ("logged in with the provided password", "API key updated") over echoing the literal value — keeps summaries tidy and avoids needlessly persisting secrets in trace logs. If the user explicitly asked you to show them a value (a recovery code, an API key on the page, etc.), including the value IS the answer and you should include it.',
       parameters: {
         type: 'object',
         properties: {
-          summary: { type: 'string', description: 'Summary of what was accomplished. Must NOT contain credentials, passwords, API keys, tokens, OTPs, or any secret the user provided or that you read from a password field.' },
+          summary: { type: 'string', description: 'Summary of what was accomplished.' },
         },
         required: ['summary'],
       },
@@ -569,13 +569,37 @@ export const ASK_ONLY_TOOLS = [
 export const AGENT_TOOL_NAMES = new Set(AGENT_TOOLS.map(t => t.function.name));
 
 /**
- * Get tools filtered by mode.
+ * Strict-mode replacement for the `done` tool. See chrome/agent/tools.js for
+ * the rationale — webbrain runs as a personal-computer tool so the default
+ * is LOOSE (tidy summaries, but quote secrets when the user asks). Strict
+ * mode is opt-in via Settings → "Strict secret handling".
  */
-export function getToolsForMode(mode) {
-  if (mode === 'ask') {
-    return AGENT_TOOLS.filter(t => ASK_ONLY_TOOLS.includes(t.function.name));
-  }
-  return AGENT_TOOLS; // act mode gets everything
+const DONE_TOOL_STRICT = {
+  type: 'function',
+  function: {
+    name: 'done',
+    description: 'Signal that the task is FULLY complete. Only call this when you have successfully accomplished the user\'s request OR have exhausted every reasonable alternative (at least 3-4 different approaches). Provide a summary of what was accomplished. Do NOT call this prematurely — keep trying different strategies if the current one fails. CREDENTIALS (strict mode is ON): never include passwords, API keys, tokens, OTPs, recovery codes, application-password strings, or any value the user typed into a password field — in the summary. Refer to them generically ("logged in with the provided credentials", "API key updated", "OTP submitted") even if the user explicitly asked you to display the value: in strict mode the answer is "I filled the field with the value you provided" or "the API key on this page is in the field labeled X", not the literal string. This rule applies even if the user typed the value directly into the chat.',
+    parameters: {
+      type: 'object',
+      properties: {
+        summary: { type: 'string', description: 'Summary of what was accomplished. Must NOT contain credentials, passwords, API keys, tokens, OTPs, or any secret the user provided or that you read from a password field.' },
+      },
+      required: ['summary'],
+    },
+  },
+};
+
+/**
+ * Get tools filtered by mode.
+ *
+ * `opts.strictSecretMode` swaps in the strict `done` description.
+ */
+export function getToolsForMode(mode, opts = {}) {
+  const base = (mode === 'ask')
+    ? AGENT_TOOLS.filter(t => ASK_ONLY_TOOLS.includes(t.function.name))
+    : AGENT_TOOLS;
+  if (!opts.strictSecretMode) return base;
+  return base.map(t => (t.function.name === 'done' ? DONE_TOOL_STRICT : t));
 }
 
 export const SYSTEM_PROMPT_ASK = `You are WebBrain, a helpful AI browser assistant running in Ask mode.
