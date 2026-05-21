@@ -136,6 +136,36 @@ export async function transcribeAudio(providers, audioBlob, opts = {}) {
   if (!res.ok) {
     let detail = '';
     try { detail = (await res.text()).slice(0, 300); } catch {}
+
+    // Some OpenAI-compatible chat servers (LM Studio < 0.3, llama.cpp
+    // without a Whisper model loaded, certain Together/Fireworks configs)
+    // return 415 with a body like
+    //   {"error":"Unsupported Media Type. POST requests must use 'application/json'"}
+    // when hit on /v1/audio/transcriptions. That message is the server
+    // saying "I'm a chat-only API, I don't host an audio endpoint" — even
+    // though the same /v1 base accepts chat completions. The raw HTTP
+    // dump is useless to the user; translate it into something they can
+    // act on. (OpenAI's own 415 — when the file MIME is wrong — looks
+    // different and is fixed separately by the audio/webm re-wrap above.)
+    const isChatOnlyEndpoint =
+      res.status === 415 &&
+      /application\/json|must.*use.*json/i.test(detail);
+    if (isChatOnlyEndpoint) {
+      const isLocal = picked.id === 'lmstudio' || picked.id === 'llamacpp';
+      return {
+        ok: false,
+        error:
+          `Transcription failed: ${picked.id} (${picked.baseUrl}) doesn't host a Whisper transcription endpoint — its server only accepts JSON, ` +
+          `not multipart audio uploads. ` +
+          (isLocal
+            ? `Either load a GGUF Whisper model in that server (LM Studio 0.3+ and recent llama.cpp builds support whisper.cpp models), ` +
+              `or add an API key for OpenAI (whisper-1) or Groq (whisper-large-v3) in Settings → Providers — those host Whisper natively ` +
+              `and will be auto-picked when configured.`
+            : `Add an API key for OpenAI (whisper-1) or Groq (whisper-large-v3) in Settings → Providers — webbrain auto-picks the first ` +
+              `Whisper-capable provider, so a configured OpenAI key takes priority.`),
+      };
+    }
+
     return {
       ok: false,
       error: `Transcription ${picked.id} HTTP ${res.status}: ${detail || res.statusText}`,
