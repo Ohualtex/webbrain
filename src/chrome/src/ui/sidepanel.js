@@ -441,6 +441,16 @@ async function sendMessage() {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.target !== 'sidepanel' || msg.action !== 'agent_update') return;
 
+  // Drop updates that belong to a different tab's run. agent_update is a
+  // window-wide broadcast (chrome.runtime.sendMessage has no per-tab
+  // targeting from the service worker), and the side panel mounts a
+  // fresh instance on every tab — so without this guard, an agent run
+  // still in flight on tab A would render its "thinking…" / tool steps
+  // / final text into a brand-new Cmd+T tab B's panel the moment B's
+  // panel finished mounting. `msg.tabId == null` keeps backward compat
+  // for any in-flight events from a pre-tabId background build.
+  if (msg.tabId != null && msg.tabId !== currentTabId) return;
+
   const { type, data } = msg;
 
   switch (type) {

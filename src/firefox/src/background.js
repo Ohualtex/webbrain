@@ -280,6 +280,7 @@ async function handleMessage(msg, sender) {
           browser.runtime.sendMessage({
             target: 'sidepanel',
             action: 'agent_update',
+            tabId,          // see sidepanel onMessage — filters out cross-tab leak
             type,
             data,
           }).catch(() => {});
@@ -304,6 +305,7 @@ async function handleMessage(msg, sender) {
           browser.runtime.sendMessage({
             target: 'sidepanel',
             action: 'agent_update',
+            tabId,          // see sidepanel onMessage — filters out cross-tab leak
             type,
             data,
           }).catch(() => {});
@@ -326,6 +328,7 @@ async function handleMessage(msg, sender) {
           browser.runtime.sendMessage({
             target: 'sidepanel',
             action: 'agent_update',
+            tabId,          // see sidepanel onMessage — filters out cross-tab leak
             type,
             data,
           }).catch(() => {});

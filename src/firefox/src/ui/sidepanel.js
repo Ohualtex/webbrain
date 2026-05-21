@@ -290,6 +290,15 @@ async function sendMessage() {
 browser.runtime.onMessage.addListener((msg) => {
   if (msg.target !== 'sidepanel' || msg.action !== 'agent_update') return;
 
+  // Drop updates that belong to a different tab's run. agent_update is a
+  // window-wide broadcast (browser.runtime.sendMessage has no per-tab
+  // targeting from the background script), and the side panel can render
+  // for any tab — so without this guard, an agent run still in flight on
+  // tab A would spill its "thinking…" / tool steps / final text into a
+  // brand-new Ctrl+T tab B the moment B becomes active. `msg.tabId == null`
+  // keeps backward compat for any in-flight events from a pre-tabId build.
+  if (msg.tabId != null && msg.tabId !== currentTabId) return;
+
   const { type, data } = msg;
 
   switch (type) {
