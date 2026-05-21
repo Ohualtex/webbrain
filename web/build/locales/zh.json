@@ -201,5 +201,7 @@
   "footer.link_privacy": "隐私政策",
   "footer.link_report_bug": "报告 Bug",
   "footer.link_license": "MIT 许可",
-  "footer.link_press_releases": "新闻稿"
+  "footer.link_press_releases": "新闻稿",
+  "features.captcha.title": "Optional CAPTCHA Solver",
+  "features.captcha.desc": "Plug in a <a href=\"https://capsolver.com\" target=\"_blank\" rel=\"noopener\" style=\"color:var(--accent);text-decoration:none;\">CapSolver</a> API key and the agent will auto-solve reCAPTCHA v2/v3, hCaptcha, and Cloudflare Turnstile when they block a step — instead of stopping to ask. Off by default, BYO key, no captcha service is shipped or contacted unless you turn it on."
 }
