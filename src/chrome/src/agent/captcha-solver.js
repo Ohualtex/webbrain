@@ -32,10 +32,39 @@ async function postJson(path, body) {
   return await res.json();
 }
 
+// Wrap a CapSolver error response in a friendlier message.
+//
+// CapSolver returns several different error codes when it refuses a sitekey
+// it considers a public TEST/DEMO key (Google's recaptcha demo, the
+// hcaptcha.com demo, etc.). Two we've actually hit in the wild:
+//
+//   ERROR_WRONG_CAPTCHA_TYPE  ("wrong captcha type")
+//   ERROR_INVALID_TASK_DATA   ("We don't support this service.")
+//
+// Both translate, in practice, to "this is a public test sitekey, real
+// captcha solvers won't farm it because no genuine token would come back".
+// The vendor-side description on its own is opaque, so we tack on a one-
+// liner pointing the model (and the user, via the trace) at the real
+// remedy: try on a production site.
+function capsolverError(prefix, body) {
+  const desc = body.errorDescription || body.errorCode || 'unknown error';
+  const code = String(body.errorCode || '');
+  const looksLikeDemoRejection =
+    code === 'ERROR_WRONG_CAPTCHA_TYPE' ||
+    code === 'ERROR_INVALID_TASK_DATA' ||
+    /don['’]?t support|not support|unsupported/i.test(desc);
+  if (looksLikeDemoRejection) {
+    return new Error(
+      `${prefix}: ${desc}. This usually means CapSolver refused the sitekey — most often because it is a public TEST/DEMO key (Google's recaptcha demo, hcaptcha.com/demo, etc.) that no captcha-solving service will farm. Try the same flow on a real production site.`
+    );
+  }
+  return new Error(`${prefix}: ${desc}`);
+}
+
 export async function getBalance(apiKey) {
   if (!apiKey) throw new Error('No CapSolver API key configured.');
   const res = await postJson('/getBalance', { clientKey: apiKey });
-  if (res.errorId) throw new Error(`CapSolver: ${res.errorDescription || res.errorCode}`);
+  if (res.errorId) throw capsolverError('CapSolver', res);
   return { balance: res.balance, packages: res.packages || [] };
 }
 
@@ -45,9 +74,7 @@ async function createTask(apiKey, task) {
     appId: DEFAULT_APP_ID,
     task,
   });
-  if (res.errorId) {
-    throw new Error(`CapSolver createTask: ${res.errorDescription || res.errorCode}`);
-  }
+  if (res.errorId) throw capsolverError('CapSolver createTask', res);
   if (!res.taskId) throw new Error('CapSolver createTask returned no taskId.');
   return res.taskId;
 }
@@ -56,9 +83,7 @@ async function pollTaskResult(apiKey, taskId, { timeoutMs = POLL_TIMEOUT_MS } = 
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     const res = await postJson('/getTaskResult', { clientKey: apiKey, taskId });
-    if (res.errorId) {
-      throw new Error(`CapSolver getTaskResult: ${res.errorDescription || res.errorCode}`);
-    }
+    if (res.errorId) throw capsolverError('CapSolver getTaskResult', res);
     if (res.status === 'ready') return res.solution || {};
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
   }
@@ -232,6 +257,48 @@ function detectCaptchaInPage() {
     if (d.querySelector('script[src*="challenges.cloudflare.com/turnstile"]') ||
         d.querySelector('iframe[src*="challenges.cloudflare.com"]')) {
       return { type: 'turnstile_challenge', websiteKey: null, note: 'Cloudflare interstitial detected but no sitekey was exposed in the DOM. Pass websiteKey explicitly if you have it.' };
+    }
+  }
+
+  // ── URL-string fallback ─────────────────────────────────────────────
+  // The DOM-element checks above cover the vast majority of production
+  // integrations (`<div class="h-captcha" data-sitekey="...">` etc.).
+  // Some pages — notably the official hcaptcha.com/demo and a handful of
+  // SPA integrations that mount the widget via JS — never put the sitekey
+  // on a host element in the main DOM. The sitekey IS still leaking
+  // through iframe `src=` and script `src=` URLs, though, because the
+  // widget script fetches its iframe with a `?sitekey=` (hCaptcha,
+  // Turnstile) or `?k=` (reCAPTCHA) query parameter. iframe.src and
+  // script.src are readable across origins from the parent page, so we
+  // can scrape them even when the widget renders cross-origin.
+  const urlCandidates = [];
+  for (const el of document.querySelectorAll('iframe[src], script[src]')) {
+    try { if (el.src) urlCandidates.push(el.src); } catch {}
+  }
+  for (const url of urlCandidates) {
+    // hCaptcha
+    if (/hcaptcha\.com/i.test(url)) {
+      const m = url.match(/[?&#][^?&#]*?sitekey=([a-zA-Z0-9_-]{6,})/);
+      if (m) {
+        return { type: 'hcaptcha', websiteKey: m[1], detectedVia: 'url' };
+      }
+    }
+    // Cloudflare Turnstile
+    if (/challenges\.cloudflare\.com\/turnstile/i.test(url)) {
+      const m = url.match(/[?&#][^?&#]*?sitekey=([a-zA-Z0-9_-]{6,})/);
+      if (m) {
+        return { type: 'turnstile', websiteKey: m[1], detectedVia: 'url' };
+      }
+    }
+    // reCAPTCHA v2 — the anchor iframe carries the sitekey in `k=` and
+    // visible (checkbox) widgets are the only kind that produce this URL
+    // pattern (v3 is invisible and would have surfaced via the DOM scan
+    // above if a host element existed).
+    if (/recaptcha\/(api2|enterprise)\/anchor/i.test(url)) {
+      const m = url.match(/[?&#]k=([a-zA-Z0-9_-]{6,})/);
+      if (m) {
+        return { type: 'recaptcha_v2', websiteKey: m[1], detectedVia: 'url' };
+      }
     }
   }
   return null;
