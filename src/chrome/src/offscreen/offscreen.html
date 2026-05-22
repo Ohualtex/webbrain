@@ -3,7 +3,14 @@
   Offscreen document for WebBrain.
   - Local-network fetch proxy (PNA workaround).
   - WebGPU + ONNX LLM runtime via vendored @huggingface/transformers.
+  - Tab recorder (recorder.js).
+
   type="module" is required so offscreen.js can dynamically import the
-  vendored library.
+  vendored library. NOTE: the vendored transformers.web.min.js has its
+  internal `import("onnxruntime-web/webgpu")` bare specifier rewritten
+  to a relative path during vendoring — see
+  src/chrome/vendor/transformers/README.md. We deliberately do NOT use a
+  <script type="importmap"> here because the MV3 CSP (`script-src 'self'`)
+  may block inline import maps on some Chrome versions.
 -->
 <html><head><script type="module" src="offscreen.js"></script><script src="recorder.js"></script></head></html>

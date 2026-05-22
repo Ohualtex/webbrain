@@ -9,15 +9,34 @@ fresh `git clone` — no per-developer vendoring step.
 
 | File | Source | Purpose |
 | --- | --- | --- |
-| `transformers.web.min.js` | `node_modules/@huggingface/transformers/dist/` | Browser ESM bundle of the library |
-| `ort-wasm-simd-threaded.jsep.mjs` | `node_modules/@huggingface/transformers/dist/` | JS loader for the WebGPU WASM blob |
-| `ort-wasm-simd-threaded.jsep.wasm` | `node_modules/onnxruntime-web/dist/` | The actual WebGPU-enabled ONNX runtime (~25MB) |
+| `transformers.web.min.js` | `node_modules/@huggingface/transformers/dist/` | Browser ESM bundle (patched, see below) |
+| `ort.webgpu.bundle.min.mjs` | `node_modules/onnxruntime-web/dist/` | WebGPU backend, fully self-bundled (~111KB) |
+| `ort-wasm-simd-threaded.jsep.mjs` | `node_modules/@huggingface/transformers/dist/` | WASM-CPU fallback loader |
+| `ort-wasm-simd-threaded.jsep.wasm` | `node_modules/onnxruntime-web/dist/` | WASM-CPU runtime (~25MB) |
 
 The `.web.min.js` build is the browser ESM variant — not
 `transformers.min.js` (dual ESM/CJS), not `transformers.node.*`. The
 import path in `src/offscreen/offscreen.js` is hard-coded to
 `transformers.web.min.js`; if you change which build is vendored, update
 that import.
+
+### Patch: rewrite the bare specifier
+
+The upstream `transformers.web.min.js` contains a dynamic
+`import("onnxruntime-web/webgpu")` — a bare module specifier that the
+browser can't resolve without an import map or a bundler. MV3's CSP
+(`script-src 'self'`) can block inline import maps on some Chrome
+versions, so instead we patch the vendored file to point the dynamic
+import at our sibling `ort.webgpu.bundle.min.mjs`:
+
+```bash
+sed -i 's|"onnxruntime-web/webgpu"|"./ort.webgpu.bundle.min.mjs"|' \
+  src/chrome/vendor/transformers/transformers.web.min.js
+```
+
+There's exactly one occurrence per release. After running the sed,
+verify with `grep -c '"onnxruntime-web/webgpu"' src/chrome/vendor/transformers/transformers.web.min.js`
+— it should print `0`.
 
 ## Current vendored version
 
