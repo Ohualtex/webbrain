@@ -487,13 +487,16 @@ function submitClarify(card, tabId, clarifyId, answer, source) {
   card.appendChild(answered);
   scrollToBottom();
 
-  browser.runtime.sendMessage({
-    action: 'clarify_response',
-    tabId,
-    clarifyId,
-    answer,
-    source,
-  }).catch(() => { /* background may be torn down — clarify state already lives there */ });
+  // IMPORTANT: include `target: 'background'`. Without it, background's
+  // message router (browser.runtime.onMessage in background.js) silently
+  // drops the message — the very first line is
+  //   if (msg.target !== 'background') return;
+  // …and the agent's pending clarify Promise hangs forever, leaving the
+  // run stuck after the user answers. Use sendToBackground() rather than
+  // browser.runtime.sendMessage directly so the target field is always
+  // injected.
+  sendToBackground('clarify_response', { tabId, clarifyId, answer, source })
+    .catch(() => { /* background may be torn down — clarify state already lives there */ });
 }
 
 
