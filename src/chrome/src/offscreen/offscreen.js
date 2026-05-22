@@ -98,6 +98,12 @@ async function loadLibrary() {
       // gives us the "big first download, instant subsequent runs" UX.
       lib.env.allowLocalModels = false;
       lib.env.allowRemoteModels = true;
+      // The Cache API rejects chrome-extension:// URLs ("Request scheme
+      // 'chrome-extension' is unsupported"). transformers.js's wasm-cache
+      // path warns once per load and falls through to a raw fetch — which
+      // works, since our wasm files are already local. Turning off the
+      // cache attempt silences the warning and skips a useless code path.
+      lib.env.useWasmCache = false;
       // Pin wasmPaths to OUR vendor dir, asyncify variant. In
       // onnxruntime-web 1.20+ the variant naming is counterintuitive:
       //
