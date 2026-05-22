@@ -23,7 +23,7 @@ const NOT_YET = 'WebGPU provider is not yet supported on Firefox. ' +
 export class WebGPUProvider extends BaseLLMProvider {
   constructor(config = {}) {
     super(config);
-    this.model = config.model || 'onnx-community/Qwen3-0.6B-ONNX';
+    this.model = config.model || 'onnx-community/Qwen3.5-0.8B-ONNX';
   }
 
   get name() { return 'webgpu'; }

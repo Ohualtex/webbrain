@@ -418,7 +418,7 @@ function renderProviders() {
     // safe default for ~6GB VRAM laptops).
     webgpu_qwen3: {
       fields: [
-        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'onnx-community/Qwen3-0.6B-ONNX' },
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'onnx-community/Qwen3.5-0.8B-ONNX' },
         { key: 'dtype', labelKey: 'st.provider.field.dtype', type: 'text', placeholder: 'q4f16' },
         { key: 'useCompactPrompt', labelKey: 'st.provider.field.compact_prompt', type: 'checkbox' },
       ],

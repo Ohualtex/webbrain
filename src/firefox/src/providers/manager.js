@@ -77,8 +77,8 @@ export class ProviderManager {
       webgpu_qwen3: {
         type: 'webgpu',
         category: 'local',
-        label: 'Qwen 3 0.6B (WebGPU, in-browser)',
-        model: 'onnx-community/Qwen3-0.6B-ONNX',
+        label: 'Qwen 3.5 0.8B (WebGPU, in-browser)',
+        model: 'onnx-community/Qwen3.5-0.8B-ONNX',
         dtype: 'q4f16',
         device: 'webgpu',
         supportsVision: false,
