@@ -695,10 +695,11 @@ function wrapCollapsibleCard(id, config, isActive, bodyHtml) {
   // LM Studio defaults to whatever's loaded) just renders nothing rather
   // than a placeholder, to avoid pretending we know what they're running.
   const modelStr = (config.model && String(config.model).trim()) || '';
+  const providerTitle = id === 'webgpu_qwen3' ? 'WebGPU' : (config.label || id);
   header.innerHTML = `
     <div class="provider-header-left">
       <span class="provider-chevron" aria-hidden="true">${expanded ? '▾' : '▸'}</span>
-      <span class="provider-name">${escapeHtml(config.label || id)}</span>
+      <span class="provider-name">${escapeHtml(providerTitle)}</span>
       <span class="provider-type">${escapeHtml(config.type)}</span>
       ${config.category ? `<span class="provider-category-badge provider-category-${escapeHtml(config.category)}">${escapeHtml(config.category)}</span>` : ''}
       ${modelStr ? `<span class="provider-model" title="${escapeHtml(modelStr)}">${escapeHtml(modelStr)}</span>` : ''}
