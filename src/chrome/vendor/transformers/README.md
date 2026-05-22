@@ -7,10 +7,11 @@ fresh `git clone` — no per-developer vendoring step.
 
 ## What's here
 
-| File | Source | Purpose |
+| File / dir | Source | Purpose |
 | --- | --- | --- |
 | `transformers.web.js` | `node_modules/@huggingface/transformers/dist/` | Browser ESM bundle, UNMINIFIED (patched, see below) |
 | `ort.webgpu.mjs` | `node_modules/onnxruntime-web/dist/` | WebGPU backend, UNMINIFIED (~662KB) |
+| `onnxruntime-common/` (21 files) | `node_modules/onnxruntime-common/dist/esm/` | `Tensor` + session types, imported by transformers.web.js (~85KB total) |
 | `ort-wasm-simd-threaded.jsep.mjs` | `node_modules/onnxruntime-web/dist/` | WASM-CPU fallback loader |
 | `ort-wasm-simd-threaded.jsep.wasm` | `node_modules/onnxruntime-web/dist/` | WASM-CPU runtime (~25MB) |
 
@@ -27,23 +28,36 @@ import path in `src/offscreen/offscreen.js` is hard-coded to
 `transformers.web.js`; if you change which build is vendored, update
 that import.
 
-### Patch: rewrite the bare specifier
+### Patch: rewrite the bare specifiers
 
-The upstream `transformers.web.js` contains a static
-`import * as ONNX_WEB from "onnxruntime-web/webgpu"` — a bare module
-specifier that the browser can't resolve without an import map or a
-bundler. MV3's CSP (`script-src 'self'`) can block inline import maps
-on some Chrome versions, so instead we patch the vendored file to
-point the import at our sibling `ort.webgpu.mjs`:
+The upstream `transformers.web.js` contains TWO bare module specifiers
+the browser can't resolve without an import map or a bundler — MV3's
+CSP (`script-src 'self'`) can block inline import maps on some Chrome
+versions, so we patch both at vendoring time:
 
 ```bash
+# 1. onnxruntime-web's WebGPU backend
 sed -i 's|"onnxruntime-web/webgpu"|"./ort.webgpu.mjs"|' \
+  src/chrome/vendor/transformers/transformers.web.js
+
+# 2. onnxruntime-common (Tensor + session types). transformers.web.js
+#    has `import { Tensor } from "onnxruntime-common";`. We vendor the
+#    onnxruntime-common ESM tree under ./onnxruntime-common/ and point
+#    the import at its index.js.
+sed -i 's|"onnxruntime-common"|"./onnxruntime-common/index.js"|' \
   src/chrome/vendor/transformers/transformers.web.js
 ```
 
-There's exactly one occurrence per release. After running the sed,
-verify with `grep -c '"onnxruntime-web/webgpu"' src/chrome/vendor/transformers/transformers.web.js`
-— it should print `0`.
+Each occurs exactly once per release (a third hit for the
+`@huggingface/transformers` literal at line ~10667 is inside a JSDoc
+example string, not a real import — leave it). After sed-ing, verify:
+
+```bash
+grep -E '(import|export)[^"]*from\s+"[a-zA-Z@]' \
+  src/chrome/vendor/transformers/transformers.web.js \
+  | grep -v '^\s*//' | grep -v '^\s*\*'
+# expected: empty output
+```
 
 ## Current vendored version
 
@@ -64,8 +78,17 @@ cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs \
 cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm \
    src/chrome/vendor/transformers/
 
-# Re-apply the bare-specifier patch:
+# onnxruntime-common (21 small .js files, ~85KB) — wholesale-copy
+# the ESM tree.
+rm -rf src/chrome/vendor/transformers/onnxruntime-common
+mkdir  src/chrome/vendor/transformers/onnxruntime-common
+cp node_modules/onnxruntime-common/dist/esm/*.js \
+   src/chrome/vendor/transformers/onnxruntime-common/
+
+# Re-apply the bare-specifier patches:
 sed -i 's|"onnxruntime-web/webgpu"|"./ort.webgpu.mjs"|' \
+  src/chrome/vendor/transformers/transformers.web.js
+sed -i 's|"onnxruntime-common"|"./onnxruntime-common/index.js"|' \
   src/chrome/vendor/transformers/transformers.web.js
 ```
 

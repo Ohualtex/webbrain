@@ -7602,7 +7602,7 @@ async function loadWasmFactory(libURL) {
 }
 
 // src/backends/onnx.js
-import { Tensor } from "onnxruntime-common";
+import { Tensor } from "./onnxruntime-common/index.js";
 var DEVICE_TO_EXECUTION_PROVIDER_MAPPING = Object.freeze({
   auto: null,
   // Auto-detect based on device and environment
