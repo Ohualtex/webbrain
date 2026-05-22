@@ -12,8 +12,10 @@ fresh `git clone` — no per-developer vendoring step.
 | `transformers.web.js` | `node_modules/@huggingface/transformers/dist/` | Browser ESM bundle, UNMINIFIED (patched, see below) |
 | `ort.webgpu.mjs` | `node_modules/onnxruntime-web/dist/` | WebGPU backend, UNMINIFIED (~662KB) |
 | `onnxruntime-common/` (21 files) | `node_modules/onnxruntime-common/dist/esm/` | `Tensor` + session types, imported by transformers.web.js (~85KB total) |
-| `ort-wasm-simd-threaded.jsep.mjs` | `node_modules/onnxruntime-web/dist/` | WASM-CPU fallback loader |
-| `ort-wasm-simd-threaded.jsep.wasm` | `node_modules/onnxruntime-web/dist/` | WASM-CPU runtime (~25MB) |
+| `ort-wasm-simd-threaded.jsep.mjs` | `node_modules/onnxruntime-web/dist/` | JSEP (WebGPU) wasm loader |
+| `ort-wasm-simd-threaded.jsep.wasm` | `node_modules/onnxruntime-web/dist/` | JSEP (WebGPU) wasm runtime (~25MB) |
+| `ort-wasm-simd-threaded.asyncify.mjs` | `node_modules/onnxruntime-web/dist/` | Asyncify wasm loader |
+| `ort-wasm-simd-threaded.asyncify.wasm` | `node_modules/onnxruntime-web/dist/` | Asyncify wasm runtime (~23MB) — used when ops fall back from WebGPU to CPU |
 
 **Why unminified.** Chrome Web Store and AMO require readable source for
 review; minified blobs can get review delays or outright rejection.
@@ -77,6 +79,10 @@ cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs \
    src/chrome/vendor/transformers/
 cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm \
    src/chrome/vendor/transformers/
+cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.mjs \
+   src/chrome/vendor/transformers/
+cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.asyncify.wasm \
+   src/chrome/vendor/transformers/
 
 # onnxruntime-common (21 small .js files, ~85KB) — wholesale-copy
 # the ESM tree.
@@ -128,8 +134,11 @@ to the library's own resolution heuristics.
   backend into a single file but are minified only. We use the plain
   `ort.webgpu.mjs` (unminified, non-bundle) instead since the bare
   imports it'd need (Node-only `node:fs` etc.) never fire in browsers.
-- `ort-wasm-simd-threaded.asyncify.wasm` / `.jspi.wasm` / plain `.wasm` —
-  CPU fallback variants. Adding them would let the provider fall back
-  to WASM-CPU when WebGPU is absent, but for now we surface a clear
-  "WebGPU not available" error instead. Add these later if we want
-  CPU fallback for systems without WebGPU.
+- `ort-wasm-simd-threaded.jspi.{mjs,wasm}` / plain `ort-wasm-simd-threaded.{mjs,wasm}` —
+  other WASM variants. `.jspi` requires the JavaScript Promise
+  Integration browser feature (still experimental as of Chrome 125);
+  the plain variant lacks both async support and JSEP/WebGPU bridging.
+  We vendor only the variants the runtime actually loads on supported
+  browsers (`.jsep` for WebGPU, `.asyncify` for the CPU fallback path
+  that some ops take when WebGPU can't run them). If a future browser
+  release starts requesting `.jspi.mjs`, add the pair here.
