@@ -98,16 +98,35 @@ async function loadLibrary() {
       // gives us the "big first download, instant subsequent runs" UX.
       lib.env.allowLocalModels = false;
       lib.env.allowRemoteModels = true;
-      // Pin the WASM file URL to OUR vendor dir. Without this, the
-      // onnxruntime-web loader resolves the wasm path relative to
-      // transformers.web.js's URL — which DOES work for us today
-      // (both files are siblings in vendor/transformers/) but only by
-      // happy accident. Setting it explicitly makes the wiring obvious
-      // and survives future re-vendoring at different paths.
+      // Pin the WASM file URLs to OUR vendor dir AND force the .jsep
+      // variant. Two things are happening here:
+      //
+      // (1) Path pin: without this, the onnxruntime-web loader would
+      //     resolve the wasm relative to transformers.web.js's URL.
+      //     That happens to work today (siblings in vendor/) but is
+      //     fragile.
+      //
+      // (2) Variant pin: this is the critical one. transformers.js's
+      //     init code (line ~7786 of transformers.web.js) auto-picks
+      //     `ort-wasm-simd-threaded.asyncify.{mjs,wasm}` for non-Safari
+      //     browsers. The asyncify wasm has Asyncify stack-switching
+      //     support but NO JSEP (JavaScript Execution Provider) exports
+      //     — and the WebGPU EP is plumbed THROUGH JSEP. ort.webgpu.mjs
+      //     calls things like `wasm2.jsepOnCreateSession?.()` with
+      //     optional chaining; when those are undefined, WebGPU init
+      //     silently no-ops and inference falls back to the WASM CPU
+      //     backend, OOMing the 2GB heap on any sub-1B model.
+      //
+      //     The .jsep wasm exports the jsep* functions WebGPU needs.
+      //     Hard-set wasmPaths as the {mjs,wasm} object form so it
+      //     bypasses normalizeUrl entirely (urlOverride path in
+      //     ort.webgpu.mjs).
       try {
         if (lib.env.backends?.onnx?.wasm) {
-          const base = chrome.runtime.getURL('vendor/transformers/');
-          lib.env.backends.onnx.wasm.wasmPaths = base;
+          lib.env.backends.onnx.wasm.wasmPaths = {
+            mjs: chrome.runtime.getURL('vendor/transformers/ort-wasm-simd-threaded.jsep.mjs'),
+            wasm: chrome.runtime.getURL('vendor/transformers/ort-wasm-simd-threaded.jsep.wasm'),
+          };
         }
       } catch { /* if the shape moves between library versions, fall back to defaults */ }
     }
@@ -146,6 +165,10 @@ async function getPipeline(modelId, dtype, device) {
       navigatorGpu: gpuAvailable,
       adapter: adapterInfo,
       onnxBackends: lib.env?.backends ? Object.keys(lib.env.backends) : null,
+      // WebGPU EP presence: if env.backends.onnx.webgpu is an object, the
+      // WebGPU bindings registered; if undefined, we're CPU-only.
+      hasWebgpuBackend: !!lib.env?.backends?.onnx?.webgpu,
+      wasmPaths: lib.env?.backends?.onnx?.wasm?.wasmPaths,
     });
   } catch { /* logging must never break inference */ }
   // Free the previous pipeline before loading a new one — two 500MB
