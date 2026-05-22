@@ -76,9 +76,13 @@ async function loadLibrary() {
     let lib;
     try {
       // Dynamic import so a vendor-mishap fails at runtime (with a clear
-      // message) instead of at offscreen-doc parse time. The .web build
-      // is the browser ESM variant; transformers.node.* is for Node.
-      lib = await import('../../vendor/transformers/transformers.web.min.js');
+      // message) instead of at offscreen-doc parse time. We use the
+      // UNMINIFIED .web.js build (not .web.min.js): Chrome Web Store +
+      // AMO want readable source for review. Vendored file is sed-patched
+      // to rewrite the internal `import * as ONNX_WEB from
+      // "onnxruntime-web/webgpu"` to a relative path pointing at the
+      // sibling ort.webgpu.mjs — see the vendor README.
+      lib = await import('../../vendor/transformers/transformers.web.js');
     } catch (e) {
       _libPromise = null; // allow retry after the user re-vendors
       throw new Error(
@@ -96,7 +100,7 @@ async function loadLibrary() {
       lib.env.allowRemoteModels = true;
       // Pin the WASM file URL to OUR vendor dir. Without this, the
       // onnxruntime-web loader resolves the wasm path relative to
-      // transformers.web.min.js's URL — which DOES work for us today
+      // transformers.web.js's URL — which DOES work for us today
       // (both files are siblings in vendor/transformers/) but only by
       // happy accident. Setting it explicitly makes the wiring obvious
       // and survives future re-vendoring at different paths.

@@ -9,33 +9,40 @@ fresh `git clone` — no per-developer vendoring step.
 
 | File | Source | Purpose |
 | --- | --- | --- |
-| `transformers.web.min.js` | `node_modules/@huggingface/transformers/dist/` | Browser ESM bundle (patched, see below) |
-| `ort.webgpu.bundle.min.mjs` | `node_modules/onnxruntime-web/dist/` | WebGPU backend, fully self-bundled (~111KB) |
-| `ort-wasm-simd-threaded.jsep.mjs` | `node_modules/@huggingface/transformers/dist/` | WASM-CPU fallback loader |
+| `transformers.web.js` | `node_modules/@huggingface/transformers/dist/` | Browser ESM bundle, UNMINIFIED (patched, see below) |
+| `ort.webgpu.mjs` | `node_modules/onnxruntime-web/dist/` | WebGPU backend, UNMINIFIED (~662KB) |
+| `ort-wasm-simd-threaded.jsep.mjs` | `node_modules/onnxruntime-web/dist/` | WASM-CPU fallback loader |
 | `ort-wasm-simd-threaded.jsep.wasm` | `node_modules/onnxruntime-web/dist/` | WASM-CPU runtime (~25MB) |
 
-The `.web.min.js` build is the browser ESM variant — not
-`transformers.min.js` (dual ESM/CJS), not `transformers.node.*`. The
+**Why unminified.** Chrome Web Store and AMO require readable source for
+review; minified blobs can get review delays or outright rejection.
+The unminified builds are larger (1.1MB vs 422KB for transformers,
+662KB vs 111KB for the webgpu backend) but still well within the
+extension package budget, and they don't impact runtime — the browser
+just sees more JS to parse, which is microseconds.
+
+The `.web.js` build is the browser ESM variant — not
+`transformers.js` (dual ESM/CJS), not `transformers.node.*`. The
 import path in `src/offscreen/offscreen.js` is hard-coded to
-`transformers.web.min.js`; if you change which build is vendored, update
+`transformers.web.js`; if you change which build is vendored, update
 that import.
 
 ### Patch: rewrite the bare specifier
 
-The upstream `transformers.web.min.js` contains a dynamic
-`import("onnxruntime-web/webgpu")` — a bare module specifier that the
-browser can't resolve without an import map or a bundler. MV3's CSP
-(`script-src 'self'`) can block inline import maps on some Chrome
-versions, so instead we patch the vendored file to point the dynamic
-import at our sibling `ort.webgpu.bundle.min.mjs`:
+The upstream `transformers.web.js` contains a static
+`import * as ONNX_WEB from "onnxruntime-web/webgpu"` — a bare module
+specifier that the browser can't resolve without an import map or a
+bundler. MV3's CSP (`script-src 'self'`) can block inline import maps
+on some Chrome versions, so instead we patch the vendored file to
+point the import at our sibling `ort.webgpu.mjs`:
 
 ```bash
-sed -i 's|"onnxruntime-web/webgpu"|"./ort.webgpu.bundle.min.mjs"|' \
-  src/chrome/vendor/transformers/transformers.web.min.js
+sed -i 's|"onnxruntime-web/webgpu"|"./ort.webgpu.mjs"|' \
+  src/chrome/vendor/transformers/transformers.web.js
 ```
 
 There's exactly one occurrence per release. After running the sed,
-verify with `grep -c '"onnxruntime-web/webgpu"' src/chrome/vendor/transformers/transformers.web.min.js`
+verify with `grep -c '"onnxruntime-web/webgpu"' src/chrome/vendor/transformers/transformers.web.js`
 — it should print `0`.
 
 ## Current vendored version
@@ -48,12 +55,18 @@ verify with `grep -c '"onnxruntime-web/webgpu"' src/chrome/vendor/transformers/t
 
 ```bash
 npm install @huggingface/transformers@latest
-cp node_modules/@huggingface/transformers/dist/transformers.web.min.js \
+cp node_modules/@huggingface/transformers/dist/transformers.web.js \
    src/chrome/vendor/transformers/
-cp node_modules/@huggingface/transformers/dist/ort-wasm-simd-threaded.jsep.mjs \
+cp node_modules/onnxruntime-web/dist/ort.webgpu.mjs \
+   src/chrome/vendor/transformers/
+cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.mjs \
    src/chrome/vendor/transformers/
 cp node_modules/onnxruntime-web/dist/ort-wasm-simd-threaded.jsep.wasm \
    src/chrome/vendor/transformers/
+
+# Re-apply the bare-specifier patch:
+sed -i 's|"onnxruntime-web/webgpu"|"./ort.webgpu.mjs"|' \
+  src/chrome/vendor/transformers/transformers.web.js
 ```
 
 Then bump the version row in the table above, commit, and re-run the
@@ -84,12 +97,16 @@ to the library's own resolution heuristics.
 
 ## Files NOT vendored (and why)
 
-- `transformers.js` / `transformers.min.js` (dual builds, ~1.3MB each) —
-  redundant with the `.web.min.js` we use; the dual variants embed Node-
+- `transformers.min.js` / `transformers.js` (dual ESM/CJS builds) —
+  redundant with the `.web.js` we use; the dual variants embed Node-
   only code paths we never reach.
 - `transformers.node.*` — Node runtime, unused.
-- `ort-wasm-simd-threaded.asyncify.wasm` / `.jspi.wasm` / `.wasm` — CPU
-  fallback variants. Adding them would let the provider fall back to
-  WASM-CPU when WebGPU is absent, but for now we surface a clear
+- `ort.webgpu.bundle.*.mjs` — the "bundle" variants inline the WebGPU
+  backend into a single file but are minified only. We use the plain
+  `ort.webgpu.mjs` (unminified, non-bundle) instead since the bare
+  imports it'd need (Node-only `node:fs` etc.) never fire in browsers.
+- `ort-wasm-simd-threaded.asyncify.wasm` / `.jspi.wasm` / plain `.wasm` —
+  CPU fallback variants. Adding them would let the provider fall back
+  to WASM-CPU when WebGPU is absent, but for now we surface a clear
   "WebGPU not available" error instead. Add these later if we want
   CPU fallback for systems without WebGPU.
