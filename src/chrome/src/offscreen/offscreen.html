@@ -1,2 +1,9 @@
 <!DOCTYPE html>
-<html><head><script src="offscreen.js"></script></head></html>
+<!--
+  Offscreen document for WebBrain.
+  - Local-network fetch proxy (PNA workaround).
+  - WebGPU + ONNX LLM runtime via vendored @huggingface/transformers.
+  type="module" is required so offscreen.js can dynamically import the
+  vendored library.
+-->
+<html><head><script type="module" src="offscreen.js"></script></head></html>

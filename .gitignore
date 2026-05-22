@@ -3,6 +3,17 @@
 node_modules/
 test/anonymous/.test-profile/
 
+# Vendored @huggingface/transformers build artifacts. See
+# src/{chrome,firefox}/vendor/transformers/README.md — the build is
+# dropped in locally and too big to commit. The READMEs themselves
+# stay tracked.
+src/chrome/vendor/transformers/*.js
+src/chrome/vendor/transformers/*.wasm
+src/chrome/vendor/transformers/*.mjs
+src/firefox/vendor/transformers/*.js
+src/firefox/vendor/transformers/*.wasm
+src/firefox/vendor/transformers/*.mjs
+
 # ---- SocialMediaDownloader test suite ----
 # Cookies / session state if someone ever points the profile here
 smd-test-profile/

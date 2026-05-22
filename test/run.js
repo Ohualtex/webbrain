@@ -1506,4 +1506,41 @@ test('_defaultConfigs: chrome and firefox share the same provider set', () => {
   }
 });
 
+test('_defaultConfigs: webgpu provider present, local, disabled, no network fields', () => {
+  // WebGPU runs in-browser via ONNX — no baseUrl / apiKey. The first-run
+  // download is ~500MB so default-disabled prevents auto-burning bandwidth.
+  for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
+    const defaults = new PM()._defaultConfigs();
+    const wg = defaults.webgpu_qwen3;
+    assert.ok(wg, `${PM.name}: missing default config for webgpu_qwen3`);
+    assert.equal(wg.type, 'webgpu');
+    assert.equal(wg.category, 'local');
+    assert.equal(wg.enabled, false, 'webgpu must be disabled by default (~500MB first-run download)');
+    assert.ok(wg.model && wg.model.includes('Qwen3'), 'webgpu default model should point at the Qwen 3 ONNX repo');
+    assert.equal(wg.useCompactPrompt, true, '0.6B model needs the compact system prompt');
+    // No network fields — this provider runs entirely on-device.
+    assert.equal(wg.baseUrl, undefined);
+    assert.equal(wg.apiKey, undefined);
+  }
+});
+
+test('_createProvider: webgpu type wires the WebGPUProvider class', () => {
+  // Both manager builds should accept the type without throwing. We can't
+  // actually invoke chat() in Node (no chrome.offscreen, no WebGPU) but
+  // construction must work so the load() path doesn't blow up when the
+  // user's stored configs contain a webgpu entry.
+  for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
+    const mgr = new PM();
+    const provider = mgr._createProvider('webgpu_qwen3', {
+      type: 'webgpu',
+      category: 'local',
+      label: 'Qwen 3 0.6B (WebGPU, in-browser)',
+      model: 'onnx-community/Qwen3-0.6B-ONNX',
+    });
+    assert.equal(provider.name, 'webgpu');
+    assert.equal(provider.supportsTools, true);
+    assert.equal(provider.supportsVision, false);
+  }
+});
+
 await run();

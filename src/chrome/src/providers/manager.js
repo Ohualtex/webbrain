@@ -1,6 +1,7 @@
 import { LlamaCppProvider } from './llamacpp.js';
 import { OpenAICompatibleProvider } from './openai.js';
 import { AnthropicProvider, AnthropicOAuthProvider } from './anthropic.js';
+import { WebGPUProvider } from './webgpu.js';
 
 /**
  * Manages LLM provider instances and persists configuration.
@@ -76,6 +77,24 @@ export class ProviderManager {
         model: '',
         supportsVision: false,
         enabled: true,
+      },
+      // Browser-native local: WebGPU + ONNX runtime via @huggingface/transformers.
+      // No separate server needed — model weights download from HF Hub on
+      // first use (~500MB for q4 Qwen 3 0.6B), cached in IndexedDB by the
+      // library, inference runs in the offscreen document on the user's
+      // GPU. Default disabled because the first-run download is substantial
+      // and the library has to be vendored — see
+      // src/chrome/vendor/transformers/README.md.
+      webgpu_qwen3: {
+        type: 'webgpu',
+        category: 'local',
+        label: 'Qwen 3 0.6B (WebGPU, in-browser)',
+        model: 'onnx-community/Qwen3-0.6B-ONNX',
+        dtype: 'q4',
+        device: 'webgpu',
+        supportsVision: false,
+        useCompactPrompt: true,
+        enabled: false,
       },
       ollama: {
         type: 'openai',
@@ -241,6 +260,8 @@ export class ProviderManager {
         return new AnthropicProvider(config);
       case 'anthropic_oauth':
         return new AnthropicOAuthProvider(config);
+      case 'webgpu':
+        return new WebGPUProvider(config);
       default:
         throw new Error(`Unknown provider type: ${config.type}`);
     }

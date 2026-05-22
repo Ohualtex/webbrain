@@ -6,7 +6,7 @@ import { t, getLocale, setLocale, LANGUAGES } from './i18n.js';
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '7.3.1';
+const EXT_VERSION = '7.4.0';
 
 const providersContainer = document.getElementById('providers');
 const verboseToggle = document.getElementById('toggle-verbose');
@@ -409,6 +409,17 @@ function renderProviders() {
         { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://localhost:8080' },
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
         { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
+        { key: 'useCompactPrompt', labelKey: 'st.provider.field.compact_prompt', type: 'checkbox' },
+      ],
+    },
+    // WebGPU + ONNX in-browser provider. The model field takes a HuggingFace
+    // repo id (e.g. onnx-community/Qwen3-0.6B-ONNX); dtype lets the user pick
+    // a quantization variant if their GPU has the memory for it (q4 is the
+    // safe default for ~6GB VRAM laptops).
+    webgpu_qwen3: {
+      fields: [
+        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'onnx-community/Qwen3-0.6B-ONNX' },
+        { key: 'dtype', labelKey: 'st.provider.field.dtype', type: 'text', placeholder: 'q4' },
         { key: 'useCompactPrompt', labelKey: 'st.provider.field.compact_prompt', type: 'checkbox' },
       ],
     },
