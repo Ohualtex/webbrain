@@ -13,6 +13,8 @@ const verboseToggle = document.getElementById('toggle-verbose');
 const screenshotToggle = document.getElementById('toggle-screenshot-fallback');
 const maxStepsRange = document.getElementById('range-max-steps');
 const stepsValueLabel = document.getElementById('steps-value');
+const requestTimeoutRange = document.getElementById('range-request-timeout');
+const requestTimeoutValueLabel = document.getElementById('timeout-value');
 const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 const tracingToggle = document.getElementById('toggle-tracing');
@@ -84,7 +86,7 @@ async function init() {
   renderAuthSection();
 
   // Load display settings
-  const stored = await browser.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'providerFilter']);
+  const stored = await browser.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'providerFilter', 'requestTimeoutMs']);
   if (typeof stored.providerFilter === 'string' && ['all','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -92,6 +94,15 @@ async function init() {
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   maxStepsRange.value = stored.maxAgentSteps || 130;
   stepsValueLabel.textContent = maxStepsRange.value;
+  // requestTimeoutMs is stored in milliseconds, displayed as seconds.
+  if (requestTimeoutRange && requestTimeoutValueLabel) {
+    const tMs = (typeof stored.requestTimeoutMs === 'number' && stored.requestTimeoutMs > 0)
+      ? stored.requestTimeoutMs
+      : 60000;
+    const tSec = Math.max(10, Math.min(600, Math.round(tMs / 1000)));
+    requestTimeoutRange.value = tSec;
+    requestTimeoutValueLabel.textContent = tSec + 's';
+  }
   if (autoScreenshotSelect) autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   if (siteAdaptersToggle) siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   if (tracingToggle) tracingToggle.checked = stored.tracingEnabled === true;
@@ -203,6 +214,16 @@ maxStepsRange.addEventListener('input', () => {
 maxStepsRange.addEventListener('change', () => {
   browser.storage.local.set({ maxAgentSteps: parseInt(maxStepsRange.value) });
 });
+
+if (requestTimeoutRange) {
+  requestTimeoutRange.addEventListener('input', () => {
+    requestTimeoutValueLabel.textContent = requestTimeoutRange.value + 's';
+  });
+  requestTimeoutRange.addEventListener('change', () => {
+    const sec = parseInt(requestTimeoutRange.value, 10);
+    browser.storage.local.set({ requestTimeoutMs: sec * 1000 });
+  });
+}
 
 autoScreenshotSelect?.addEventListener('change', () => {
   browser.storage.local.set({ autoScreenshot: autoScreenshotSelect.value });

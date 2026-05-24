@@ -509,6 +509,14 @@
       </div>
       <div class="setting-row">
         <div class="setting-info">
+          <div class="setting-label"><span data-i18n="st.display.request_timeout.label"></span> <span id="timeout-value" style="color:var(--accent);font-weight:700;margin-left:4px;">60s</span></div>
+          <div class="setting-desc" data-i18n="st.display.request_timeout.desc"></div>
+        </div>
+        <input type="range" id="range-request-timeout" min="10" max="600" value="60" step="5"
+               style="width:120px;accent-color:var(--accent);cursor:pointer;">
+      </div>
+      <div class="setting-row">
+        <div class="setting-info">
           <div class="setting-label" data-i18n="st.display.traces_link.label"></div>
           <div class="setting-desc" data-i18n="st.display.traces_link.desc"></div>
         </div>

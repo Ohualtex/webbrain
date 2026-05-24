@@ -13,6 +13,8 @@ const verboseToggle = document.getElementById('toggle-verbose');
 const screenshotToggle = document.getElementById('toggle-screenshot-fallback');
 const maxStepsRange = document.getElementById('range-max-steps');
 const stepsValueLabel = document.getElementById('steps-value');
+const requestTimeoutRange = document.getElementById('range-request-timeout');
+const requestTimeoutValueLabel = document.getElementById('timeout-value');
 const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 const notifySoundToggle = document.getElementById('toggle-notify-sound');
@@ -88,7 +90,7 @@ async function init() {
   renderAuthSection();
 
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'providerFilter']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'providerFilter', 'requestTimeoutMs']);
   if (typeof stored.providerFilter === 'string' && ['all','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -96,6 +98,16 @@ async function init() {
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
   maxStepsRange.value = stored.maxAgentSteps || 130;
   stepsValueLabel.textContent = maxStepsRange.value;
+  // requestTimeoutMs is stored in milliseconds, displayed as seconds.
+  // Default 60s when unset. Floor 10s / ceiling 600s matches the slider.
+  if (requestTimeoutRange && requestTimeoutValueLabel) {
+    const tMs = (typeof stored.requestTimeoutMs === 'number' && stored.requestTimeoutMs > 0)
+      ? stored.requestTimeoutMs
+      : 60000;
+    const tSec = Math.max(10, Math.min(600, Math.round(tMs / 1000)));
+    requestTimeoutRange.value = tSec;
+    requestTimeoutValueLabel.textContent = tSec + 's';
+  }
   autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   notifySoundToggle.checked = stored.notifySound ?? true; // on by default
@@ -212,6 +224,17 @@ maxStepsRange.addEventListener('input', () => {
 maxStepsRange.addEventListener('change', () => {
   chrome.storage.local.set({ maxAgentSteps: parseInt(maxStepsRange.value) });
 });
+
+if (requestTimeoutRange) {
+  requestTimeoutRange.addEventListener('input', () => {
+    requestTimeoutValueLabel.textContent = requestTimeoutRange.value + 's';
+  });
+  requestTimeoutRange.addEventListener('change', () => {
+    // Stored as ms (the provider code consumes ms). UI shows seconds.
+    const sec = parseInt(requestTimeoutRange.value, 10);
+    chrome.storage.local.set({ requestTimeoutMs: sec * 1000 });
+  });
+}
 
 autoScreenshotSelect.addEventListener('change', () => {
   chrome.storage.local.set({ autoScreenshot: autoScreenshotSelect.value });

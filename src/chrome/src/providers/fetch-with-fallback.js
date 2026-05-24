@@ -14,6 +14,53 @@ import { ensureOffscreen } from '../offscreen/ensure.js';
 // can co-exist in one offscreen document. See that file for the full
 // rationale on why reasons must be declared together up front.)
 
+// User-configurable connection-phase timeout for LLM HTTP requests.
+//
+// Lives in chrome.storage.local under `requestTimeoutMs`. Default 60s —
+// fine for cloud providers (OpenAI / Anthropic / Gemini, which respond
+// within a couple seconds before the SSE stream starts). Local providers
+// (llama.cpp / Ollama / LM Studio) loading a large model into a long
+// context can take 60–180s before the first byte; users bump this
+// setting via Settings → Display → "LLM request timeout".
+//
+// Cached at module scope after a lazy first read, refreshed in-place
+// when the settings page writes a new value. Providers don't pass
+// `timeoutMs` explicitly — they rely on this default — so a single
+// setting change applies to every subsequent request without provider
+// reconstruction.
+let _cachedTimeoutMs = 60000;
+let _timeoutInitialized = false;
+const TIMEOUT_FLOOR_MS = 5000;        // 5s — anything lower than this is a typo
+const TIMEOUT_CEILING_MS = 600000;    // 10 min — well past any reasonable first-byte wait
+
+async function _ensureTimeoutInitialized() {
+  if (_timeoutInitialized) return;
+  _timeoutInitialized = true;
+  try {
+    const api = (typeof chrome !== 'undefined' && chrome?.storage)
+      ? chrome
+      : ((typeof browser !== 'undefined' && browser?.storage) ? browser : null);
+    if (!api?.storage?.local?.get) return;
+    const stored = await api.storage.local.get(['requestTimeoutMs']);
+    const v = stored?.requestTimeoutMs;
+    if (typeof v === 'number' && v >= TIMEOUT_FLOOR_MS && v <= TIMEOUT_CEILING_MS) {
+      _cachedTimeoutMs = v;
+    }
+    // Live refresh when the user edits the setting.
+    if (api.storage.onChanged?.addListener) {
+      api.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes.requestTimeoutMs) return;
+        const next = changes.requestTimeoutMs.newValue;
+        if (typeof next === 'number' && next >= TIMEOUT_FLOOR_MS && next <= TIMEOUT_CEILING_MS) {
+          _cachedTimeoutMs = next;
+        } else if (next == null) {
+          _cachedTimeoutMs = 60000; // setting was cleared — back to default
+        }
+      });
+    }
+  } catch { /* keep the hardcoded default */ }
+}
+
 /**
  * Try direct fetch first. If it fails with a network error, retry
  * through the offscreen document proxy.
@@ -22,12 +69,16 @@ import { ensureOffscreen } from '../offscreen/ensure.js';
  * fetch() resolves, the timer is cleared so streaming bodies can run as
  * long as needed. Without this, a stalled endpoint hangs the UI forever.
  *
+ * If the caller passes an explicit `timeoutMs`, it wins. Otherwise the
+ * user's setting (or the 60s fallback) is used.
+ *
  * @param {string} url
  * @param {RequestInit & { timeoutMs?: number }} options
  * @returns {Promise<Response>}
  */
 export async function fetchWithFallback(url, options = {}) {
-  const { timeoutMs = 60000, ...fetchOptions } = options;
+  await _ensureTimeoutInitialized();
+  const { timeoutMs = _cachedTimeoutMs, ...fetchOptions } = options;
 
   // Fast path: try direct fetch first, with a connection-phase timeout.
   const controller = new AbortController();

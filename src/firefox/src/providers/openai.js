@@ -1,6 +1,45 @@
 import { BaseLLMProvider } from './base.js';
 
-const CONNECT_TIMEOUT_MS = 60000;
+// User-configurable connection-phase timeout. Read from browser.storage.local
+// under `requestTimeoutMs`. Default 60s; configurable via Settings → Display
+// → "LLM request timeout". Cached at module scope and live-refreshed on
+// storage changes so the user can bump it without reloading the extension.
+//
+// Local providers (lmstudio / ollama) route through this file too — they
+// have `type: 'openai'` in their config — so this single change picks them
+// up. anthropic.js / llamacpp.js on Firefox don't currently set a timeout
+// at all; that's a separate gap.
+let _cachedTimeoutMs = 60000;
+let _timeoutInitialized = false;
+const TIMEOUT_FLOOR_MS = 5000;
+const TIMEOUT_CEILING_MS = 600000;
+
+async function _ensureTimeoutInitialized() {
+  if (_timeoutInitialized) return;
+  _timeoutInitialized = true;
+  try {
+    const api = (typeof browser !== 'undefined' && browser?.storage)
+      ? browser
+      : ((typeof chrome !== 'undefined' && chrome?.storage) ? chrome : null);
+    if (!api?.storage?.local?.get) return;
+    const stored = await api.storage.local.get(['requestTimeoutMs']);
+    const v = stored?.requestTimeoutMs;
+    if (typeof v === 'number' && v >= TIMEOUT_FLOOR_MS && v <= TIMEOUT_CEILING_MS) {
+      _cachedTimeoutMs = v;
+    }
+    if (api.storage.onChanged?.addListener) {
+      api.storage.onChanged.addListener((changes, area) => {
+        if (area !== 'local' || !changes.requestTimeoutMs) return;
+        const next = changes.requestTimeoutMs.newValue;
+        if (typeof next === 'number' && next >= TIMEOUT_FLOOR_MS && next <= TIMEOUT_CEILING_MS) {
+          _cachedTimeoutMs = next;
+        } else if (next == null) {
+          _cachedTimeoutMs = 60000;
+        }
+      });
+    }
+  } catch { /* keep the hardcoded default */ }
+}
 
 /**
  * fetch() wrapper that aborts only the connection / time-to-headers phase.
@@ -8,8 +47,10 @@ const CONNECT_TIMEOUT_MS = 60000;
  * long as needed. Without this, a stalled endpoint hangs the UI forever.
  */
 async function fetchWithTimeout(url, options) {
+  await _ensureTimeoutInitialized();
+  const timeoutMs = _cachedTimeoutMs;
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), CONNECT_TIMEOUT_MS);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(url, { ...options, signal: controller.signal });
     clearTimeout(timeoutId);
@@ -18,7 +59,7 @@ async function fetchWithTimeout(url, options) {
     clearTimeout(timeoutId);
     if (e.name === 'AbortError') {
       throw new Error(
-        `Request to ${url} timed out after ${CONNECT_TIMEOUT_MS}ms. ` +
+        `Request to ${url} timed out after ${timeoutMs}ms. ` +
         `The endpoint may be unreachable, blocked by CORS, or stalled.`
       );
     }
