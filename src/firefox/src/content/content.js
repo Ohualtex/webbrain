@@ -1247,12 +1247,42 @@
       'extract_data': () => extractData(msg.params || {}),
       'wait_for_element': () => waitForElement(msg.params || {}),
       'get_selection': () => ({ text: window.getSelection()?.toString() || '' }),
+      // execute_js — model-supplied JS body, evaluated in the content
+      // script's isolated world via `new Function()`.
+      //
+      // CSP NOTE (Firefox-specific): `new Function()` requires
+      // `'unsafe-eval'` in the extension's CSP. Firefox MV2 permits us
+      // to opt in to that, and the firefox manifest does — so this
+      // handler works on every host regardless of the host page's CSP.
+      // (Page CSP doesn't reach the isolated content-script world for
+      // eval purposes; the extension's own CSP governs.)
+      //
+      // The same code path on Chrome MV3 can NOT grant unsafe-eval —
+      // MV3's minimum-policy enforcement is strict, the extension fails
+      // to install if you try. So Chrome's identical handler returns a
+      // `cspBlocked: true` error and points the agent at finite-verb
+      // tools instead. We keep the same shape here: if the eval throws
+      // a CSP-flavoured error (which shouldn't happen on Firefox today
+      // but is possible if the policy ever tightens), report it
+      // identically so the cross-browser surface stays consistent.
       'execute_js': () => {
         try {
           const fn = new Function(msg.params.code);
           return { success: true, result: fn() };
         } catch (e) {
-          return { success: false, error: e.message };
+          const errMsg = (e && e.message) || String(e);
+          const isCspBlock =
+            (e && e.name === 'EvalError') ||
+            /unsafe-eval|Content Security Policy/i.test(errMsg);
+          if (isCspBlock) {
+            return {
+              success: false,
+              cspBlocked: true,
+              error:
+                'execute_js is blocked by the extension\'s Content Security Policy — `new Function()` requires `unsafe-eval`. This is unexpected on Firefox (the manifest grants `unsafe-eval`) — the policy may have been changed. Use the finite tools instead: get_accessibility_tree (read the page), click_ax / type_ax / set_field (interact via ref_id), scroll, navigate, get_selection, iframe_read / iframe_click / iframe_type.',
+            };
+          }
+          return { success: false, error: errMsg };
         }
       },
       'get_shadow_dom': () => getShadowDOM(),
