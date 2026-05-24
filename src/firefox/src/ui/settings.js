@@ -90,7 +90,7 @@ async function init() {
   }
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
-  maxStepsRange.value = stored.maxAgentSteps || 60;
+  maxStepsRange.value = stored.maxAgentSteps || 130;
   stepsValueLabel.textContent = maxStepsRange.value;
   if (autoScreenshotSelect) autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   if (siteAdaptersToggle) siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;

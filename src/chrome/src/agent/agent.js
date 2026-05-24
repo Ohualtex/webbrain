@@ -39,7 +39,7 @@ export class Agent {
     this.persistTimers = new Map(); // tabId -> debounce handle
     this.abortFlags = new Map(); // tabId -> boolean
     this.currentRunId = new Map(); // tabId -> active trace runId (for recorder hooks)
-    this.maxSteps = 120; // safety limit for autonomous loops (configurable via settings)
+    this.maxSteps = 130; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped

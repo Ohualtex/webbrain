@@ -94,7 +94,7 @@ async function init() {
   }
   verboseToggle.checked = stored.verboseMode || false;
   screenshotToggle.checked = stored.screenshotFallback ?? true; // on by default
-  maxStepsRange.value = stored.maxAgentSteps || 60;
+  maxStepsRange.value = stored.maxAgentSteps || 130;
   stepsValueLabel.textContent = maxStepsRange.value;
   autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
