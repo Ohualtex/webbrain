@@ -132,7 +132,7 @@ export default {
   'st.display.max_steps.label': 'Max Agent Steps',
   'st.display.max_steps.desc': 'Maximum number of tool-use steps the agent can take per message. Higher values allow more complex multi-step tasks but may use more tokens.',
   'st.display.request_timeout.label': 'LLM request timeout',
-  'st.display.request_timeout.desc': 'How long to wait for the LLM to start responding before giving up. Aborts only the connection / time-to-headers phase — streaming bodies are not affected. Default 60s is fine for cloud providers. Local models (llama.cpp / Ollama / LM Studio) on CPU or with large contexts may need 120–300s.',
+  'st.display.request_timeout.desc': 'How long to wait for the LLM to start responding before giving up. Aborts only the connection / time-to-headers phase — streaming bodies are not affected. Default 120s. Cloud providers (OpenAI / Anthropic / Gemini) respond within seconds; local models (llama.cpp / Ollama / LM Studio) on CPU or with large contexts can take 60–180s before the first byte.',
   'st.display.traces_link.label': 'Traces',
   'st.display.traces_link.desc': 'Inspect recorded runs side-by-side. Only available when tracing is on.',
   'st.display.traces_link.open': 'Open Traces →',

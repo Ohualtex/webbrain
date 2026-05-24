@@ -1,15 +1,18 @@
 import { BaseLLMProvider } from './base.js';
 
 // User-configurable connection-phase timeout. Read from browser.storage.local
-// under `requestTimeoutMs`. Default 60s; configurable via Settings → Display
-// → "LLM request timeout". Cached at module scope and live-refreshed on
-// storage changes so the user can bump it without reloading the extension.
+// under `requestTimeoutMs`. Default 120s — errs on the local-model side
+// (lmstudio / ollama with a large model can take 60–180s before the first
+// byte). Cloud providers' SSE stream starts within seconds, so the higher
+// default costs them nothing. Configurable via Settings → Display →
+// "LLM request timeout". Cached at module scope and live-refreshed on
+// storage changes so the user can adjust it without reloading the extension.
 //
 // Local providers (lmstudio / ollama) route through this file too — they
 // have `type: 'openai'` in their config — so this single change picks them
 // up. anthropic.js / llamacpp.js on Firefox don't currently set a timeout
 // at all; that's a separate gap.
-let _cachedTimeoutMs = 60000;
+let _cachedTimeoutMs = 120000;
 let _timeoutInitialized = false;
 const TIMEOUT_FLOOR_MS = 5000;
 const TIMEOUT_CEILING_MS = 600000;
@@ -34,7 +37,7 @@ async function _ensureTimeoutInitialized() {
         if (typeof next === 'number' && next >= TIMEOUT_FLOOR_MS && next <= TIMEOUT_CEILING_MS) {
           _cachedTimeoutMs = next;
         } else if (next == null) {
-          _cachedTimeoutMs = 60000;
+          _cachedTimeoutMs = 120000;
         }
       });
     }

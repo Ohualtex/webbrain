@@ -16,19 +16,20 @@ import { ensureOffscreen } from '../offscreen/ensure.js';
 
 // User-configurable connection-phase timeout for LLM HTTP requests.
 //
-// Lives in chrome.storage.local under `requestTimeoutMs`. Default 60s —
-// fine for cloud providers (OpenAI / Anthropic / Gemini, which respond
-// within a couple seconds before the SSE stream starts). Local providers
-// (llama.cpp / Ollama / LM Studio) loading a large model into a long
-// context can take 60–180s before the first byte; users bump this
-// setting via Settings → Display → "LLM request timeout".
+// Lives in chrome.storage.local under `requestTimeoutMs`. Default 120s —
+// errs on the local-model side (llama.cpp / Ollama / LM Studio with a
+// large model + long context can take 60–180s before the first byte).
+// Cloud providers (OpenAI / Anthropic / Gemini) start their SSE stream
+// within a couple seconds, so the higher default costs them nothing —
+// the timer only ever fires for genuinely stalled endpoints. Users bump
+// or lower it via Settings → Display → "LLM request timeout".
 //
 // Cached at module scope after a lazy first read, refreshed in-place
 // when the settings page writes a new value. Providers don't pass
 // `timeoutMs` explicitly — they rely on this default — so a single
 // setting change applies to every subsequent request without provider
 // reconstruction.
-let _cachedTimeoutMs = 60000;
+let _cachedTimeoutMs = 120000;
 let _timeoutInitialized = false;
 const TIMEOUT_FLOOR_MS = 5000;        // 5s — anything lower than this is a typo
 const TIMEOUT_CEILING_MS = 600000;    // 10 min — well past any reasonable first-byte wait
@@ -54,7 +55,7 @@ async function _ensureTimeoutInitialized() {
         if (typeof next === 'number' && next >= TIMEOUT_FLOOR_MS && next <= TIMEOUT_CEILING_MS) {
           _cachedTimeoutMs = next;
         } else if (next == null) {
-          _cachedTimeoutMs = 60000; // setting was cleared — back to default
+          _cachedTimeoutMs = 120000; // setting was cleared — back to default
         }
       });
     }

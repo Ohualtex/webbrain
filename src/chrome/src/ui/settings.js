@@ -103,7 +103,7 @@ async function init() {
   if (requestTimeoutRange && requestTimeoutValueLabel) {
     const tMs = (typeof stored.requestTimeoutMs === 'number' && stored.requestTimeoutMs > 0)
       ? stored.requestTimeoutMs
-      : 60000;
+      : 120000;
     const tSec = Math.max(10, Math.min(600, Math.round(tMs / 1000)));
     requestTimeoutRange.value = tSec;
     requestTimeoutValueLabel.textContent = tSec + 's';
