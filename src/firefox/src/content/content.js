@@ -446,6 +446,36 @@
     });
   }
 
+  // When click({index}) or type_text({index}) gets an out-of-range index,
+  // return both a SPECIFIC stale-index error AND a fresh enumeration of
+  // what's actually clickable now. Background: with the generic
+  // "Element not found" message, several models (qwen3.6-27b q7kix9 was
+  // the loudest) interpret the failure as a broken page state and try to
+  // "reset" via navigate(same URL) → scroll → click(same stale index),
+  // looping indefinitely. Embedding the current enumeration in the tool
+  // result means even a model that ignores the prose has to see that
+  // index 6 doesn't exist among the 23 elements actually on the page.
+  function _staleIndexError(requestedIndex, interactive) {
+    const total = interactive.length;
+    const available = interactive.slice(0, 40).map((el, i) => {
+      const text = (el.innerText || el.value || el.placeholder || el.title || el.ariaLabel || '').trim().slice(0, 80);
+      return {
+        index: i,
+        tag: el.tagName.toLowerCase(),
+        role: el.getAttribute('role') || '',
+        text,
+      };
+    });
+    return {
+      success: false,
+      error: `Index ${requestedIndex} not found — only ${total} interactive element${total === 1 ? '' : 's'} on the current page (max valid index: ${total - 1}). Indices are NOT stable across scrolls, navigations, or DOM updates — the index you used was from a previous turn's get_interactive_elements call and no longer applies. Pick a new index from \`available\` below, OR use click({text: "..."}) which re-resolves every call. DO NOT reload, re-navigate, or scroll-then-retry with the same index — the page is fine; your index is stale.`,
+      indexRequested: requestedIndex,
+      totalAvailable: total,
+      available,
+      truncated: total > available.length,
+    };
+  }
+
   // -- Click helpers: interactive-element detection & parent traversal --------
   const _INTERACTIVE_TAGS = new Set(['BUTTON', 'A', 'INPUT', 'SELECT', 'TEXTAREA']);
   const _INTERACTIVE_ROLES = new Set(['button', 'link', 'tab', 'menuitem', 'option']);
@@ -705,7 +735,9 @@
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
       // Same traversal as getInteractiveElements — index stability.
-      el = queryInteractive()[params.index];
+      const interactive = queryInteractive();
+      el = interactive[params.index];
+      if (!el) return _staleIndexError(params.index, interactive);
     } else if (params.x != null && params.y != null) {
       el = document.elementFromPoint(params.x, params.y);
     }
@@ -851,7 +883,9 @@
     if (params.selector) {
       el = document.querySelector(params.selector);
     } else if (params.index != null) {
-      el = queryInteractive()[params.index];
+      const interactive = queryInteractive();
+      el = interactive[params.index];
+      if (!el) return _staleIndexError(params.index, interactive);
     } else {
       // No selector and no index → type into the currently focused element.
       // Most reliable for click-then-type flows on forms with weird selectors.
