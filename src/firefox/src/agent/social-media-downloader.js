@@ -769,27 +769,59 @@ window.SocialMediaDownloader = (() => {
     return groups;
   };
 
-  // Pick the "primary" stream when the page captured multiple. Prefer a
-  // group whose MediaSource blob URL is currently attached to a <video>
-  // element in the DOM — that's the one the user is actually looking at.
-  // Among DOM-attached candidates (or all groups, if none match), pick
-  // the largest by bytes: longer playback ≈ what the user watched.
+  // Pick the "primary" stream when the page captured multiple. Instagram
+  // (and similar infinite-feed viewers) keeps adjacent preloaded reels
+  // mounted as their own <video> elements with their own MediaSources,
+  // so "is the MediaSource attached to any <video>" doesn't narrow at
+  // all — every captured group is. We need a tighter signal for "the
+  // one the user is watching". Probe in priority order:
+  //   1. video is actively playing AND its bounding rect intersects
+  //      the viewport (Instagram autoplays the focused reel; preloaded
+  //      neighbours are paused);
+  //   2. video bounding rect intersects the viewport (user paused, but
+  //      it's still the one on screen);
+  //   3. any <video> in the DOM (last resort).
+  // Within the narrowest non-empty tier we tie-break by total bytes —
+  // longer playback ≈ the one the user actually watched. Bytes alone
+  // are NOT used as the primary signal: an off-screen neighbour that
+  // happened to preload more frames than the focused reel would
+  // otherwise win.
   const _pickPrimaryMseGroup = (groups) => {
     if (groups.length <= 1) return groups[0];
     const byUrl = new Map();
     for (const g of groups) {
       if (g.url) byUrl.set(g.url, g);
     }
-    const onPage = new Set();
+    const playing = new Set();
+    const visible = new Set();
+    const anyDom = new Set();
     try {
       if (typeof document !== 'undefined') {
+        const vw = (typeof window !== 'undefined' && window.innerWidth) || 0;
+        const vh = (typeof window !== 'undefined' && window.innerHeight) || 0;
         for (const v of document.querySelectorAll('video')) {
           const g = byUrl.get(v.currentSrc) || byUrl.get(v.src);
-          if (g) onPage.add(g);
+          if (!g) continue;
+          anyDom.add(g);
+          let inView = false;
+          try {
+            const r = v.getBoundingClientRect();
+            inView = r.width > 0 && r.height > 0 &&
+                     r.bottom > 0 && r.top < vh &&
+                     r.right > 0 && r.left < vw;
+          } catch (_) { /* detached <video> — leave inView=false */ }
+          if (inView) {
+            visible.add(g);
+            if (v.paused === false) playing.add(g);
+          }
         }
       }
     } catch (_) { /* detached doc — fall through to size heuristic */ }
-    const candidates = onPage.size > 0 ? [...onPage] : groups;
+    const candidates =
+      playing.size > 0 ? [...playing] :
+      visible.size > 0 ? [...visible] :
+      anyDom.size > 0 ? [...anyDom] :
+      groups;
     candidates.sort((a, b) => b.totalBytes - a.totalBytes);
     return candidates[0];
   };
