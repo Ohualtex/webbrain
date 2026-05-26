@@ -1537,7 +1537,7 @@ test('_defaultConfigs: webgpu provider present, local, disabled, no network fiel
     assert.equal(wg.type, 'webgpu');
     assert.equal(wg.category, 'local');
     assert.equal(wg.enabled, false, 'webgpu must be disabled by default (~500MB first-run download)');
-    assert.ok(wg.model && wg.model.includes('Qwen3'), 'webgpu default model should point at the Qwen 3 ONNX repo');
+    assert.equal(wg.model, 'onnx-community/gemma-4-E2B-it-ONNX', 'webgpu default model should point at the Gemma 4 E2B ONNX repo');
     assert.equal(wg.useCompactPrompt, true, '0.6B model needs the compact system prompt');
     // No network fields — this provider runs entirely on-device.
     assert.equal(wg.baseUrl, undefined);

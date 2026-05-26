@@ -319,7 +319,23 @@ self.addEventListener('message', async (e) => {
             _runtimeDeviceMode = 'wasm';
             await disposeActivePipeline();
             pipe = await getPipeline(modelId, dtype, device, _outputLocationMode, _runtimeDeviceMode);
-            return await pipe(messages || [], generateArgs);
+            try {
+              return await pipe(messages || [], generateArgs);
+            } catch (wasmErr) {
+              const wasmMsg = wasmErr?.message || String(wasmErr);
+              const missingKernel = wasmMsg.includes('Kernel not found') || wasmMsg.includes('GatherBlockQuantized');
+              if (missingKernel) {
+                _runtimeDeviceMode = 'webgpu';
+                await disposeActivePipeline();
+                throw new Error(
+                  `WASM fallback unsupported for this quantized model (${modelId}). ` +
+                  `ONNX Runtime CPU/WASM is missing GatherBlockQuantized kernels. ` +
+                  `Please keep device=webgpu and reduce context/tokens, or choose a WASM-compatible model. ` +
+                  `Underlying error: ${wasmMsg}`
+                );
+              }
+              throw wasmErr;
+            }
           }
         }
       };

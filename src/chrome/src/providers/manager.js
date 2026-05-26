@@ -96,7 +96,7 @@ export class ProviderManager {
         type: 'webgpu',
         category: 'local',
         label: 'WebGPU',
-        model: 'onnx-community/Qwen3.5-0.8B-ONNX',
+        model: 'onnx-community/gemma-4-E2B-it-ONNX',
         dtype: 'q4f16',
         device: 'webgpu',
         supportsVision: false,

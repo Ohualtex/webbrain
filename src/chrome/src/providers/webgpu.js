@@ -41,7 +41,7 @@ import { BaseLLMProvider } from './base.js';
 export class WebGPUProvider extends BaseLLMProvider {
   constructor(config = {}) {
     super(config);
-    this.model = config.model || 'onnx-community/Qwen3.5-0.8B-ONNX';
+    this.model = config.model || 'onnx-community/gemma-4-E2B-it-ONNX';
     // dtype: 'q4f16' = 4-bit weights + fp16 activations. Plain 'q4' uses
     // fp32 activations, whose intermediate buffers blow past the WASM
     // 2GB heap mid-inference (std::bad_alloc out of OrtRun). 'q4f16' is
