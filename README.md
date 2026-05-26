@@ -9,14 +9,17 @@ Open-source AI browser agent for Chrome and Firefox. Chat with any web page, aut
 - **Page Reading** — Extracts text, links, forms, tables, and interactive elements from any page
 - **Browser Actions** — Click, type, scroll, navigate, and interact with page elements
 - **Ask / Act Modes** — Read-only mode by default, full agent mode with confirmation
-- **Multi-Step Agent** — Autonomous task execution with tool-use loops (configurable, default 60 steps)
+- **Multi-Step Agent** — Autonomous task execution with tool-use loops (configurable, default 130 steps)
 - **Continue from Limit** — When the agent hits the step limit, click Continue to keep going
 - **Multi-Provider LLM** — Supports local and cloud models:
   - **llama.cpp** (local, default) — No API key needed. Also **Ollama** and **LM Studio**
   - **OpenAI** (GPT-5.5, etc.)
-  - **OpenRouter** (access 100+ models)
   - **Anthropic Claude** (native API)
-  - **Claude (Pro/Max subscription)** — sign in with your Claude.ai account via OAuth instead of an API key. See *Known Issues* below for the ToS / reliability caveats.
+  - **Google Gemini**, **Mistral AI**, **DeepSeek**, **xAI Grok**, **Groq**
+  - **MiniMax**, **Alibaba Cloud (Qwen)**
+  - **Nvidia NIM**
+  - **OpenRouter** (access 100+ models)
+- **Onboarding Wizard** — First-launch walkthrough covering Act mode safety and provider setup
 - **Side Panel UI** — Clean chat interface that lives alongside your browsing
 - **Per-Tab Conversations** — Each tab has its own chat history
 - **Streaming** — Real-time token streaming from all providers
@@ -115,29 +118,47 @@ Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `si
 
 ## Agent Tools
 
-| Tool | Ask Mode | Act Mode | Description |
-|------|----------|----------|-------------|
-| `read_page` | Yes | Yes | Extract page text, links, forms |
-| `read_pdf` | Yes | Yes | Extract text from PDF documents via vendored pdfjs-dist. On Anthropic Claude, also attaches raw PDF bytes as a native document block for full layout/vision. |
-| `screenshot` | Yes | Yes | Capture visible tab |
-| `get_interactive_elements` | Yes | Yes | List all clickable/interactive elements |
+| Tool | Ask | Act | Description |
+|------|-----|-----|-------------|
+| `get_accessibility_tree` | Yes | Yes | Flat indented text of the page's accessibility tree with persistent ref_ids |
+| `read_page` | Yes | Yes | Extract page text, links, forms (legacy prose fallback) |
+| `read_pdf` | Yes | Yes | Extract text from PDF documents via vendored pdfjs-dist |
+| `screenshot` | Yes | Yes | Capture visible tab (with optional `save:true` to Downloads) |
+| `full_page_screenshot` | Yes | Yes | Capture full scrollable page (Chrome only) |
+| `get_interactive_elements` | Yes | Yes | List all clickable/interactive elements (legacy) |
+| `get_frames` | Yes | Yes | List all iframes on the page |
+| `get_shadow_dom` | Yes | Yes | Read shadow DOM trees |
 | `scroll` | Yes | Yes | Scroll the page |
 | `extract_data` | Yes | Yes | Extract tables, headings, images |
 | `get_selection` | Yes | Yes | Get highlighted text |
-| `click` | No | Yes | Click elements by selector, index, or coordinates |
-| `type_text` | No | Yes | Type into input fields |
+| `click_ax` | No | Yes | Click an element by accessibility tree ref_id (preferred) |
+| `type_ax` | No | Yes | Type into a field by ref_id. Supports `lang: "tr-deasciify"` for Turkish deasciification |
+| `set_field` | No | Yes | One-shot focus + clear + type + verify by ref_id. Supports `lang: "tr-deasciify"` |
+| `click` | No | Yes | Click elements by selector, index, or coordinates (legacy) |
+| `type_text` | No | Yes | Type into input fields. Supports `lang: "tr-deasciify"` |
+| `press_keys` | No | Yes | Press Escape, Tab, or Enter |
+| `hover` | No | Yes | CDP-trusted hover for reveal-on-hover menus (Chrome only) |
+| `drag_drop` | No | Yes | Drag-and-drop via CDP pointer events (Chrome only) |
 | `navigate` | No | Yes | Go to a URL |
-| `wait_for_element` | No | Yes | Wait for a selector to appear |
-| `execute_js` | No | Yes | Run custom JavaScript |
 | `new_tab` | No | Yes | Open a new tab |
-| `fetch_url` | Yes | Yes | Fetch a URL from the background with the user's cookies. Best for JSON APIs, READMEs, plain HTML. |
-| `research_url` | Yes | Yes | Open a URL in a hidden tab, wait for JS rendering, return main content. Best for SPAs. |
-| `list_downloads` | Yes | Yes | List recent downloads with status and source URLs. |
-| `read_downloaded_file` | No | Yes | Re-fetch a downloaded file's content (text or base64). |
-| `download_file` | No | Yes | Download a single file from a URL. |
-| `download_files` | No | Yes | Download multiple files in parallel (max 3 concurrent). |
-| `download_resource_from_page` | No | Yes | Download an `<img>`/`<video>`/blob URL from the current page. |
-| `iframe_read` / `iframe_click` / `iframe_type` | No | Yes | Read/click/type inside cross-origin iframes (Stripe, embedded forms). |
+| `wait_for_element` | No | Yes | Wait for a selector to appear |
+| `wait_for_stable` | No | Yes | Wait until page is idle (no DOM mutations + no network) |
+| `upload_file` | No | Yes | Upload a file to a file input (Chrome only) |
+| `execute_js` | No | Yes | Run custom JavaScript (**Firefox only** — blocked by MV3 CSP on Chrome) |
+| `fetch_url` | Yes | Yes | Fetch a URL from the background with the user's cookies |
+| `research_url` | Yes | Yes | Open a URL in a hidden tab, wait for JS rendering, return content |
+| `download_file` | No | Yes | Download a single file from a URL (Chrome only) |
+| `download_files` | No | Yes | Download multiple files in parallel |
+| `download_resource_from_page` | No | Yes | Download an `<img>`/`<video>`/blob URL from the current page |
+| `download_social_media` | No | Yes | One-shot media download from Facebook, Instagram, X, LinkedIn, Reddit, Pinterest, YouTube |
+| `list_downloads` | Yes | Yes | List recent downloads with status and source URLs |
+| `read_downloaded_file` | No | Yes | Re-fetch a downloaded file's content (text or base64) |
+| `iframe_read` / `iframe_click` / `iframe_type` | No | Yes | Read/click/type inside cross-origin iframes |
+| `record_tab` / `stop_recording` | No | Yes | Record tab video+audio into .webm with optional Whisper transcription (Chrome only) |
+| `scratchpad_write` | Yes | Yes | Pin a note in context that survives summarization |
+| `clarify` | Yes | Yes | Pause and ask the user a question |
+| `verify_form` | No | Yes | Verify form fields before submitting |
+| `solve_captcha` | No | Yes | Solve CAPTCHAs via CapSolver API (optional, requires API key) |
 | `done` | Yes | Yes | Signal task completion |
 
 ## LM Studio plugin
@@ -160,7 +181,7 @@ WebBrain accepts a small set of slash commands as the first thing on a line in t
 
 | Command | What it does |
 |---------|--------------|
-| `/allow-api` | **Per-conversation API mutation override.** By default WebBrain refuses to use API endpoints (POST/PUT/PATCH/DELETE via `fetch_url` or `execute_js`) for any action that creates, modifies, deletes, or sends — it always goes through the visible UI of the current page so you can see what's happening. Type `/allow-api` (optionally followed by a task description) to lift that restriction *for the current conversation only*. The agent will still prefer UI when UI works, but may fall back to API mutations when UI is genuinely failing or unworkable. A sticky badge appears above the input area while the override is active. The flag clears when you reset the conversation. |
+| `/allow-api` | **Per-conversation API mutation override.** By default WebBrain refuses to use API endpoints (POST/PUT/PATCH/DELETE via `fetch_url`) for any action that creates, modifies, deletes, or sends — it always goes through the visible UI of the current page so you can see what's happening. Type `/allow-api` (optionally followed by a task description) to lift that restriction *for the current conversation only*. The agent will still prefer UI when UI works, but may fall back to API mutations when UI is genuinely failing or unworkable. A sticky badge appears above the input area while the override is active. The flag clears when you reset the conversation. |
 
 The default UI-first rule exists because API actions are invisible (you don't see what's being sent), often require separate auth tokens you may not have configured, and can have a much larger blast radius than a visible mis-click. Only use `/allow-api` when you've decided you want that tradeoff for a specific job.
 
