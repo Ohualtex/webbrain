@@ -2208,12 +2208,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
         break;
       }
-      case 'download_file': {
-        if (parsed.downloadId != null) {
-          return `downloaded id=${parsed.downloadId}${parsed.filename ? `, file=${this._truncate(parsed.filename, 80)}` : ''}`;
-        }
-        break;
-      }
+      case 'download_file':
       case 'download_files': {
         if (Array.isArray(parsed.results)) {
           const ok = parsed.results.filter(r => r?.success).length;
@@ -2869,7 +2864,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (name === 'download_resource_from_page') {
       return await downloadResourceFromPage(tabId, args);
     }
-    if (name === 'download_files') {
+    if (name === 'download_files' || name === 'download_file') {
+      if (args.url && !args.urls) args.urls = [args.url];
       return await downloadFiles(args);
     }
 
@@ -3533,14 +3529,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
-    if (name === 'download_file') {
-      try {
-        const result = await cdpClient.downloadFile(tabId, args.url, args.filename);
-        return result;
-      } catch (e) {
-        return { success: false, error: `Download failed: ${e.message}` };
-      }
-    }
+    // download_file is now handled by download_files (normalized above)
 
     if (name === 'upload_file') {
       try {

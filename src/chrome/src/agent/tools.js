@@ -542,11 +542,11 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'read_downloaded_file',
-      description: 'Read the content of a previously downloaded file. Returns text for text-y files (txt, csv, json, html, xml, code, log, etc.) up to ~16k chars. Returns base64 for small binary files. For large binaries, returns the on-disk path. Pass the downloadId from list_downloads or download_file.',
+      description: 'Read the content of a previously downloaded file. Returns text for text-y files (txt, csv, json, html, xml, code, log, etc.) up to ~16k chars. Returns base64 for small binary files. For large binaries, returns the on-disk path. Pass the downloadId from list_downloads or download_files.',
       parameters: {
         type: 'object',
         properties: {
-          downloadId: { type: 'number', description: 'Download ID from list_downloads or download_file' },
+          downloadId: { type: 'number', description: 'Download ID from list_downloads or download_files' },
         },
         required: ['downloadId'],
       },
@@ -571,28 +571,14 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'download_files',
-      description: 'Download multiple files in parallel (max 3 concurrent, max 50 total). Returns per-URL results with downloadIds. Use list_downloads after to verify completion.',
+      description: 'Download one or more files. Pass a single url string or an array of urls (max 3 concurrent, max 50 total). Returns per-URL results with downloadIds. Use list_downloads after to verify completion.',
       parameters: {
         type: 'object',
         properties: {
+          url: { type: 'string', description: 'Single file URL to download' },
           urls: { type: 'array', items: { type: 'string' }, description: 'Array of file URLs to download' },
+          filename: { type: 'string', description: 'Name to save as (only for single url)' },
         },
-        required: ['urls'],
-      },
-    },
-  },
-  {
-    type: 'function',
-    function: {
-      name: 'download_file',
-      description: 'Download a single file from a URL. The file will be saved to the downloads folder.',
-      parameters: {
-        type: 'object',
-        properties: {
-          url: { type: 'string', description: 'URL of the file to download' },
-          filename: { type: 'string', description: 'Name to save the file as' },
-        },
-        required: ['url'],
       },
     },
   },
@@ -647,7 +633,7 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'download_social_media',
-      description: 'One-shot media downloader for major social sites: Facebook, Instagram, X/Twitter, LinkedIn, Reddit, Pinterest, YouTube (thumbnails only). Auto-detects the active site, picks the main photo/video on single-content pages (/photo/, /p/, /reel/, /status/.../photo/, /pin/, /comments/), or every media item on feeds when scroll:true. Handles per-site DOM quirks, upgrades to max resolution (X name=orig, Pinterest /originals/), pairs Reddit DASH video+audio, stitches HLS (incl. AES-128 encrypted), and falls back to opening in a new tab when a CDN blocks CORS. PREFER this over execute_js / download_file / download_resource_from_page whenever the user asks to "download this image/video", "save this photo", "grab the media" on a supported site — it is a single call instead of figuring DOM selectors out manually. Files land in the browser Downloads folder; call list_downloads afterwards to confirm. RESULT SHAPE: `count` is total URLs found; `triggeredCount` is how many we tried to download; `completedCount` is how many were successfully fetched-and-saved; `openedInTabCount` are URLs the browser blocked from direct fetch (we opened them in a new tab — popup-blocking usually kills these AFTER the first one, so a count > 1 here means most did NOT actually save); `failedCount` are hard errors. ALWAYS report honestly: if `completedCount` is much smaller than `count`, say so — do not claim "downloads in progress in the background"; the run is fully synchronous and what is not in `completedCount` is not coming. May also include a `recommendation` object ({kind, message}) when the in-browser path cannot fully handle the request (YouTube DRM video, MSE blob with nothing buffered yet, unsupported site, empty result). When present, relay `recommendation.message` verbatim to the user — it names the right external CLI tool (yt-dlp or gallery-dl) and includes a copy-pasteable command.',
+      description: 'One-shot media downloader for major social sites: Facebook, Instagram, X/Twitter, LinkedIn, Reddit, Pinterest, YouTube (thumbnails only). Auto-detects the active site, picks the main photo/video on single-content pages (/photo/, /p/, /reel/, /status/.../photo/, /pin/, /comments/), or every media item on feeds when scroll:true. Handles per-site DOM quirks, upgrades to max resolution (X name=orig, Pinterest /originals/), pairs Reddit DASH video+audio, stitches HLS (incl. AES-128 encrypted), and falls back to opening in a new tab when a CDN blocks CORS. PREFER this over execute_js / download_files / download_resource_from_page whenever the user asks to "download this image/video", "save this photo", "grab the media" on a supported site — it is a single call instead of figuring DOM selectors out manually. Files land in the browser Downloads folder; call list_downloads afterwards to confirm. RESULT SHAPE: `count` is total URLs found; `triggeredCount` is how many we tried to download; `completedCount` is how many were successfully fetched-and-saved; `openedInTabCount` are URLs the browser blocked from direct fetch (we opened them in a new tab — popup-blocking usually kills these AFTER the first one, so a count > 1 here means most did NOT actually save); `failedCount` are hard errors. ALWAYS report honestly: if `completedCount` is much smaller than `count`, say so — do not claim "downloads in progress in the background"; the run is fully synchronous and what is not in `completedCount` is not coming. May also include a `recommendation` object ({kind, message}) when the in-browser path cannot fully handle the request (YouTube DRM video, MSE blob with nothing buffered yet, unsupported site, empty result). When present, relay `recommendation.message` verbatim to the user — it names the right external CLI tool (yt-dlp or gallery-dl) and includes a copy-pasteable command.',
       parameters: {
         type: 'object',
         properties: {
@@ -953,14 +939,14 @@ SCRATCHPAD — use this for long tasks:
   (b) Whenever you finalize a plan — "Plan: (1) download all pages (DONE), (2) read each, (3) regex <tr> rows, (4) emit CSV."
   (c) When you finish a chunk of iterative work — "Processed pages 1-10. Next: 11."
   (d) When you discover a non-obvious fact you'll need later — "API endpoint /api/investors 404s, use HTML scrape." "Download path: /Users/me/Downloads/page{N}.html."
-  (e) IMMEDIATELY after \`download_file\` / \`download_files\` returns success: pin the local path(s) and downloadId(s). The next tool that needs them (\`upload_file\`, \`read_downloaded_file\`) needs exact paths, and after a few screenshots the original tool result will not be reliably attended to. Format: \`Downloaded: chrome.zip → /Users/.../Downloads/webbrain-chrome-5.1.0.zip (id 800), firefox.zip → /Users/.../Downloads/webbrain-firefox-5.1.0.zip (id 801).\`
+  (e) IMMEDIATELY after \`download_files\` returns success: pin the local path(s) and downloadId(s). The next tool that needs them (\`upload_file\`, \`read_downloaded_file\`) needs exact paths, and after a few screenshots the original tool result will not be reliably attended to. Format: \`Downloaded: chrome.zip → /Users/.../Downloads/webbrain-chrome-5.1.0.zip (id 800), firefox.zip → /Users/.../Downloads/webbrain-firefox-5.1.0.zip (id 801).\`
 - Keep entries SHORT and FACTUAL. One line per fact. The pad is visible on every future turn — scan it before picking your next action, especially if you're about to restart something.
 - Don't use the scratchpad for short tasks (< 5 tool calls) or for prose reasoning. It's working memory, not a journal.
 
 DON'T REDO WORK YOU'VE ALREADY DONE — read this:
 - If a tool returned \`success: true\` earlier this conversation, the work is done. Don't navigate back to the source and re-do it "to be safe". Re-doing wastes tens of seconds, doubles disk/server cost, and tells the user you don't trust your own state.
 - Before navigating back to a previously-used file source (a downloads-list page, a search results page, a repo's /tree/.../dist folder), check: (a) does the scratchpad already record the resource I need? (b) is the resource still on disk from an earlier \`download_files\`? (c) is this URL one I've already \`fetch_url\`-ed this turn? If yes to any, skip the navigate and use the existing handle.
-- DOWNLOADS specifically: if \`download_file\` / \`download_files\` succeeded for a file this conversation, the file is at the path that tool returned. Use that path directly in \`upload_file({filePath: "...", selector: "..."})\`. Do NOT navigate back to the source folder and re-download. The most common failure mode that produces this loop: an auto-screenshot replaces the recent text context, you can no longer "see" the download paths, you decide to fetch them again — instead, scan your scratchpad and tool-call history before navigating.
+- DOWNLOADS specifically: if \`download_files\` succeeded for a file this conversation, the file is at the path that tool returned. Use that path directly in \`upload_file({filePath: "...", selector: "..."})\`. Do NOT navigate back to the source folder and re-download. The most common failure mode that produces this loop: an auto-screenshot replaces the recent text context, you can no longer "see" the download paths, you decide to fetch them again — instead, scan your scratchpad and tool-call history before navigating.
 - FETCHES specifically: if \`fetch_url\` / \`research_url\` already returned content for a URL this conversation, don't re-fetch — the content is in your context. If the result was truncated, scroll/extract within the existing result rather than hitting the URL again.
 - VISITS specifically: if you already read \`/foo/bar\`'s accessibility tree and got ref_ids, ref_ids are stable across calls. To re-read a subtree, call \`get_accessibility_tree({ref_id: "ref_N"})\` instead of re-navigating.
 - "Verification" of a previous step is a screenshot of the destination, not a redo of the origin step. If a click_ax navigated you somewhere and you're not sure it landed, take a screenshot of the current page; do not navigate back and click again.
@@ -1057,7 +1043,7 @@ SCROLLING — read this:
 - After filling visible fields, always scroll down to check for more fields before submitting.
 
 SOCIAL MEDIA DOWNLOADS — read this:
-- When the user asks to download images or videos from Facebook, Instagram, X/Twitter, LinkedIn, Reddit, Pinterest, or YouTube (thumbnails), call \`download_social_media\` — it is a SINGLE tool call that handles the per-site DOM, picks the right resolution, and saves to the Downloads folder. Do NOT inspect the page with \`get_accessibility_tree\` + \`download_file\` to figure it out yourself; the tool already knows.
+- When the user asks to download images or videos from Facebook, Instagram, X/Twitter, LinkedIn, Reddit, Pinterest, or YouTube (thumbnails), call \`download_social_media\` — it is a SINGLE tool call that handles the per-site DOM, picks the right resolution, and saves to the Downloads folder. Do NOT inspect the page with \`get_accessibility_tree\` + \`download_files\` to figure it out yourself; the tool already knows.
 - Defaults: on single-content pages (e.g. /photo/, /p/, /reel/, /status/.../photo/, /pin/, /comments/) it grabs the main item; pass \`scroll:true\` to walk a feed/profile/timeline and capture everything that lazy-loads.
 - After it returns, optionally call \`list_downloads\` to surface the saved filenames for the user. Some CDNs (notably media.licdn.com) block CORS and the tool will open the media in a new tab as fallback — that is expected behavior, not a failure.
 - The tool may return a \`recommendation\` field with shape \`{ kind, message }\`. This means SMD knowingly cannot handle the request well — most often YouTube full video (Widevine DRM + signatureCipher), an MSE blob the player hasn't loaded yet, or a site outside SMD's supported list. When it appears, RELAY \`recommendation.message\` to the user verbatim in your reply — it points them at the right external CLI tool (\`yt-dlp\` for video, \`gallery-dl\` for images) with a copy-pasteable command. Do NOT try to work around it with \`get_accessibility_tree\` or repeated tool calls — the recommendation exists precisely because those paths cannot help.

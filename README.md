@@ -147,8 +147,7 @@ Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `si
 | `execute_js` | -- | Yes | -- | Run custom JavaScript (**Firefox only** — blocked by MV3 CSP on Chrome) |
 | `fetch_url` | Yes | Yes | Yes | Fetch a URL from the background with the user's cookies |
 | `research_url` | Yes | Yes | -- | Open a URL in a hidden tab, wait for JS rendering, return content |
-| `download_file` | -- | Yes | -- | Download a single file from a URL (Chrome only) |
-| `download_files` | -- | Yes | -- | Download multiple files in parallel |
+| `download_files` | -- | Yes | -- | Download one or more files (single url or array, max 3 concurrent) |
 | `download_resource_from_page` | -- | Yes | -- | Download an `<img>`/`<video>`/blob URL from the current page |
 | `download_social_media` | -- | Yes | Yes | One-shot media download from Facebook, Instagram, X, LinkedIn, Reddit, Pinterest, YouTube |
 | `list_downloads` | Yes | Yes | -- | List recent downloads with status and source URLs |
