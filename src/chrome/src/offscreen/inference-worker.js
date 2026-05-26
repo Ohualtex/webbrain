@@ -333,15 +333,24 @@ self.addEventListener('message', async (e) => {
             const loweredDtype = String(effectiveDtype || dtype || '').toLowerCase();
             const quantized = loweredDtype.startsWith('q') || loweredDtype.includes('int8') || loweredDtype.includes('int4');
             if (quantized) {
+              // WASM path for quantized models often misses GatherBlockQuantized;
+              // instead of failing immediately, retry on WebGPU with fp16 first.
+              effectiveDtype = 'fp16';
               _runtimeDeviceMode = 'webgpu';
               _outputLocationMode = 'auto';
               await disposeActivePipeline();
-              throw new Error(
-                `webgpu map/buffer retry failed and WASM fallback is disabled for quantized dtype (${effectiveDtype || dtype || 'unknown'}), ` +
-                `because CPUExecutionProvider often lacks GatherBlockQuantized kernels. ` +
-                `Keep device=webgpu and try dtype=fp16 or smaller context/tokens. ` +
-                `Underlying error: ${retryMsg}`
-              );
+              pipe = await getPipeline(modelId, effectiveDtype, device, _outputLocationMode, _runtimeDeviceMode);
+              try {
+                return await pipe(messages || [], generateArgs);
+              } catch (fp16Err) {
+                const fp16Msg = fp16Err?.message || String(fp16Err);
+                throw new Error(
+                  `webgpu map/buffer retry failed for quantized dtype (${dtype || 'unknown'}), ` +
+                  `and fp16 WebGPU retry also failed. WASM fallback remains disabled for quantized models ` +
+                  `because CPUExecutionProvider often lacks GatherBlockQuantized kernels. ` +
+                  `Try smaller context/tokens. Underlying errors: quantized=${retryMsg}; fp16=${fp16Msg}`
+                );
+              }
             }
 
             // Second retry: WebGPU buffer is still unstable; fall back to WASM.
