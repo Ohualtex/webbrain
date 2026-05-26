@@ -34,6 +34,7 @@ let _activePipelineKey = null; // `${modelId}|${dtype}|${device}`
 let _activePipeline = null;    // text-generation pipeline instance
 let _config = null;            // { transformersUrl, wasmMjsUrl, wasmUrl } from init
 let _outputLocationMode = 'auto'; // 'auto' | 'gpu-buffer'
+let _runtimeDeviceMode = 'webgpu'; // 'webgpu' | 'wasm'
 
 /**
  * Dynamic import transformers.js using the URL passed from offscreen.js.
@@ -80,10 +81,11 @@ async function loadLibrary() {
   return _libPromise;
 }
 
-async function getPipeline(modelId, dtype, device, outputLocationMode = _outputLocationMode) {
+async function getPipeline(modelId, dtype, device, outputLocationMode = _outputLocationMode, runtimeDeviceMode = _runtimeDeviceMode) {
   // Cache key includes dtype + device so editing those in Settings
   // rebuilds the pipeline instead of silently reusing the old one.
-  const key = `${modelId}|${dtype || 'default'}|${device || 'webgpu'}|${outputLocationMode}`;
+  const effectiveDevice = runtimeDeviceMode || device || 'webgpu';
+  const key = `${modelId}|${dtype || 'default'}|${effectiveDevice}|${outputLocationMode}`;
   if (_activePipeline && _activePipelineKey === key) return _activePipeline;
   const lib = await loadLibrary();
   const { pipeline } = lib;
@@ -104,7 +106,7 @@ async function getPipeline(modelId, dtype, device, outputLocationMode = _outputL
       } catch (e) { adapterInfo = { error: e.message }; }
     }
     console.log('[webgpu-worker] pipeline init', {
-      modelId, dtype, device,
+      modelId, dtype, device: effectiveDevice,
       libraryVersion: _libraryVersion,
       navigatorGpu: gpuAvailable,
       adapter: adapterInfo,
@@ -121,7 +123,7 @@ async function getPipeline(modelId, dtype, device, outputLocationMode = _outputL
     try { await _activePipeline.dispose(); } catch {}
   }
   const pipelineOptions = {
-    device: device || 'webgpu',
+    device: effectiveDevice,
     dtype: dtype || 'q4f16',
     progress_callback: (ev) => postProgress(modelId, ev),
   };
@@ -291,18 +293,37 @@ self.addEventListener('message', async (e) => {
         generateArgs.tools = opts.tools.map(t => t.function || t);
       }
       let output;
-      try {
-        output = await pipe(messages || [], generateArgs);
-      } catch (err) {
-        const msg = err?.message || String(err);
-        const cpuError = msg.includes('The data is not on CPU');
-        const mapError = msg.includes('Failed to download data from buffer') || msg.includes("Failed to execute 'mapAsync'");
-        if (!cpuError && !mapError) throw err;
-        _outputLocationMode = mapError ? 'gpu-buffer' : 'auto';
-        await disposeActivePipeline();
-        pipe = await getPipeline(modelId, dtype, device, _outputLocationMode);
-        output = await pipe(messages || [], generateArgs);
-      }
+      const runWithRetries = async () => {
+        try {
+          return await pipe(messages || [], generateArgs);
+        } catch (err) {
+          const msg = err?.message || String(err);
+          const cpuError = msg.includes('The data is not on CPU');
+          const mapError = msg.includes('Failed to download data from buffer') || msg.includes("Failed to execute 'mapAsync'");
+          if (!cpuError && !mapError) throw err;
+
+          // First retry: toggle output mode inside WebGPU.
+          _outputLocationMode = mapError ? 'gpu-buffer' : 'auto';
+          _runtimeDeviceMode = 'webgpu';
+          await disposeActivePipeline();
+          pipe = await getPipeline(modelId, dtype, device, _outputLocationMode, _runtimeDeviceMode);
+          try {
+            return await pipe(messages || [], generateArgs);
+          } catch (retryErr) {
+            const retryMsg = retryErr?.message || String(retryErr);
+            const retryMapError = retryMsg.includes('Failed to download data from buffer') || retryMsg.includes("Failed to execute 'mapAsync'");
+            if (!retryMapError) throw retryErr;
+
+            // Second retry: WebGPU buffer is still unstable; fall back to WASM.
+            _outputLocationMode = 'auto';
+            _runtimeDeviceMode = 'wasm';
+            await disposeActivePipeline();
+            pipe = await getPipeline(modelId, dtype, device, _outputLocationMode, _runtimeDeviceMode);
+            return await pipe(messages || [], generateArgs);
+          }
+        }
+      };
+      output = await runWithRetries();
       const text = extractGeneratedText(output);
       const toolCalls = extractToolCalls(text);
       self.postMessage({
