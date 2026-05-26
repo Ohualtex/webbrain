@@ -161,6 +161,10 @@ Key difference: Chrome uses Manifest V3 (service worker, `chrome.scripting`, `si
 | `solve_captcha` | No | Yes | Solve CAPTCHAs via CapSolver API (optional, requires API key) |
 | `done` | Yes | Yes | Signal task completion |
 
+All tools use the same schema in both modes — Ask mode simply filters to the read-only subset. A **compact system prompt** for small local models (under 8B) exists but is currently disabled; all providers receive the full prompt.
+
+> **Shadow DOM note:** The accessibility tree only traverses light DOM. On Web Component-heavy pages (Stripe, Salesforce, Shopify), use `get_interactive_elements` (pierces open shadow roots) or `get_shadow_dom` / `shadow_dom_query` for targeted reads.
+
 ## LM Studio plugin
 
 The `fetch_url` and `research_url` tools also ship as a standalone
