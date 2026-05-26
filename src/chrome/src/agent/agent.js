@@ -1832,13 +1832,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * Small/local models get a compact prompt to save context budget.
    */
   _getActPrompt() {
-    // Compact prompt temporarily disabled — all providers get the full
-    // prompt. The UI checkbox and provider config are preserved so it
-    // can be re-enabled later by uncommenting the block below.
-    // try {
-    //   const provider = this.providerManager.getActive();
-    //   if (provider.useCompactPrompt) return SYSTEM_PROMPT_ACT_COMPACT;
-    // } catch { /* provider not ready yet — use full prompt */ }
+    try {
+      const provider = this.providerManager.getActive();
+      if (provider.useCompactPrompt) return SYSTEM_PROMPT_ACT_COMPACT;
+    } catch { /* provider not ready yet — use full prompt */ }
     return SYSTEM_PROMPT_ACT;
   }
 
@@ -5232,7 +5229,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode, compact: provider.useCompactPrompt });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     let finalResponse = '';
@@ -5450,7 +5447,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._persist(tabId);
 
     const provider = this.providerManager.getActive();
-    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode });
+    const tools = getToolsForMode(mode, { strictSecretMode: this.strictSecretMode, compact: provider.useCompactPrompt });
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
     // See processMessage — used to break the empty-response→nudge cycle.
