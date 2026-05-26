@@ -34,4 +34,5 @@ export class WebGPUProvider extends BaseLLMProvider {
   async chat() { throw new Error(NOT_YET); }
   async *chatStream() { throw new Error(NOT_YET); }
   async testConnection() { return { ok: false, error: NOT_YET }; }
+  async clearCache() { return { ok: false, error: NOT_YET }; }
 }

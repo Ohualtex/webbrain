@@ -259,6 +259,25 @@ self.addEventListener('message', async (e) => {
     return;
   }
 
+  if (type === 'clear-cache') {
+    try {
+      if (_activePipeline && _activePipeline.dispose) {
+        try { await _activePipeline.dispose(); } catch {}
+      }
+      _activePipeline = null;
+      _activePipelineKey = null;
+      _libPromise = null;
+      const deleted = [];
+      for (const name of ['transformers-cache', 'experimental_transformers-hash-cache']) {
+        if (await caches.delete(name)) deleted.push(name);
+      }
+      self.postMessage({ id, ok: true, deletedCaches: deleted });
+    } catch (err) {
+      self.postMessage({ id, ok: false, error: err.message });
+    }
+    return;
+  }
+
   if (type === 'chat') {
     try {
       const { modelId, dtype, device, messages, options } = payload;

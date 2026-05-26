@@ -162,6 +162,20 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg.type !== 'webgpu-clear-cache') return false;
+  (async () => {
+    try {
+      await ensureWorker();
+      const res = await sendToWorker('clear-cache', {});
+      sendResponse(res);
+    } catch (e) {
+      sendResponse({ ok: false, error: e.message });
+    }
+  })();
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg.type !== 'webgpu-chat') return false;
   (async () => {
     try {

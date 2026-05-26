@@ -162,6 +162,16 @@ export class WebGPUProvider extends BaseLLMProvider {
     }
   }
 
+  async clearCache() {
+    try {
+      const res = await this._dispatch({ type: 'webgpu-clear-cache' });
+      if (!res || res.error) return { ok: false, error: res?.error || 'clear-cache failed' };
+      return { ok: true, deletedCaches: res.deletedCaches || [] };
+    } catch (e) {
+      return { ok: false, error: e.message };
+    }
+  }
+
   /**
    * Send a message to the offscreen document and await its reply.
    * Lazily creates the offscreen doc if it doesn't exist yet — same

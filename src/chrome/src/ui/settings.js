@@ -6,7 +6,7 @@ import { t, getLocale, setLocale, LANGUAGES } from './i18n.js';
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '9.0.0';
+const EXT_VERSION = '9.0.2';
 
 const providersContainer = document.getElementById('providers');
 const verboseToggle = document.getElementById('toggle-verbose');
@@ -713,6 +713,7 @@ function renderProviders() {
         <button class="btn-primary btn-save" data-provider="${id}">${escapeHtml(t('st.providers.save'))}</button>
         <button class="btn-secondary btn-test" data-provider="${id}">${escapeHtml(t('st.providers.test'))}</button>
         ${!isActive ? `<button class="btn-secondary btn-activate" data-provider="${id}">${escapeHtml(t('st.providers.set_active'))}</button>` : ''}
+        ${config.type === 'webgpu' ? `<button class="btn-secondary btn-clear-cache" data-provider="${id}">${escapeHtml(t('st.providers.clear_cache'))}</button>` : ''}
       </div>
       <div class="test-result" id="test-${id}"></div>
     `;
@@ -741,6 +742,9 @@ function renderProviders() {
   });
   document.querySelectorAll('.btn-load-models').forEach(btn => {
     btn.addEventListener('click', () => loadProviderModels(btn.dataset.provider));
+  });
+  document.querySelectorAll('.btn-clear-cache').forEach(btn => {
+    btn.addEventListener('click', () => clearWebGPUCache(btn.dataset.provider));
   });
   // OAuth-Claude-specific bindings. These only fire if the OAuth card is
   // currently rendered (i.e., expanded — collapsed bodies aren't in DOM).
@@ -1019,6 +1023,21 @@ async function testProvider(id) {
   } else {
     testEl.className = 'test-result show fail';
     testEl.textContent = t('st.providers.failed', { error: res.error });
+  }
+}
+
+async function clearWebGPUCache(id) {
+  const testEl = document.getElementById(`test-${id}`);
+  testEl.className = 'test-result show';
+  testEl.textContent = t('st.providers.clearing_cache');
+  testEl.style.color = 'var(--text2)';
+  try {
+    const res = await sendToBackground('clear_webgpu_cache');
+    testEl.className = 'test-result show ok';
+    testEl.textContent = t('st.providers.cache_cleared');
+  } catch (e) {
+    testEl.className = 'test-result show fail';
+    testEl.textContent = t('st.providers.cache_clear_failed', { error: e.message });
   }
 }
 
