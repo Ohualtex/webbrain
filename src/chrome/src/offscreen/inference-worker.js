@@ -122,19 +122,10 @@ async function getPipeline(modelId, dtype, device) {
   _activePipeline = await pipeline('text-generation', modelId, {
     device: device || 'webgpu',
     dtype: dtype || 'q4f16',
-    // Keep model outputs as GPU buffers instead of mapping them back
-    // to CPU after every forward pass. Qwen 3.5 is a hybrid
-    // Mamba+Transformer architecture with past_conv / past_recurrent
-    // state tensors (in addition to the usual transformer KV cache);
-    // mapping all of those across the GPU/CPU boundary every step
-    // triggers Dawn's "Failed to allocate memory for buffer mapping"
-    // when the model is also vision-capable. transformers.js normally
-    // sets this for KV-cache-keys when the model config provides a
-    // cache_config, but for hybrid/vision models the cache names
-    // aren't always populated — setting it globally as a fallback.
-    session_options: {
-      preferredOutputLocation: 'gpu-buffer',
-    },
+    // Do not force preferredOutputLocation='gpu-buffer' globally.
+    // For chat generation, transformers.js needs CPU-readable values in
+    // parts of its post-processing path; forcing all outputs to GPU can
+    // raise "The data is not on CPU. Use getData() ..." at runtime.
     progress_callback: (ev) => postProgress(modelId, ev),
   });
   _activePipelineKey = key;
