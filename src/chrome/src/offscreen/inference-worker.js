@@ -279,9 +279,10 @@ self.addEventListener('message', async (e) => {
   if (type === 'chat') {
     try {
       const { modelId, dtype, device, messages, options } = payload;
+      let effectiveDtype = dtype;
       let pipe;
       try {
-        pipe = await getPipeline(modelId, dtype, device);
+        pipe = await getPipeline(modelId, effectiveDtype, device);
       } catch (initErr) {
         const initMsg = initErr?.message || String(initErr);
         const missingKernel = initMsg.includes('Kernel not found') || initMsg.includes('GatherBlockQuantized');
@@ -292,7 +293,7 @@ self.addEventListener('message', async (e) => {
         _runtimeDeviceMode = 'webgpu';
         _outputLocationMode = 'auto';
         await disposeActivePipeline();
-        pipe = await getPipeline(modelId, dtype, device, _outputLocationMode, _runtimeDeviceMode);
+        pipe = await getPipeline(modelId, effectiveDtype, device, _outputLocationMode, _runtimeDeviceMode);
       }
       const opts = options || {};
       const generateArgs = {
@@ -314,7 +315,8 @@ self.addEventListener('message', async (e) => {
           const msg = err?.message || String(err);
           const cpuError = msg.includes('The data is not on CPU');
           const mapError = msg.includes('Failed to download data from buffer') || msg.includes("Failed to execute 'mapAsync'");
-          if (!cpuError && !mapError) throw err;
+          const unalignedAccess = msg.includes('operation does not support unaligned accesses');
+          if (!cpuError && !mapError && !unalignedAccess) throw err;
 
           // First retry: toggle output mode inside WebGPU.
           _outputLocationMode = mapError ? 'gpu-buffer' : 'auto';
@@ -350,6 +352,17 @@ self.addEventListener('message', async (e) => {
               }
               throw wasmErr;
             }
+          }
+
+          // Some WebGPU kernels reject 4-bit layouts with unaligned access
+          // requirements. Retry once on fp16 to use aligned tensors.
+          if (unalignedAccess) {
+            effectiveDtype = 'fp16';
+            _runtimeDeviceMode = 'webgpu';
+            _outputLocationMode = 'auto';
+            await disposeActivePipeline();
+            pipe = await getPipeline(modelId, effectiveDtype, device, _outputLocationMode, _runtimeDeviceMode);
+            return await pipe(messages || [], generateArgs);
           }
         }
       };
