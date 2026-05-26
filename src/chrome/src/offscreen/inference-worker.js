@@ -330,6 +330,20 @@ self.addEventListener('message', async (e) => {
             const retryMapError = retryMsg.includes('Failed to download data from buffer') || retryMsg.includes("Failed to execute 'mapAsync'");
             if (!retryMapError) throw retryErr;
 
+            const loweredDtype = String(effectiveDtype || dtype || '').toLowerCase();
+            const quantized = loweredDtype.startsWith('q') || loweredDtype.includes('int8') || loweredDtype.includes('int4');
+            if (quantized) {
+              _runtimeDeviceMode = 'webgpu';
+              _outputLocationMode = 'auto';
+              await disposeActivePipeline();
+              throw new Error(
+                `webgpu map/buffer retry failed and WASM fallback is disabled for quantized dtype (${effectiveDtype || dtype || 'unknown'}), ` +
+                `because CPUExecutionProvider often lacks GatherBlockQuantized kernels. ` +
+                `Keep device=webgpu and try dtype=fp16 or smaller context/tokens. ` +
+                `Underlying error: ${retryMsg}`
+              );
+            }
+
             // Second retry: WebGPU buffer is still unstable; fall back to WASM.
             _outputLocationMode = 'auto';
             _runtimeDeviceMode = 'wasm';
