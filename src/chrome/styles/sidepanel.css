@@ -41,6 +41,228 @@ body {
   height: 100vh;
 }
 
+/* ==========================================================================
+   ONBOARDING OVERLAY — first-launch wizard
+   ========================================================================== */
+
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--bg-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  animation: fadeIn 0.3s ease;
+}
+
+.onboarding.hidden {
+  display: none;
+}
+
+.ob-card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ob-step-indicator {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 28px;
+}
+
+.ob-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.3s, transform 0.3s;
+}
+
+.ob-step-dot.active {
+  background: var(--accent);
+  transform: scale(1.25);
+}
+
+.ob-step-dot.done {
+  background: var(--success);
+}
+
+.ob-step {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  animation: fadeIn 0.25s ease;
+}
+
+.ob-step.active {
+  display: flex;
+}
+
+.ob-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--accent-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  color: var(--accent);
+}
+
+.ob-icon-warn {
+  background: rgba(255, 152, 0, 0.12);
+  color: var(--warning);
+}
+
+.ob-icon-key {
+  background: rgba(76, 175, 80, 0.12);
+  color: var(--success);
+}
+
+.ob-step h2 {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.ob-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+}
+
+.ob-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.ob-warn-list,
+.ob-provider-list {
+  text-align: left;
+  width: 100%;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ob-warn-list li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  background: rgba(255, 152, 0, 0.08);
+  border: 1px solid rgba(255, 152, 0, 0.18);
+  border-radius: var(--radius-sm);
+  position: relative;
+  padding-left: 32px;
+}
+
+.ob-warn-list li::before {
+  content: '!';
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: rgba(255, 152, 0, 0.2);
+  color: var(--warning);
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ob-provider-list li {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  padding: 10px 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.ob-settings-btn {
+  margin-top: 14px;
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 20px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.ob-settings-btn:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ob-nav {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 28px;
+  gap: 10px;
+}
+
+.ob-btn {
+  flex: 1;
+  padding: 10px 0;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+
+.ob-btn:active {
+  transform: scale(0.97);
+}
+
+.ob-btn-next {
+  background: var(--accent);
+  color: #fff;
+}
+
+.ob-btn-next:hover {
+  background: var(--accent-hover);
+}
+
+.ob-btn-back {
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.ob-btn-back:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.ob-btn.hidden {
+  visibility: hidden;
+}
+
+
 /* Header */
 #header {
   display: flex;

@@ -6,7 +6,7 @@ import { t, getLocale, setLocale, LANGUAGES } from './i18n.js';
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '8.0.3';
+const EXT_VERSION = '8.1.1';
 
 const providersContainer = document.getElementById('providers');
 const verboseToggle = document.getElementById('toggle-verbose');
@@ -630,6 +630,9 @@ function renderProviders() {
   const entries = Object.entries(providersData);
   let visibleCount = 0;
   for (const [id, config] of entries) {
+    // Claude Pro/Max subscription OAuth flow is broken — hide until fixed.
+    if (id === 'claude_subscription') continue;
+
     const isActive = id === activeProviderId;
     const fieldDefs = providerConfigs[id]?.fields || [];
 

@@ -6,6 +6,60 @@
 import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations } from './i18n.js';
 import { sanitizeMarkdownLinks } from './markdown-link.js';
 
+// ─── Onboarding (first-launch wizard) ───────────────────────────────
+(async function initOnboarding() {
+  const stored = await browser.storage.local.get('onboardingComplete');
+  if (stored.onboardingComplete) return;
+
+  const overlay = document.getElementById('onboarding');
+  if (!overlay) return;
+
+  applyDOMTranslations(overlay);
+  overlay.classList.remove('hidden');
+
+  const steps = overlay.querySelectorAll('.ob-step');
+  const dots = overlay.querySelectorAll('.ob-step-dot');
+  const nextBtn = document.getElementById('ob-next');
+  const backBtn = document.getElementById('ob-back');
+  const settingsBtn = document.getElementById('ob-open-settings');
+  const totalSteps = steps.length;
+  let current = 0;
+
+  function goTo(idx) {
+    steps[current].classList.remove('active');
+    dots[current].classList.remove('active');
+    dots[current].classList.add('done');
+
+    current = idx;
+
+    steps[current].classList.add('active');
+    dots.forEach((d, i) => {
+      d.classList.toggle('active', i === current);
+      d.classList.toggle('done', i < current);
+    });
+
+    backBtn.classList.toggle('hidden', current === 0);
+    nextBtn.textContent = current === totalSteps - 1 ? t('ob.btn.done') : t('ob.btn.next');
+  }
+
+  nextBtn.addEventListener('click', () => {
+    if (current < totalSteps - 1) {
+      goTo(current + 1);
+    } else {
+      browser.storage.local.set({ onboardingComplete: true }).catch(() => {});
+      overlay.classList.add('hidden');
+    }
+  });
+
+  backBtn.addEventListener('click', () => {
+    if (current > 0) goTo(current - 1);
+  });
+
+  settingsBtn.addEventListener('click', () => {
+    browser.runtime.openOptionsPage();
+  });
+})();
+
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('user-input');
 const sendBtn = document.getElementById('btn-send');

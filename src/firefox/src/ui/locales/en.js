@@ -84,6 +84,26 @@ export default {
   'tool.extract_data.type': 'Extracting {type}',
   'tool.wait_for_element.selector': 'Waiting for "{selector}"',
 
+  // --- Onboarding --------------------------------------------------------
+  'ob.step': '{current} of {total}',
+  'ob.welcome.title': 'Welcome to WebBrain',
+  'ob.welcome.body': 'WebBrain is an AI browser agent that lives in your sidebar. It can read pages, answer questions, fill forms, click buttons, and automate multi-step tasks across the web.',
+  'ob.welcome.note': 'Let's walk through a couple of things before you get started.',
+  'ob.act.title': 'Be careful with Act mode',
+  'ob.act.body': 'WebBrain has two modes: Ask and Act. In Act mode the agent takes real actions inside your browser — clicking, typing, scrolling, and navigating — on your behalf.',
+  'ob.act.warn1': 'It operates in your authenticated session, so it has access to every site you're logged into.',
+  'ob.act.warn2': 'It can open and switch tabs, which means it may navigate away from the page you're on.',
+  'ob.act.warn3': 'Always keep an eye on what it's doing. You can stop the agent at any time with the Stop button.',
+  'ob.tokens.title': 'Connect an LLM provider',
+  'ob.tokens.body': 'WebBrain needs a language model to work. Open Settings and add at least one provider:',
+  'ob.tokens.option_lmstudio': 'LM Studio — run models locally for free. Start LM Studio, load a model, and WebBrain connects automatically.',
+  'ob.tokens.option_openai': 'OpenAI / ChatGPT API — paste your API key to use GPT-4o or other OpenAI models.',
+  'ob.tokens.option_other': 'Other providers — Anthropic, Groq, Gemini, OpenRouter, Ollama, and llama.cpp are also supported.',
+  'ob.btn.next': 'Next',
+  'ob.btn.back': 'Back',
+  'ob.btn.settings': 'Open Settings',
+  'ob.btn.done': 'Get Started',
+
   // --- Settings ----------------------------------------------------------
   'st.title': 'WebBrain Settings',
   'st.subtitle': 'Configure your LLM providers and display preferences · v{version}',
