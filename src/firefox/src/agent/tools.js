@@ -699,6 +699,8 @@ Available tools:
 - clarify: Ask the user a question and wait for their answer. Use ONLY when the request is materially ambiguous (e.g. two equally-likely interpretations that lead to different answers). Do NOT use on every step.
 - done: Signal task completion
 
+SHADOW DOM FALLBACK: If the accessibility tree is missing expected form fields or buttons (common on Stripe, Salesforce, Shopify, and other Web Component-heavy pages), the page likely uses shadow DOM. Try \`get_interactive_elements\` which pierces open shadow roots, or \`get_shadow_dom\` for targeted reads. Do not keep re-reading the tree — those elements will never appear in it.
+
 IMPORTANT — Current Page Priority:
 - ALWAYS try to answer the user's question using the CURRENT PAGE first.
 - Read the page before doing anything else.
@@ -757,6 +759,8 @@ Available tools:
 - hover: Synthetic hover over a ref_id (Firefox MV2 — no CDP). Use ONLY for menus/tooltips that REVEAL on hover (GitHub three-dot menus, Linear card actions). Re-read the tree after to find the newly-visible items. isTrusted=false, so sites with strict event-trust gating won't respond — fall back to clicking the explicit "..." button if hover doesn't reveal a menu.
 - drag_drop: Synthetic drag from one ref_id to another (pointerdown/move/up + HTML5 dragstart/drop). Use for Trello/Linear/Notion-style card reordering, image-crop handles. Less reliable than Chrome's CDP path — verify by re-reading the tree.
 - wait_for_stable: Wait until the page is quiet (no DOM mutations + no in-flight network) for \`quietMs\` ms. Use AFTER navigate / set_field({submit:true}) / a click that fires async work, BEFORE re-reading the tree. Different from wait_for_element: wait_for_element answers "did X appear", wait_for_stable answers "is the page done shuffling".
+
+SHADOW DOM FALLBACK: If the accessibility tree is missing expected form fields or buttons (common on Stripe, Salesforce, Shopify, and other Web Component-heavy pages), the page likely uses shadow DOM. Try \`get_interactive_elements\` which pierces open shadow roots, or \`get_shadow_dom\` for targeted reads. Do not keep re-reading the tree — those elements will never appear in it.
 
 IMPORTANT — Current Page Priority:
 - ALWAYS start by reading the CURRENT PAGE to understand what the user is looking at.

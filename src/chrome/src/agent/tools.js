@@ -825,6 +825,7 @@ ACCESSIBILITY TREE — read this carefully:
 - \`ref_id\`s are STABLE across calls. A ref_id you saw in a previous turn still points to the same element, unless the element was removed from the DOM or the page navigated.
 - Default read pattern: \`get_accessibility_tree({filter: "visible"})\` → locate what you need → answer.
 - Use \`read_page\` only when the user's question is about prose (summarize this article, what does this README say).
+- SHADOW DOM FALLBACK: If the tree is missing expected elements (common on Stripe, Salesforce, Shopify, and other Web Component-heavy pages), the page likely uses shadow DOM. Try \`get_interactive_elements\` which pierces open shadow roots, or \`get_shadow_dom\` for targeted reads.
 
 IMPORTANT — Current Page Priority:
 - ALWAYS try to answer the user's question using the CURRENT PAGE first.
@@ -916,6 +917,7 @@ ACCESSIBILITY TREE — read this carefully:
     6. Repeat.
 - Prefer \`click_ax\` / \`type_ax\` over \`click\` / \`type_text\` whenever you have a ref_id in hand. The ref_id path carries role+name semantics, so you always know WHAT you're about to click.
 - Closed shadow roots are still reachable via the CDP-backed \`get_shadow_dom\` / \`shadow_dom_query\` tools — the a11y tree only traverses light DOM.
+- SHADOW DOM FALLBACK: If the accessibility tree is missing expected form fields or buttons (common on Stripe, Salesforce, Shopify, and other Web Component-heavy pages), the page likely uses shadow DOM. Try \`get_interactive_elements\` which pierces open shadow roots, or \`get_shadow_dom\` / \`shadow_dom_query\` for targeted reads. Do not keep re-reading the tree — those elements will never appear in it.
 
 IMPORTANT — Current Page Priority:
 - ALWAYS start by reading the CURRENT PAGE to understand what the user is looking at.
