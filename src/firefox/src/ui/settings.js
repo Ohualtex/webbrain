@@ -3,10 +3,11 @@
  */
 
 import { t, getLocale, setLocale, LANGUAGES } from './i18n.js';
+import { THEME_MODES, applyMode, loadMode, watch } from './theme.js';
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '8.7.0';
+const EXT_VERSION = '8.8.0';
 
 const providersContainer = document.getElementById('providers');
 const verboseToggle = document.getElementById('toggle-verbose');
@@ -50,7 +51,41 @@ const btnTestCaptcha = document.getElementById('btn-test-captcha');
 const btnClearCaptcha = document.getElementById('btn-clear-captcha');
 const captchaTestResult = document.getElementById('test-captcha');
 const languageSelect = document.getElementById('select-language');
+const themeSelect = document.getElementById('select-theme');
 const subtitleEl = document.getElementById('subtitle');
+
+// --- Appearance / theme ---
+// Loaded from browser.storage.local (canonical) with a localStorage mirror
+// kept in sync by theme.js — so the FOUC bootstrap in <head> always has the
+// latest mode on next page open. watch() keeps every open extension page
+// (this settings tab + the side panel) in sync if any one of them flips it.
+let currentThemeMode = 'system';
+if (themeSelect) {
+  loadMode().then((mode) => {
+    currentThemeMode = mode;
+    themeSelect.value = mode;
+    applyMode(mode, { syncStorage: false }); // already loaded, just paint
+  });
+  themeSelect.addEventListener('change', () => {
+    const mode = THEME_MODES.includes(themeSelect.value) ? themeSelect.value : 'system';
+    currentThemeMode = mode;
+    applyMode(mode);
+  });
+  watch(() => currentThemeMode);
+  // If another Settings tab or the side panel flips the theme, watch()
+  // already re-paints this page — but the closure variable and the select
+  // value won't update on their own. Without this, the picker drifts out
+  // of sync and a later OS-theme flip can re-apply the stale 'system'.
+  if (globalThis.browser?.storage?.onChanged) {
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'local' || !changes.themeMode) return;
+      const next = changes.themeMode.newValue;
+      if (!THEME_MODES.includes(next)) return;
+      currentThemeMode = next;
+      if (themeSelect.value !== next) themeSelect.value = next;
+    });
+  }
+}
 
 function renderSubtitle() {
   if (subtitleEl) subtitleEl.textContent = t('st.subtitle', { version: EXT_VERSION });
