@@ -77,8 +77,8 @@ export default {
   'tool.wait_for_element.selector': '「{selector}」を待機',
 
   'st.title': 'WebBrain 設定',
-  'st.subtitle': 'LLM プロバイダーと表示設定を構成 · v{version}',
-  'st.tab.display': '表示',
+  'st.subtitle': 'LLM プロバイダーと設定を構成 · v{version}',
+  'st.tab.display': '一般',
   'st.tab.providers': 'プロバイダー',
   'st.tab.vision': '画像認識',
   'st.tab.profile': 'プロフィール',

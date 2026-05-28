@@ -118,8 +118,8 @@ export default {
 
   // --- Settings ----------------------------------------------------------
   'st.title': 'WebBrain Settings',
-  'st.subtitle': 'Configure your LLM providers and display preferences · v{version}',
-  'st.tab.display': 'Display',
+  'st.subtitle': 'Configure your LLM providers and preferences · v{version}',
+  'st.tab.display': 'General',
   'st.tab.providers': 'Providers',
   'st.tab.vision': 'Vision',
   'st.tab.multimodal': 'Multimodal',

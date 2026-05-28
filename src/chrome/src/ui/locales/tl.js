@@ -77,8 +77,8 @@ export default {
   'tool.wait_for_element.selector': 'Naghihintay sa "{selector}"',
 
   'st.title': 'Mga Setting ng WebBrain',
-  'st.subtitle': 'I-configure ang iyong mga LLM provider at display preference · v{version}',
-  'st.tab.display': 'Display',
+  'st.subtitle': 'I-configure ang iyong mga LLM provider at preference · v{version}',
+  'st.tab.display': 'General',
   'st.tab.providers': 'Mga Provider',
   'st.tab.vision': 'Bisyon',
   'st.tab.profile': 'Profile',

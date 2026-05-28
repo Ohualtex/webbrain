@@ -77,8 +77,8 @@ export default {
   'tool.wait_for_element.selector': '«{selector}» bekleniyor',
 
   'st.title': 'WebBrain Ayarları',
-  'st.subtitle': 'LLM sağlayıcılarını ve görüntü tercihlerini yapılandır · v{version}',
-  'st.tab.display': 'Görüntü',
+  'st.subtitle': 'LLM sağlayıcılarını ve tercihleri yapılandır · v{version}',
+  'st.tab.display': 'Genel',
   'st.tab.providers': 'Sağlayıcılar',
   'st.tab.vision': 'Görme',
   'st.tab.profile': 'Profil',
