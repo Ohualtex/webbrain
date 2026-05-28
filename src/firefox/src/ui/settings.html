@@ -4,22 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebBrain Settings</title>
-  <!-- Theme bootstrap — synchronous, before paint. Mirrors the one in
-       sidepanel.html so opening Settings in light mode doesn't flash dark. -->
-  <script>
-    (function () {
-      try {
-        var mode = localStorage.getItem('wbTheme');
-        if (mode !== 'light' && mode !== 'dark') mode = 'system';
-        var theme = (mode === 'system')
-          ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-          : mode;
-        document.documentElement.setAttribute('data-theme', theme);
-      } catch (_) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      }
-    })();
-  </script>
+  <!-- Theme bootstrap — runs before <style> so data-theme is set before any
+       paint. External classic script because Firefox MV2's CSP forbids
+       inline scripts without an explicit unsafe-inline. -->
+  <script src="theme-bootstrap.js"></script>
   <style>
     :root {
       --bg: #1a1a2e;

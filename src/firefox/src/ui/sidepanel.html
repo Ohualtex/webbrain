@@ -4,23 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WebBrain</title>
-  <!-- Theme bootstrap — synchronous, runs before stylesheets paint so the
-       panel opens in the visitor's chosen theme without a dark-flash. The
-       module loader will later import theme.js and wire up storage syncing. -->
-  <script>
-    (function () {
-      try {
-        var mode = localStorage.getItem('wbTheme');
-        if (mode !== 'light' && mode !== 'dark') mode = 'system';
-        var theme = (mode === 'system')
-          ? (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
-          : mode;
-        document.documentElement.setAttribute('data-theme', theme);
-      } catch (_) {
-        document.documentElement.setAttribute('data-theme', 'dark');
-      }
-    })();
-  </script>
+  <!-- Theme bootstrap MUST load before the stylesheet so data-theme is set
+       on <html> before any paint. External classic script (not inline,
+       not module) — Firefox MV2's CSP also forbids inline without an
+       explicit unsafe-inline, and modules are deferred so they'd run
+       AFTER first paint. -->
+  <script src="theme-bootstrap.js"></script>
   <link rel="stylesheet" href="../../styles/sidepanel.css">
   <link rel="stylesheet" href="../../vendor/katex/katex.min.css">
   <!-- KaTeX is loaded as classic scripts (not modules). They assign to
