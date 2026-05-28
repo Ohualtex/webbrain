@@ -142,6 +142,11 @@ export default {
 
   'st.display.language.label': 'Language',
   'st.display.language.desc': 'Interface language for the WebBrain plugin.',
+  'st.display.theme.label': 'Appearance',
+  'st.display.theme.desc': 'Light, dark, or follow your OS setting.',
+  'st.display.theme.system': 'System',
+  'st.display.theme.light': 'Light',
+  'st.display.theme.dark': 'Dark',
   'st.display.verbose.label': 'Verbose Mode',
   'st.display.verbose.desc': 'Show full tool call details, arguments, and raw JSON results. Off by default for a cleaner chat experience.',
   'st.display.screenshot.label': 'Screenshot Fallback',

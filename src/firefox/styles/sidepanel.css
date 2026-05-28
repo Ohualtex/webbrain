@@ -1,5 +1,10 @@
 /* WebBrain Side Panel Styles */
 
+/* Theme tokens — dark defaults on :root, cream-light overrides on
+   :root[data-theme="light"]. The theme bootstrap in sidepanel.html /
+   settings.html sets the attribute before first paint to avoid FOUC.
+   Hardcoded rgba(255,255,255,*) tints across the file moved to --tint-*
+   tokens so they invert per theme. */
 :root {
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
@@ -14,10 +19,42 @@
   --success: #4caf50;
   --warning: #ff9800;
   --error: #f44336;
+  --error-soft: #ff8a80;
   --border: rgba(255, 255, 255, 0.08);
+  --tint-soft: rgba(255, 255, 255, 0.05);
+  --tint-soft-2: rgba(255, 255, 255, 0.04);
+  --tint-medium: rgba(255, 255, 255, 0.08);
+  --overlay-bg: rgba(0, 0, 0, 0.30);
+  --overlay-bg-strong: rgba(0, 0, 0, 0.40);
   --radius: 12px;
   --radius-sm: 8px;
   --shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg-primary: #f7f1e6;       /* warm cream — main panel background */
+  --bg-secondary: #fffdf8;     /* cards, message bubbles */
+  --bg-tertiary: #ebe0c9;      /* deeper cream — section dividers */
+  --bg-input: #fdf6e0;         /* input fields */
+  --text-primary: #2c1810;     /* espresso */
+  --text-secondary: #6b5b47;   /* mocha */
+  --text-muted: #9b8c75;       /* lighter mocha */
+  --accent: #5b52e8;
+  --accent-hover: #4a42c4;
+  --accent-dim: rgba(91, 82, 232, 0.12);
+  --success: #2d8866;
+  --warning: #b97a00;
+  --error: #c5363c;
+  --error-soft: #b04349;
+  --border: rgba(89, 55, 25, 0.15);
+  --tint-soft: rgba(89, 55, 25, 0.05);
+  --tint-soft-2: rgba(89, 55, 25, 0.07);
+  --tint-medium: rgba(89, 55, 25, 0.10);
+  --overlay-bg: rgba(89, 55, 25, 0.10);
+  --overlay-bg-strong: rgba(89, 55, 25, 0.18);
+  --shadow: 0 2px 8px rgba(89, 55, 25, 0.10);
+  color-scheme: light;
 }
 
 * {
@@ -237,7 +274,7 @@ body {
 
 .ob-btn-back:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tint-soft);
 }
 
 .ob-btn.hidden {
@@ -915,7 +952,7 @@ body {
 
 /* Code blocks */
 .message-content code {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--overlay-bg);
   padding: 1px 4px;
   border-radius: 3px;
   font-family: 'SF Mono', 'Fira Code', monospace;
@@ -923,7 +960,7 @@ body {
 }
 
 .message-content pre {
-  background: rgba(0, 0, 0, 0.3);
+  background: var(--overlay-bg);
   padding: 8px;
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
   overflow-x: auto;
@@ -950,7 +987,7 @@ body {
   align-items: center;
   justify-content: space-between;
   padding: 4px 8px;
-  background: rgba(0, 0, 0, 0.4);
+  background: var(--overlay-bg-strong);
   border-bottom: 1px solid var(--border);
   font-size: 10px;
 }
@@ -975,7 +1012,7 @@ body {
 .code-copy-btn:hover {
   color: var(--text-primary);
   border-color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tint-soft);
 }
 
 .code-copy-btn.copied {
@@ -1006,7 +1043,7 @@ body {
 .msg-copy-btn:hover {
   color: var(--text-primary);
   border-color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tint-soft);
 }
 
 .msg-copy-btn.copied {
@@ -1057,7 +1094,7 @@ body {
 .message.error .message-content {
   background: rgba(244, 67, 54, 0.1);
   border: 1px solid rgba(244, 67, 54, 0.3);
-  color: #ff8a80;
+  color: var(--error-soft);
 }
 
 /* Clarify card — agent paused to ask user a question */
@@ -1095,7 +1132,7 @@ body {
 .clarify-option {
   text-align: left;
   padding: 8px 10px;
-  background: var(--bg-input, rgba(255,255,255,0.04));
+  background: var(--bg-input);
   color: var(--text-primary);
   border: 1px solid var(--border);
   border-radius: 4px;

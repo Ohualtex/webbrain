@@ -5,6 +5,25 @@
 
 import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations } from './i18n.js';
 import { sanitizeMarkdownLinks } from './markdown-link.js';
+import { applyMode, loadMode, watch } from './theme.js';
+
+// Hydrate the theme from browser.storage.local (the inline <head> bootstrap
+// only sees localStorage; if the user changes the theme on another device
+// or page, sync it in here) and subscribe to live changes so the panel
+// re-paints when the Settings page flips it.
+let currentThemeMode = 'system';
+loadMode().then((mode) => {
+  currentThemeMode = mode;
+  applyMode(mode, { syncStorage: false });
+});
+watch(() => currentThemeMode);
+if (globalThis.browser?.storage?.onChanged) {
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.themeMode) {
+      currentThemeMode = changes.themeMode.newValue || 'system';
+    }
+  });
+}
 
 // ─── Onboarding (first-launch wizard) ───────────────────────────────
 (async function initOnboarding() {
