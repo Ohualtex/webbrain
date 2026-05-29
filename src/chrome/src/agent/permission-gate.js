@@ -23,36 +23,44 @@
 
 export const Capability = {
   NAVIGATE: 'navigate',          // navigate / new_tab to a host
-  CLICK: 'click',                // click / click_ax
-  TYPE: 'type',                  // type_text / type_ax / set_field
+  CLICK: 'click',                // click / click_ax / iframe_click / drag_drop / Enter / submit
+  TYPE: 'type',                  // type_text / type_ax / iframe_type / set_field (no submit)
   EXECUTE_JS: 'execute_js',      // execute_js
   NETWORK: 'network_write',      // fetch_url / research_url with a write method
   DOWNLOAD: 'download',          // download_* tools
+  UPLOAD: 'upload',              // upload_file (selects a local file)
 };
 
 // Human-readable verb for the permission prompt: "WebBrain wants to <label> <host>".
 export const CAPABILITY_LABEL = {
   [Capability.NAVIGATE]: 'navigate to',
-  [Capability.CLICK]: 'click on',
+  [Capability.CLICK]: 'click / submit on',
   [Capability.TYPE]: 'type into',
   [Capability.EXECUTE_JS]: 'run JavaScript on',
   [Capability.NETWORK]: 'send a write request to',
   [Capability.DOWNLOAD]: 'download files from',
+  [Capability.UPLOAD]: 'upload a file to',
 };
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
-// Tool name -> capability. Tools absent from this map (and fetch_url with a
-// non-write method) are read-only and never gated.
+// Tool name -> capability. EVERY side-effecting tool must be here (or handled
+// in capabilityFor below). Tools absent from this map are read-only and never
+// gated — adding a new state-changing tool without listing it would silently
+// bypass the gate, so keep this exhaustive.
 const TOOL_CAPABILITY = {
   navigate: Capability.NAVIGATE,
   new_tab: Capability.NAVIGATE,
   click: Capability.CLICK,
   click_ax: Capability.CLICK,
+  iframe_click: Capability.CLICK,
+  drag_drop: Capability.CLICK,
   type_text: Capability.TYPE,
   type_ax: Capability.TYPE,
-  set_field: Capability.TYPE,
+  iframe_type: Capability.TYPE,
   execute_js: Capability.EXECUTE_JS,
+  upload_file: Capability.UPLOAD,
+  download_file: Capability.DOWNLOAD,
   download_files: Capability.DOWNLOAD,
   download_resource_from_page: Capability.DOWNLOAD,
   download_social_media: Capability.DOWNLOAD,
@@ -60,13 +68,28 @@ const TOOL_CAPABILITY = {
 
 /**
  * Map a tool call to its gated capability, or null if the tool is read-only /
- * not gated. fetch_url and research_url are only gated when they carry a write
- * method (GET/HEAD reads are not consequential).
+ * not gated. Some tools are gated conditionally on their arguments:
+ *   - fetch_url/research_url: only when carrying a write method.
+ *   - set_field: TYPE normally, but CLICK when submit:true (pressing Enter
+ *     submits the form — a TYPE grant must not authorize a submit).
+ *   - press_keys: Enter can submit/activate → CLICK; Tab/Escape are benign.
  */
 export function capabilityFor(name, args) {
+  args = args || {};
   if (name === 'fetch_url' || name === 'research_url') {
-    const method = String((args && args.method) || 'GET').toUpperCase();
+    const method = String(args.method || 'GET').toUpperCase();
     return MUTATION_METHODS.has(method) ? Capability.NETWORK : null;
+  }
+  if (name === 'set_field') {
+    return args.submit ? Capability.CLICK : Capability.TYPE;
+  }
+  if (name === 'press_keys') {
+    const keys = JSON.stringify(args.key ?? args.keys ?? '').toLowerCase();
+    const benign = /\b(tab|escape|esc)\b/.test(keys);
+    const risky = /\b(enter|return)\b/.test(keys);
+    // Enter (or an unrecognized key) → treat as a submit/activation; pure
+    // Tab/Escape navigation is benign.
+    return (benign && !risky) ? null : Capability.CLICK;
   }
   return TOOL_CAPABILITY[name] || null;
 }

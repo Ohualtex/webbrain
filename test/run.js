@@ -1869,6 +1869,27 @@ test('capabilityFor: state-changing tools map to capabilities', () => {
   assert.equal(capabilityFor('fetch_url', { url: 'https://api.x.com', method: 'POST' }), Capability.NETWORK);
 });
 
+test('capabilityFor: no side-effecting tool slips through ungated', () => {
+  // iframe + drag + upload + chrome download alias
+  assert.equal(capabilityFor('iframe_click', {}), Capability.CLICK);
+  assert.equal(capabilityFor('iframe_type', {}), Capability.TYPE);
+  assert.equal(capabilityFor('drag_drop', {}), Capability.CLICK);
+  assert.equal(capabilityFor('upload_file', {}), Capability.UPLOAD);
+  assert.equal(capabilityFor('download_file', {}), Capability.DOWNLOAD);
+});
+
+test('set_field with submit:true requires CLICK, not the weaker TYPE', () => {
+  assert.equal(capabilityFor('set_field', { ref_id: 'r', text: 'x' }), Capability.TYPE);
+  assert.equal(capabilityFor('set_field', { ref_id: 'r', text: 'x', submit: true }), Capability.CLICK);
+});
+
+test('press_keys: Enter is a submit (CLICK); Tab/Escape are benign (null)', () => {
+  assert.equal(capabilityFor('press_keys', { key: 'Enter' }), Capability.CLICK);
+  assert.equal(capabilityFor('press_keys', { key: 'Escape' }), null);
+  assert.equal(capabilityFor('press_keys', { key: 'Tab' }), null);
+  assert.equal(capabilityFor('press_keys', {}), Capability.CLICK); // unknown → gate, fail safe
+});
+
 test('normalizeHost strips scheme/www/port/path', () => {
   assert.equal(normalizeHost('https://www.GitHub.com/foo/bar'), 'github.com');
   assert.equal(normalizeHost('http://example.com:8080/x'), 'example.com');
