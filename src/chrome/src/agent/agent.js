@@ -4355,6 +4355,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               hint: `The clicked link had target="_blank" and opened in a new tab. To keep the agent on one tab, the spawned tab was closed and this tab was navigated to ${redirectedText.url}. Take a screenshot or call read_page to see the destination.`,
             };
           }
+          const clickX = Math.round(info.x);
+          const clickY = Math.round(info.y);
+          this._lastInteractionRect.set(tabId, { x: clickX, y: clickY, w: 1, h: 1, ts: Date.now() });
           return {
             success: true,
             method: 'cdp-by-text',
@@ -4362,6 +4365,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             tag: info.tag,
             text: info.text,
             matched: args.text,
+            x: clickX,
+            y: clickY,
+            rect: { x: clickX, y: clickY, w: 1, h: 1 },
             ...(warning ? { warning } : {}),
           };
         }
@@ -4572,6 +4578,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               hint: `The clicked coordinate hit a target="_blank" link. The spawned tab was closed and this tab was navigated to ${redirectedCoord.url} so the agent stays on a single tab.`,
             };
           }
+          this._lastInteractionRect.set(tabId, {
+            x: Math.round(Number(args.x)),
+            y: Math.round(Number(args.y)),
+            w: 1,
+            h: 1,
+            ts: Date.now(),
+          });
           return { success: true, method: 'cdp-coords', x: args.x, y: args.y };
         }
         // index-based: fall through to content-script path which knows the
@@ -5002,6 +5015,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     } catch { /* tab lookup failures are non-fatal — fall through */ }
 
+    if (name === 'scroll') {
+      args = this._augmentScrollArgsWithLastInteraction(tabId, args);
+    }
+
     try {
       const response = await chrome.tabs.sendMessage(tabId, {
         target: 'content',
@@ -5078,10 +5095,33 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    */
   _recordInteractionRect(tabId, toolName, response) {
     if (!response || !response.success) return;
-    if (toolName !== 'click_ax' && toolName !== 'type_ax' && toolName !== 'set_field') return;
+    if (toolName !== 'click' && toolName !== 'click_ax' && toolName !== 'type_ax' && toolName !== 'set_field') return;
     const r = response.rect;
-    if (!r || !r.w || !r.h) return;
-    this._lastInteractionRect.set(tabId, { x: r.x, y: r.y, w: r.w, h: r.h, ts: Date.now() });
+    if (r && r.w && r.h) {
+      this._lastInteractionRect.set(tabId, { x: r.x, y: r.y, w: r.w, h: r.h, ts: Date.now() });
+      return;
+    }
+    if (Number.isFinite(Number(response.x)) && Number.isFinite(Number(response.y))) {
+      this._lastInteractionRect.set(tabId, {
+        x: Math.round(Number(response.x)),
+        y: Math.round(Number(response.y)),
+        w: 1,
+        h: 1,
+        ts: Date.now(),
+      });
+    }
+  }
+
+  _augmentScrollArgsWithLastInteraction(tabId, args = {}) {
+    if (!args || args.ref_id != null || args.x != null || args.y != null) return args || {};
+    const last = this._lastInteractionRect.get(tabId);
+    if (!last || Date.now() - last.ts > 60000) return args;
+    return {
+      ...args,
+      x: Math.round(last.x + last.w / 2),
+      y: Math.round(last.y + last.h / 2),
+      origin: 'last_interaction',
+    };
   }
 
   /**
