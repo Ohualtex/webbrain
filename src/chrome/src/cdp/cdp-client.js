@@ -334,6 +334,50 @@ export class CDPClient {
   }
 
   /**
+   * Read back the FileList attached to an <input type=file> so callers can
+   * confirm a setFileInputFiles actually took effect. CDP's
+   * DOM.setFileInputFiles does NOT throw on a non-existent path — it silently
+   * attaches an entry whose `size` reads as 0 — so a successful command is not
+   * proof the file landed. We can't tell a missing path from a genuine empty
+   * file by size alone (a real .gitkeep is also 0 bytes), so we additionally
+   * try to READ one byte: a non-existent path rejects (NotFoundError /
+   * NotReadableError) while a real file — even an empty one — reads fine.
+   * Returns an array of {name, size, type, readable}, or null if the element
+   * is not a file input / could not be resolved. `readable` is true/false when
+   * the probe ran, or null if it couldn't be determined.
+   */
+  async getFileInputFiles(tabId, nodeId) {
+    await this.sendCommand(tabId, 'DOM.enable');
+    await this.sendCommand(tabId, 'Runtime.enable');
+    const resolved = await this.sendCommand(tabId, 'DOM.resolveNode', { nodeId });
+    const objectId = resolved?.object?.objectId;
+    if (!objectId) return null;
+    const res = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
+      functionDeclaration: `async function () {
+        if (!this.files) return null;
+        const out = [];
+        for (const f of Array.from(this.files)) {
+          let readable = null;
+          try {
+            // Read 1 byte to force the browser to actually open the file.
+            // Cheap at any size; rejects only when the path is missing.
+            await f.slice(0, 1).arrayBuffer();
+            readable = true;
+          } catch (e) {
+            readable = false;
+          }
+          out.push({ name: f.name, size: f.size, type: f.type, readable });
+        }
+        return out;
+      }`,
+      objectId,
+      returnByValue: true,
+      awaitPromise: true,
+    });
+    return res?.result?.value ?? null;
+  }
+
+  /**
    * Dispatch mouse event.
    */
   async dispatchMouseEvent(tabId, type, x, y, button = 'left') {

@@ -260,11 +260,12 @@ export const AGENT_TOOLS = [
     type: 'function',
     function: {
       name: 'navigate',
-      description: 'Navigate the current tab to a URL.',
+      description: 'Navigate the current tab to a URL. NOTE: leaving a page discards unsaved form state — re-navigating to a page like GitHub\'s "New release" resets the tag, title, and any attached files. If the current page has attached files or filled fields, this is blocked and returns blockedUnsavedChanges; finish the current action first, or pass force:true to discard the changes intentionally.',
       parameters: {
         type: 'object',
         properties: {
           url: { type: 'string', description: 'URL to navigate to' },
+          force: { type: 'boolean', description: 'Set true to navigate even when the current page has unsaved changes (attached files / filled form fields). Default false: navigation is blocked to protect in-progress work.' },
         },
         required: ['url'],
       },
@@ -762,7 +763,17 @@ const DONE_TOOL_STRICT = {
  *
  * `opts.strictSecretMode` swaps in the strict `done` description (see
  * DONE_TOOL_STRICT above). All other tool definitions are mode-invariant.
+ *
+ * `opts.visionAvailable` (default true): when false — the active model has no
+ * vision and no dedicated vision sidecar is configured — the screenshot tools
+ * keep their `save:true` path (which writes a PNG to Downloads without ever
+ * needing vision) but their description is rewritten to tell the model it will
+ * NOT see the image, so it doesn't burn a step trying to "look" at the page.
  */
+const SCREENSHOT_TOOLS = new Set(['screenshot', 'full_page_screenshot']);
+
+const NO_VISION_SCREENSHOT_NOTE = 'IMPORTANT — the active model has NO vision and no vision sidecar is configured: you will NOT see the captured image, so do NOT call this to inspect, read, or verify the page (use get_accessibility_tree, get_interactive_elements, or read_page for that — calling this to "look" wastes a step). The ONLY useful purpose in this configuration is saving the image to the user\'s Downloads folder: call with save:true (optionally filename) when the user explicitly asks to download/save/export a screenshot.';
+
 export function getToolsForMode(mode, opts = {}) {
   let base;
   if (mode === 'ask') {
@@ -771,6 +782,13 @@ export function getToolsForMode(mode, opts = {}) {
     base = AGENT_TOOLS.filter(t => COMPACT_TOOL_NAMES.has(t.function.name));
   } else {
     base = AGENT_TOOLS;
+  }
+  if (opts.visionAvailable === false) {
+    base = base.map(t => (
+      SCREENSHOT_TOOLS.has(t.function.name)
+        ? { ...t, function: { ...t.function, description: `${NO_VISION_SCREENSHOT_NOTE}\n\n${t.function.description}` } }
+        : t
+    ));
   }
   if (!opts.strictSecretMode) return base;
   return base.map(t => (t.function.name === 'done' ? DONE_TOOL_STRICT : t));
