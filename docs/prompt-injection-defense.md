@@ -131,3 +131,44 @@ protect the user on the trusted sites where injected content actually lives
 `UNTRUSTED_CONTENT_TOOLS` even if it's "just a status tool" (see `done`). When in
 doubt, wrap it — wrapping a trusted field is harmless; leaving a page-derived
 field unwrapped is a hole.
+
+---
+
+## Known limitations (accepted)
+
+These are conscious trade-offs, not oversights.
+
+- **Generic interaction is charged to the top-level page host, not the frame
+  it lands in.** `click({x,y})` (CDP coordinate clicks), `type_text`, and
+  `press_keys` go to whatever pixel/element is targeted or focused — which
+  *can* be inside a cross-origin iframe (e.g. an embedded Stripe/PayPal frame).
+  The gate charges these to the page host, so a grant for `merchant.com` also
+  covers a coordinate click that lands in an embedded `stripe.com` frame.
+  - Why accepted: (1) selector/text clicks **can't** reach cross-origin frames
+    (same-origin policy blocks `querySelector` from piercing them), so this is
+    limited to coordinate clicks (Chrome/CDP only — Firefox clicks the
+    `<iframe>` element, not into it) and focus-based typing; (2) for legitimate
+    embedded flows the user grants the merchant page *expecting* checkout —
+    including its payment iframe — to work, so prompting for the provider's
+    host mid-flow is arguably worse UX than the residual risk. The **explicit**
+    `iframe_click` / `iframe_type` tools DO gate on the frame host
+    (`frameHostMatches`), because there the model deliberately names a frame.
+  - If you want to close it: resolve the target frame for coordinate clicks
+    (CDP hit-test) and the focused-frame for keystrokes, then gate on that
+    frame host or fail closed when it's cross-origin. Non-trivial and
+    Chrome/CDP-specific; needs real-browser testing.
+
+- **`solve_captcha` is ungated** (on the `KNOWN_SAFE_TOOLS` allowlist). It
+  spends CapSolver quota and injects a token (firing the widget's
+  `data-callback`, which on some sites auto-submits). Accepted because the cost
+  is bounded, the consequential submit is otherwise gated, and gating it adds a
+  prompt to a precursor the user wants when blocked by a CAPTCHA. Revisit if
+  quota abuse becomes a real concern.
+
+- **`hover` is ungated** — synthetic hover reveals menus/tooltips and commits
+  nothing.
+
+- **An LLM is *not* used anywhere in the gate.** Intent is never inferred from
+  page or prompt text (that approach was tried and removed — it was English-only
+  and leaky). The gate is deterministic capability×origin with the human as the
+  trust anchor.
