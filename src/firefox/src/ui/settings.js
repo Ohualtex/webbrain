@@ -265,6 +265,24 @@ document.getElementById('btn-clear-all-permissions')?.addEventListener('click', 
   renderPermissions();
 });
 
+// Live-sync the Permissions tab when grants (or the master switch) change
+// elsewhere while this page is open — e.g. the agent records a new "Always
+// allow" grant from the side-panel permission card. Without this the list
+// shows a stale snapshot until a manual refresh.
+if (globalThis.browser?.storage?.onChanged) {
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== 'local') return;
+    if (changes[PERMISSIONS_KEY]) renderPermissions();
+    if (changes[GATE_KEY]) {
+      const toggle = document.getElementById('toggle-permission-gate');
+      const warning = document.getElementById('permission-gate-warning');
+      const askBefore = changes[GATE_KEY].newValue ?? true;
+      if (toggle) toggle.checked = askBefore;
+      if (warning) warning.style.display = askBefore ? 'none' : '';
+    }
+  });
+}
+
 // --- Auth ---
 
 function renderAuthSection() {

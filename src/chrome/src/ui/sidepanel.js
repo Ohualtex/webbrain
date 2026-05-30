@@ -1085,6 +1085,7 @@ function renderClarifyCard(data) {
   // return a stable VALUE ('once'/'always'/'deny'), and NO free-text input —
   // so there's nothing to parse and no English/locale dependency.
   if (data.permission && data.permission.capability) {
+    card.dataset.permission = '1';
     const host = String(data.permission.host || '');
     const cap = String(data.permission.capability || '');
     const verb = t('sp.perm.verb.' + cap);
@@ -1175,14 +1176,23 @@ function submitClarify(card, tabId, clarifyId, answer, source) {
   // accepts the first response anyway, but UI feedback matters.
   if (card.classList.contains('clarify-answered')) return;
   card.classList.add('clarify-answered');
-  for (const el of card.querySelectorAll('button, input')) {
-    el.disabled = true;
+
+  // Permission cards are transient: once the user chooses, remove the card
+  // entirely so it doesn't linger at the bottom of the conversation (it could
+  // otherwise render below the run's final result). General clarify cards stay
+  // visible, locked, with the chosen answer shown.
+  if (card.dataset.permission === '1') {
+    card.remove();
+  } else {
+    for (const el of card.querySelectorAll('button, input')) {
+      el.disabled = true;
+    }
+    const answered = document.createElement('div');
+    answered.className = 'clarify-your-answer';
+    answered.textContent = (typeof t === 'function' ? t('sp.clarify.your_answer') : 'Your answer:') + ' ' + answer;
+    card.appendChild(answered);
+    scrollToBottom();
   }
-  const answered = document.createElement('div');
-  answered.className = 'clarify-your-answer';
-  answered.textContent = (typeof t === 'function' ? t('sp.clarify.your_answer') : 'Your answer:') + ' ' + answer;
-  card.appendChild(answered);
-  scrollToBottom();
 
   // IMPORTANT: include `target: 'background'`. Without it, background's
   // message router (chrome.runtime.onMessage in background.js) silently
