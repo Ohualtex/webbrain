@@ -166,47 +166,65 @@ export function frameHostMatches(frameUrl, urlFilter) {
   return host === want || host.endsWith('.' + want);
 }
 
+/** Resolve a URL (relative / protocol-relative / absolute) to a host against a
+ *  base page URL — exactly what the browser handler does (new URL(raw, base)). */
+function resolveHostAgainst(url, base) {
+  if (typeof url !== 'string' || !url) return '';
+  try {
+    const b = (typeof base === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(base)) ? base : undefined;
+    return new URL(url, b).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return normalizeHost(url);
+  }
+}
+
 /**
- * Which host does this capability act on? Navigate/network target the
- * destination URL; click/type/execute/download/record target the current page.
- *
- * The destination is resolved against the current page URL (new URL(raw, base))
- * — exactly what the navigate handler does — so a relative ("/x"), protocol-
- * relative ("//attacker.example/x") or absolute URL all resolve to the host
- * the browser will actually load. Without this, "//attacker.example" parsed to
- * empty and fell back to the current host, letting a current-site grant
- * authorize a cross-origin navigation / exfiltration.
+ * Which host does this capability act on? Navigate/network/download target the
+ * destination URL (resolved against the current page); click/type/execute/
+ * record target the current page. Returns '' for an iframe action whose frame
+ * can't be identified, so the caller fails closed. For the MULTI-host case
+ * (download_files with a urls[] array) use requiredHosts() instead.
  */
 export function hostForCapability(capability, args, currentUrlOrHost, toolName) {
   args = args || {};
-  // iframe_click / iframe_type run in ALL frames and act on the first matching
-  // selector in a (possibly cross-origin) frame named by `urlFilter` — e.g. a
-  // Stripe/PayPal iframe embedded on merchant.com. Charge the permission to the
-  // FRAME host. If urlFilter is missing/garbage we CANNOT identify the frame —
-  // return '' so the caller FAILS CLOSED rather than charging the action to the
-  // current page's grant (which would let merchant.com authorize a click inside
-  // the payment provider).
+  // iframe_click / iframe_type act in a (possibly cross-origin) frame named by
+  // `urlFilter`. Charge the FRAME host; if urlFilter is missing we can't
+  // identify the frame → '' so the caller fails closed.
   if (toolName === 'iframe_click' || toolName === 'iframe_type') {
     return normalizeHost(args.urlFilter);
   }
-  // Navigate / network / download all target a URL → charge the DESTINATION
-  // host (resolved against the current page), falling back to the current host
-  // only when the tool carries no url (e.g. download_resource_from_page, which
-  // downloads from the page itself).
   if (capability === Capability.NAVIGATE || capability === Capability.NETWORK || capability === Capability.DOWNLOAD) {
-    const raw = args && args.url;
-    if (typeof raw === 'string' && raw) {
-      try {
-        const base = (typeof currentUrlOrHost === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(currentUrlOrHost))
-          ? currentUrlOrHost : undefined;
-        return new URL(raw, base).hostname.toLowerCase().replace(/^www\./, '');
-      } catch { /* not resolvable against base → try bare parse */ }
-      const h = normalizeHost(raw);
+    if (typeof args.url === 'string' && args.url) {
+      const h = resolveHostAgainst(args.url, currentUrlOrHost);
       if (h) return h;
     }
     return normalizeHost(currentUrlOrHost);
   }
   return normalizeHost(currentUrlOrHost);
+}
+
+/**
+ * The full set of hosts that must be granted before a tool call runs. Usually
+ * a single host (= hostForCapability), but download_files takes a `urls[]`
+ * array that can span MULTIPLE hosts — each must be permission-checked, or a
+ * grant for one site would authorize downloads from arbitrary others. Returns
+ * [] when the target can't be identified (iframe with no urlFilter) so the
+ * caller fails closed.
+ */
+export function requiredHosts(capability, args, currentUrlOrHost, toolName) {
+  args = args || {};
+  if (capability === Capability.DOWNLOAD && Array.isArray(args.urls) && args.urls.length) {
+    const hosts = [];
+    const seen = new Set();
+    for (const u of args.urls) {
+      const h = resolveHostAgainst(u, currentUrlOrHost);
+      const key = h || normalizeHost(currentUrlOrHost); // url-less entry → page host
+      if (key && !seen.has(key)) { seen.add(key); hosts.push(key); }
+    }
+    return hosts;
+  }
+  const h = hostForCapability(capability, args, currentUrlOrHost, toolName);
+  return h ? [h] : [];
 }
 
 /**

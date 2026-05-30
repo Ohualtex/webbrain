@@ -43,7 +43,7 @@ const { sanitizeMarkdownLinks: sanitizeMarkdownLinksFx } = await import(
 );
 
 // permission-gate.js is pure JS (deterministic capability × origin gate).
-const { Capability, capabilityFor, normalizeHost, hostForCapability, frameHostMatches, PermissionManager, UNTRUSTED_CONTENT_TOOLS } = await import(
+const { Capability, capabilityFor, normalizeHost, hostForCapability, requiredHosts, frameHostMatches, PermissionManager, UNTRUSTED_CONTENT_TOOLS } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/agent/permission-gate.js').replace(/\\/g, '/')
 );
 const {
@@ -1951,6 +1951,24 @@ test('downloads are charged to the target URL host, not the current page', () =>
   );
   // a download with no url (e.g. download_resource_from_page) → current page
   assert.equal(hostForCapability(Capability.DOWNLOAD, {}, top), 'trusted.com');
+});
+
+test('requiredHosts: download_files gates EVERY distinct host in urls[]', () => {
+  const top = 'https://trusted.com/page';
+  // a urls[] array spanning multiple hosts → one entry per distinct host
+  assert.deepEqual(
+    requiredHosts(Capability.DOWNLOAD, { urls: [
+      'https://a.example/1.bin',
+      'https://b.example/2.bin',
+      'https://www.a.example/3.bin', // dedupes with a.example
+    ] }, top).sort(),
+    ['a.example', 'b.example']
+  );
+  // single-host helper still works for navigate/click/etc.
+  assert.deepEqual(requiredHosts(Capability.CLICK, { ref_id: 'r' }, top), ['trusted.com']);
+  assert.deepEqual(requiredHosts(Capability.NAVIGATE, { url: 'https://dest.com/x' }, top), ['dest.com']);
+  // unidentifiable iframe target → [] so the caller fails closed
+  assert.deepEqual(requiredHosts(Capability.CLICK, {}, top, 'iframe_click'), []);
 });
 
 test('hydrateFrom replaces always-grants but keeps once-grants (live revoke)', async () => {

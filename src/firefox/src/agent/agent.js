@@ -19,7 +19,7 @@ import {
 } from './pdf-tools.js';
 import * as trace from '../trace/recorder.js';
 import { solveCaptcha, detectCaptcha, injectToken } from './captcha-solver.js';
-import { Capability, CAPABILITY_LABEL, capabilityFor, hostForCapability, frameHostMatches, PermissionManager, UNTRUSTED_CONTENT_TOOLS } from './permission-gate.js';
+import { Capability, CAPABILITY_LABEL, capabilityFor, requiredHosts, frameHostMatches, PermissionManager, UNTRUSTED_CONTENT_TOOLS } from './permission-gate.js';
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -427,11 +427,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         await this.permissions.hydrate();
         const apiPreGranted = capability === Capability.NETWORK && this.apiAllowedTabs.has(tabId);
         if (!apiPreGranted) {
-          const actHost = hostForCapability(capability, fnArgs, await this._currentUrl(tabId), fnName);
-          if (!actHost) {
+          // Every distinct host the call touches must be granted. Usually one,
+          // but download_files takes a urls[] array that can span many hosts —
+          // each is a separate trust decision.
+          const hosts = requiredHosts(capability, fnArgs, await this._currentUrl(tabId), fnName);
+          if (hosts.length === 0) {
             // Target host couldn't be identified (e.g. an iframe action with no
-            // urlFilter). Fail closed — never charge it to the current page's
-            // grant — and tell the model how to make it checkable.
+            // urlFilter). Fail closed — never charge it to the current page's grant.
             messages.push({
               role: 'tool',
               tool_call_id: tc.id,
@@ -443,29 +445,37 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             });
             continue;
           }
-          const verdict = this.permissions.check(actHost, capability);
-          if (!verdict.allowed) {
+          let blockedHost = null;
+          let aborted = false;
+          for (const host of hosts) {
+            const verdict = this.permissions.check(host, capability);
+            if (verdict.allowed) continue;
             const choice = verdict.needsPrompt
-              ? await this._promptPermission(tabId, capability, actHost, onUpdate)
+              ? await this._promptPermission(tabId, capability, host, onUpdate)
               : 'deny'; // a standing "deny" grant for this (capability, host)
-            if (choice === null) {
-              onUpdate('warning', { message: 'Stopped by user.' });
-              return { action: 'return', value: partialAssistantText || '[Stopped by user]' };
-            }
+            if (choice === null) { aborted = true; break; }
             if (choice === 'deny') {
-              if (verdict.needsPrompt) await this.permissions.record(actHost, capability, 'deny', 'once');
-              messages.push({
-                role: 'tool',
-                tool_call_id: tc.id,
-                content: JSON.stringify({
-                  success: false,
-                  denied: true,
-                  error: `The user denied permission to ${CAPABILITY_LABEL[capability]} ${actHost}. Do NOT retry this action on this site. Continue with what you can without it, or ask the user how to proceed.`,
-                }),
-              });
-              continue;
+              if (verdict.needsPrompt) await this.permissions.record(host, capability, 'deny', 'once');
+              blockedHost = host;
+              break;
             }
-            await this.permissions.record(actHost, capability, 'allow', choice); // 'once' | 'always'
+            await this.permissions.record(host, capability, 'allow', choice); // 'once' | 'always'
+          }
+          if (aborted) {
+            onUpdate('warning', { message: 'Stopped by user.' });
+            return { action: 'return', value: partialAssistantText || '[Stopped by user]' };
+          }
+          if (blockedHost) {
+            messages.push({
+              role: 'tool',
+              tool_call_id: tc.id,
+              content: JSON.stringify({
+                success: false,
+                denied: true,
+                error: `The user denied permission to ${CAPABILITY_LABEL[capability]} ${blockedHost}. Do NOT retry this action on that site. Continue with what you can without it, or ask the user how to proceed.`,
+              }),
+            });
+            continue;
           }
         }
       }
