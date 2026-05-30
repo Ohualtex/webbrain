@@ -143,6 +143,14 @@ export function capabilityFor(name, args) {
   if (name === 'fetch_url' || name === 'research_url') {
     return Capability.NETWORK;
   }
+  if (name === 'read_pdf') {
+    // read_pdf({url}) does fetch(url, {credentials:'include'}) — an outbound,
+    // COOKIE-BEARING GET to an arbitrary host, same exfil class as fetch_url
+    // (worse: it sends auth cookies). Gate per destination host when an
+    // explicit url is given. With no url it reads the ACTIVE TAB's own PDF (the
+    // page the user is already on), not an arbitrary request → ungated.
+    return args.url ? Capability.NETWORK : null;
+  }
   if (name === 'screenshot' || name === 'full_page_screenshot') {
     return args.save ? Capability.DOWNLOAD : null;
   }

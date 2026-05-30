@@ -1862,6 +1862,10 @@ test('capabilityFor: outbound network egress is gated for ALL methods (exfil)', 
   assert.equal(capabilityFor('fetch_url', { url: 'https://x.com' }), Capability.NETWORK); // default GET
   assert.equal(capabilityFor('research_url', { url: 'https://x.com' }), Capability.NETWORK);
   assert.equal(capabilityFor('fetch_url', { url: 'https://api.x.com', method: 'POST' }), Capability.NETWORK);
+  // read_pdf({url}) fetches an arbitrary host with credentials:'include' → gate it;
+  // read_pdf with no url reads the active tab's own PDF → ungated.
+  assert.equal(capabilityFor('read_pdf', { url: 'https://evil.example/?q=secrets' }), Capability.NETWORK);
+  assert.equal(capabilityFor('read_pdf', {}), null);
 });
 
 test('isNetworkMutation: only write-method fetches (so /allow-api cannot waive GET exfil)', () => {
