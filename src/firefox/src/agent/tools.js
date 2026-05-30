@@ -634,7 +634,8 @@ export const AGENT_TOOLS = [
  * Read-only tools allowed in Ask mode.
  */
 export const ASK_ONLY_TOOLS = [
-  'read_page', 'read_pdf', 'screenshot', 'get_interactive_elements', 'scroll',
+  'get_accessibility_tree', 'read_page', 'read_pdf', 'screenshot',
+  'get_interactive_elements', 'scroll',
   'extract_data', 'get_selection', 'clarify', 'done',
   // wait_for_stable just polls — safe in Ask mode.
   'wait_for_stable',
