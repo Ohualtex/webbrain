@@ -422,6 +422,26 @@ export class ProviderManager {
 
     const rawBaseUrl = (provider.config.baseUrl || '').replace(/\/$/, '');
     if (!rawBaseUrl) return { ok: false, error: 'Base URL is empty' };
+
+    // LM Studio: prefer its native /api/v0/models, which (unlike the
+    // OpenAI-compatible /v1/models) reports per-model load `state` and `type`.
+    // The plain /v1/models lists the whole *downloaded* catalog with no load
+    // info, so onboarding ended up offering every model (and even embeddings).
+    // Here we surface only the model(s) actually loaded and drop embeddings;
+    // if nothing is loaded we fall back to the full chat-model list so JIT
+    // loading still works. If the native endpoint is unavailable (older LM
+    // Studio), we fall through to /v1/models below.
+    if (id === 'lmstudio') {
+      const host = rawBaseUrl.replace(/\/v1\/?$/, '');
+      try {
+        const res = await fetch(`${host}/api/v0/models`, { method: 'GET' });
+        if (res.ok) {
+          const models = this._extractLmStudioModels(await res.json());
+          if (models.length) return { ok: true, models };
+        }
+      } catch { /* fall through to /v1/models */ }
+    }
+
     const baseUrl = id === 'ollama'
       ? rawBaseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '')
       : (/\/v1$/.test(rawBaseUrl) ? rawBaseUrl : `${rawBaseUrl}/v1`);
@@ -461,6 +481,22 @@ export class ProviderManager {
         return id === 'ollama' ? m?.name : m?.id;
       })
       .filter(Boolean);
+    return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
+   * Parse LM Studio's native /api/v0/models response, which carries a per-model
+   * `state` ('loaded' | 'not-loaded') and `type` ('llm' | 'vlm' | 'embeddings').
+   * We drop embeddings (not chat models) and, if any chat model is currently
+   * loaded, return only the loaded one(s) — otherwise the full chat list so the
+   * user can still pick one and let LM Studio JIT-load it.
+   */
+  _extractLmStudioModels(data) {
+    const source = Array.isArray(data?.data) ? data.data : [];
+    const chat = source.filter((m) => m && m.id && m.type !== 'embeddings');
+    const loaded = chat.filter((m) => m.state === 'loaded');
+    const pick = loaded.length ? loaded : chat;
+    const ids = pick.map((m) => m.id).filter(Boolean);
     return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
   }
 }
