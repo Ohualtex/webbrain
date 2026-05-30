@@ -3884,8 +3884,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (!attached) {
             return { success: false, error: `Upload did not apply: the file input is still empty after setting "${args.filePath}". The selector likely points at the wrong element — re-inspect with get_interactive_elements.` };
           }
-          if (attached.size === 0) {
-            return { success: false, error: `File "${attached.name}" attached as 0 bytes — "${args.filePath}" almost certainly does not exist at that path. Confirm the absolute path (use list_downloads to see where files were actually saved) and retry.` };
+          // readable === false means the bytes couldn't be read — the path is
+          // missing/unreadable, NOT a real empty file. (A genuine 0-byte file
+          // like a .gitkeep reads fine and reports readable === true, so we
+          // must NOT reject on size alone.) readable === null = probe couldn't
+          // run; fall through to success rather than block a valid upload.
+          if (attached.readable === false) {
+            return { success: false, error: `"${args.filePath}" could not be read — it almost certainly does not exist at that path. Confirm the absolute path (use list_downloads to see where files were actually saved) and retry.` };
           }
           return { success: true, file: args.filePath, attached: { name: attached.name, size: attached.size } };
         }
