@@ -158,6 +158,14 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
 
+    if (this.config.providerName === 'openai') {
+      body.stream_options = { include_usage: true };
+    }
+
+    if (options.extraBody && typeof options.extraBody === 'object') {
+      Object.assign(body, options.extraBody);
+    }
+
     const streamUrl = `${this.baseUrl}/chat/completions`;
     let res;
     try {

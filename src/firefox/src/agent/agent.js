@@ -26,6 +26,9 @@ const COST_ALLOWANCE_SESSION_KEY = 'costAllowanceSessionUsd';
 const COST_ALLOWANCE_TOTAL_KEY = 'costAllowanceTotalUsd';
 const CLOUD_COST_SPENT_KEY = 'cloudCostSpentUsd';
 const COST_EPSILON = 1e-9;
+const TOKENS_PER_MILLION = 1_000_000;
+const DEFAULT_INPUT_COST_PER_MILLION_USD = 3;
+const DEFAULT_OUTPUT_COST_PER_MILLION_USD = 15;
 
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
@@ -141,6 +144,11 @@ export class Agent {
     return Number.isFinite(n) && n > 0 ? n : 0;
   }
 
+  _normalizeCostRate(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+
   _formatUsd(value) {
     const n = Number(value);
     return '$' + (Number.isFinite(n) ? n : 0).toFixed(2);
@@ -161,17 +169,49 @@ export class Agent {
   _isCostMeteredProvider(provider) {
     const config = provider?.config || {};
     if (config.category === 'local') return false;
+    if (config.type === 'anthropic_oauth') return false;
     if (config.category === 'cloud' || config.category === 'router') return true;
     if (config.providerName === 'openrouter') return true;
     if (this._isLocalBaseUrl(config.baseUrl)) return false;
     return !!(config.apiKey && /^https?:\/\//i.test(config.baseUrl || ''));
   }
 
-  _extractUsageCostUsd(usage) {
+  _usageTokenCounts(usage) {
+    const input = Number(
+      usage?.prompt_tokens ??
+      usage?.input_tokens ??
+      usage?.promptTokens ??
+      usage?.inputTokens ??
+      0
+    );
+    const output = Number(
+      usage?.completion_tokens ??
+      usage?.output_tokens ??
+      usage?.completionTokens ??
+      usage?.outputTokens ??
+      0
+    );
+    return {
+      inputTokens: Number.isFinite(input) && input > 0 ? input : 0,
+      outputTokens: Number.isFinite(output) && output > 0 ? output : 0,
+    };
+  }
+
+  _estimateUsageCostUsd(provider, usage) {
+    const config = provider?.config || {};
+    const inputRate = this._normalizeCostRate(config.inputCostPerMillionUsd) ?? DEFAULT_INPUT_COST_PER_MILLION_USD;
+    const outputRate = this._normalizeCostRate(config.outputCostPerMillionUsd) ?? DEFAULT_OUTPUT_COST_PER_MILLION_USD;
+    const { inputTokens, outputTokens } = this._usageTokenCounts(usage);
+    if (!inputTokens && !outputTokens) return 0;
+    return ((inputTokens * inputRate) + (outputTokens * outputRate)) / TOKENS_PER_MILLION;
+  }
+
+  _extractUsageCostUsd(provider, usage) {
     if (!usage || typeof usage !== 'object') return 0;
     const raw = usage.cost_usd ?? usage.costUsd ?? usage.total_cost_usd ?? usage.total_cost ?? usage.totalCost ?? usage.cost;
     const n = typeof raw === 'string' ? Number.parseFloat(raw) : Number(raw);
-    return Number.isFinite(n) && n > 0 ? n : 0;
+    if (Number.isFinite(n) && n > 0) return n;
+    return this._estimateUsageCostUsd(provider, usage);
   }
 
   _newCostRunState() {
@@ -220,7 +260,7 @@ export class Agent {
 
   async _recordCostUsage(provider, usage, costState) {
     if (!this._isCostMeteredProvider(provider)) return null;
-    const costUsd = this._extractUsageCostUsd(usage);
+    const costUsd = this._extractUsageCostUsd(provider, usage);
     if (!costUsd) return null;
     const state = await this._getCostAllowanceState();
     const nextTotal = state.totalSpentUsd + costUsd;
