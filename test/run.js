@@ -78,6 +78,18 @@ const { ProviderManager: ProviderManagerCh } = await import(
 const { ProviderManager: ProviderManagerFx } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/providers/manager.js').replace(/\\/g, '/')
 );
+const { OpenAICompatibleProvider: OpenAIProviderCh } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/providers/openai.js').replace(/\\/g, '/')
+);
+const { OpenAICompatibleProvider: OpenAIProviderFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/providers/openai.js').replace(/\\/g, '/')
+);
+const { Agent: AgentCh } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/agent/agent.js').replace(/\\/g, '/')
+);
+const { Agent: AgentFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/agent/agent.js').replace(/\\/g, '/')
+);
 
 // tools.js — pure ESM. We import both browser builds so prompt/tool routing
 // stays in parity.
@@ -1585,6 +1597,149 @@ test('_defaultConfigs: chrome and firefox share the same provider set', () => {
       chDefaults[id].category, fxDefaults[id].category,
       `provider ${id}: category differs (chrome=${chDefaults[id].category}, firefox=${fxDefaults[id].category})`
     );
+  }
+});
+
+test('OpenAI-compatible streams request usage metadata only for supporting providers', () => {
+  for (const Provider of [OpenAIProviderCh, OpenAIProviderFx]) {
+    for (const config of [
+      { category: 'cloud', providerName: 'gemini' },
+      { category: 'cloud', providerName: 'deepseek' },
+      { category: 'router', providerName: 'openrouter' },
+      { providerName: 'openai' },
+      { category: 'cloud', providerName: 'custom', supportsStreamUsageOptions: true },
+    ]) {
+      const provider = new Provider(config);
+      const body = { stream: true, stream_options: { custom: 'keep' } };
+      provider._addStreamUsageOptions(body);
+      assert.deepEqual(body.stream_options, { custom: 'keep', include_usage: true });
+    }
+
+    for (const config of [
+      { category: 'cloud', providerName: 'mistral' },
+      { category: 'cloud', providerName: 'custom' },
+      { category: 'router', providerName: 'custom-router' },
+      { category: 'cloud', providerName: 'openai', supportsStreamUsageOptions: false },
+    ]) {
+      const provider = new Provider(config);
+      const body = { stream: true };
+      provider._addStreamUsageOptions(body);
+      assert.equal(body.stream_options, undefined);
+    }
+  }
+});
+
+test('OpenAI-compatible local streams do not request usage metadata', () => {
+  for (const Provider of [OpenAIProviderCh, OpenAIProviderFx]) {
+    for (const config of [
+      { category: 'local', providerName: 'ollama' },
+      { category: 'local', providerName: 'lmstudio' },
+      { category: 'local', providerName: 'openai' },
+    ]) {
+      const provider = new Provider(config);
+      const body = { stream: true };
+      provider._addStreamUsageOptions(body);
+      assert.equal(body.stream_options, undefined);
+    }
+  }
+});
+
+test('Agent cost metering treats bracketed local IPv6 URLs as local', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    for (const url of [
+      'http://[::1]:1234/v1',
+      'http://[::]:1234/v1',
+      'http://[fc00::1]:1234/v1',
+      'http://[fd12:3456::1]:1234/v1',
+      'http://[fe80::1]:1234/v1',
+      'http://[::ffff:127.0.0.1]:1234/v1',
+      'http://[::ffff:192.168.1.1]:1234/v1',
+    ]) {
+      assert.equal(agent._isLocalBaseUrl(url), true, `${AgentClass.name} should treat ${url} as local`);
+      assert.equal(
+        agent._isCostMeteredProvider({ config: { type: 'openai', baseUrl: url, apiKey: 'local-key' } }),
+        false,
+        `${AgentClass.name} should not meter ${url}`
+      );
+    }
+  }
+});
+
+test('Agent cost metering treats only real IPv4 literals as local', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    for (const url of [
+      'http://10.1.2.3:1234/v1',
+      'http://127.0.0.1:1234/v1',
+      'http://172.16.0.5:1234/v1',
+      'http://192.168.1.10:1234/v1',
+    ]) {
+      assert.equal(agent._isLocalBaseUrl(url), true, `${AgentClass.name} should treat ${url} as local`);
+    }
+    for (const url of [
+      'https://10.example.com/v1',
+      'https://127.example.com/v1',
+      'https://172.16.example.com/v1',
+      'https://192.168.example.com/v1',
+      'https://999.1.2.3/v1',
+    ]) {
+      assert.equal(agent._isLocalBaseUrl(url), false, `${AgentClass.name} should treat ${url} as remote`);
+      assert.equal(
+        agent._isCostMeteredProvider({ config: { type: 'openai', baseUrl: url, apiKey: 'paid-key' } }),
+        true,
+        `${AgentClass.name} should meter ${url}`
+      );
+    }
+  }
+});
+
+test('Agent cost metering does not charge local URLs saved on cloud cards', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    for (const config of [
+      { type: 'openai', category: 'cloud', providerName: 'nvidia', baseUrl: 'http://localhost:8000/v1', apiKey: 'self-hosted' },
+      { type: 'openai', category: 'cloud', providerName: 'openai', baseUrl: 'http://127.0.0.1:8080/v1', apiKey: 'proxy-key' },
+      { type: 'openai', category: 'router', providerName: 'openrouter', baseUrl: 'http://192.168.1.8:3000/v1', apiKey: 'router-key' },
+      { type: 'openai', category: 'cloud', providerName: 'mistral', baseUrl: 'http://[::1]:1234/v1', apiKey: 'local-key' },
+    ]) {
+      assert.equal(
+        agent._isCostMeteredProvider({ config }),
+        false,
+        `${AgentClass.name} should not meter local override ${config.baseUrl}`
+      );
+    }
+  }
+});
+
+test('Agent cost metering still treats public IPv6 URLs as remote', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    assert.equal(agent._isLocalBaseUrl('https://[2606:4700:4700::1111]/v1'), false);
+    assert.equal(
+      agent._isCostMeteredProvider({ config: { type: 'openai', baseUrl: 'https://[2606:4700:4700::1111]/v1', apiKey: 'paid-key' } }),
+      true
+    );
+  }
+});
+
+test('Agent cost extraction honors reported zero-cost usage', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const provider = { config: { inputCostPerMillionUsd: 100, outputCostPerMillionUsd: 100 } };
+    const usage = { prompt_tokens: 1000, completion_tokens: 1000 };
+    assert.equal(agent._extractUsageCostUsd(provider, { ...usage, cost: 0 }), 0);
+    assert.equal(agent._extractUsageCostUsd(provider, { ...usage, cost_usd: '0' }), 0);
+  }
+});
+
+test('Agent cost extraction estimates only when reported cost is missing', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const provider = { config: { inputCostPerMillionUsd: 100, outputCostPerMillionUsd: 100 } };
+    const usage = { prompt_tokens: 1000, completion_tokens: 1000 };
+    assert.equal(agent._extractUsageCostUsd(provider, usage), 0.2);
+    assert.equal(agent._extractUsageCostUsd(provider, { ...usage, cost: '' }), 0.2);
   }
 });
 

@@ -27,6 +27,15 @@ import {
 } from '../recorder/host.js';
 import { Capability, CAPABILITY_LABEL, capabilitiesFor, requiredHosts, frameHostMatches, isNetworkMutation, PermissionManager, UNTRUSTED_CONTENT_TOOLS } from './permission-gate.js';
 
+const DEFAULT_CLOUD_COST_ALLOWANCE_USD = 10;
+const COST_ALLOWANCE_SESSION_KEY = 'costAllowanceSessionUsd';
+const COST_ALLOWANCE_TOTAL_KEY = 'costAllowanceTotalUsd';
+const CLOUD_COST_SPENT_KEY = 'cloudCostSpentUsd';
+const COST_EPSILON = 1e-9;
+const TOKENS_PER_MILLION = 1_000_000;
+const DEFAULT_INPUT_COST_PER_MILLION_USD = 3;
+const DEFAULT_OUTPUT_COST_PER_MILLION_USD = 15;
+
 /**
  * The WebBrain Agent — orchestrates multi-step LLM + tool-use loops.
  */
@@ -40,6 +49,7 @@ export class Agent {
     this.persistTimers = new Map(); // tabId -> debounce handle
     this.abortFlags = new Map(); // tabId -> boolean
     this.currentRunId = new Map(); // tabId -> active trace runId (for recorder hooks)
+    this.currentCostState = new Map(); // tabId -> active cloud/router cost state
     this.maxSteps = 130; // safety limit for autonomous loops (configurable via settings)
     this.maxContextMessages = 50; // trim beyond this
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
@@ -70,6 +80,10 @@ export class Agent {
     // _enrichUserMessageWithCurrentPage because they're URL-specific; the
     // universal preamble rides along with the base system prompt.
     this.useSiteAdapters = true;
+    this.costAllowanceSessionUsd = DEFAULT_CLOUD_COST_ALLOWANCE_USD;
+    this.costAllowanceTotalUsd = DEFAULT_CLOUD_COST_ALLOWANCE_USD;
+    this.cloudCostSpentUsd = 0;
+    this._costUpdateQueue = Promise.resolve();
 
     // Strict secret-handling mode. When true, the `done` tool description
     // adds a hard prohibition on quoting credentials in summaries and the
@@ -163,6 +177,15 @@ export class Agent {
         if (changes.askBeforeConsequentialActions) {
           this._skipPermissionGate = changes.askBeforeConsequentialActions.newValue === false;
         }
+        if (changes[COST_ALLOWANCE_SESSION_KEY]) {
+          this.costAllowanceSessionUsd = this._normalizeCostLimit(changes[COST_ALLOWANCE_SESSION_KEY].newValue);
+        }
+        if (changes[COST_ALLOWANCE_TOTAL_KEY]) {
+          this.costAllowanceTotalUsd = this._normalizeCostLimit(changes[COST_ALLOWANCE_TOTAL_KEY].newValue);
+        }
+        if (changes[CLOUD_COST_SPENT_KEY]) {
+          this.cloudCostSpentUsd = this._normalizeCostSpent(changes[CLOUD_COST_SPENT_KEY].newValue);
+        }
       });
     } catch { /* storage API unavailable in this context */ }
     // Cache for `_isPdfTab` — the URL-pattern check is sync and free,
@@ -184,6 +207,202 @@ export class Agent {
       const o = await chrome.storage.local.get('askBeforeConsequentialActions');
       this._skipPermissionGate = o?.askBeforeConsequentialActions === false;
     } catch { /* default: gate on */ }
+  }
+
+  _normalizeCostLimit(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n < 0) return DEFAULT_CLOUD_COST_ALLOWANCE_USD;
+    return n;
+  }
+
+  _normalizeCostSpent(value) {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  }
+
+  _normalizeCostRate(value) {
+    if (value == null || value === '') return null;
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  }
+
+  _formatUsd(value) {
+    const n = Number(value);
+    return '$' + (Number.isFinite(n) ? n : 0).toFixed(2);
+  }
+
+  _isLocalIpv4Host(host) {
+    if (host === 'localhost') return true;
+    if (!/^\d{1,3}(?:\.\d{1,3}){3}$/.test(host)) return false;
+    const octets = host.split('.').map(part => Number(part));
+    if (octets.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return false;
+    const [a, b] = octets;
+    return host === '0.0.0.0' || a === 127 || a === 10 || (a === 192 && b === 168) ||
+      (a === 172 && b >= 16 && b <= 31);
+  }
+
+  _ipv4FromMappedIpv6(host) {
+    if (!host.startsWith('::ffff:')) return null;
+    const mapped = host.slice('::ffff:'.length);
+    if (mapped.includes('.')) return mapped;
+    const parts = mapped.split(':');
+    if (parts.length !== 2) return null;
+    const hi = Number.parseInt(parts[0], 16);
+    const lo = Number.parseInt(parts[1], 16);
+    if (!Number.isFinite(hi) || !Number.isFinite(lo) || hi < 0 || hi > 0xffff || lo < 0 || lo > 0xffff) return null;
+    return `${(hi >> 8) & 255}.${hi & 255}.${(lo >> 8) & 255}.${lo & 255}`;
+  }
+
+  _isLocalIpv6Host(host) {
+    if (host === '::' || host === '::1') return true;
+    const first = Number.parseInt(host.split(':')[0], 16);
+    if (!Number.isFinite(first)) return false;
+    return (first & 0xfe00) === 0xfc00 || (first & 0xffc0) === 0xfe80;
+  }
+
+  _isLocalBaseUrl(baseUrl) {
+    try {
+      const { hostname } = new URL(baseUrl || '');
+      const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+      const mappedIpv4 = this._ipv4FromMappedIpv6(h);
+      return this._isLocalIpv4Host(mappedIpv4 || h) || this._isLocalIpv6Host(h);
+    } catch {
+      return false;
+    }
+  }
+
+  _isCostMeteredProvider(provider) {
+    const config = provider?.config || {};
+    if (config.category === 'local') return false;
+    if (this._isLocalBaseUrl(config.baseUrl)) return false;
+    if (config.type === 'anthropic_oauth') return false;
+    const isMeteredCategory = config.category === 'cloud' || config.category === 'router';
+    if (isMeteredCategory) return true;
+    if (config.providerName === 'openrouter') return true;
+    return !!(config.apiKey && /^https?:\/\//i.test(config.baseUrl || ''));
+  }
+
+  _usageTokenCounts(usage) {
+    const input = Number(
+      usage?.prompt_tokens ??
+      usage?.input_tokens ??
+      usage?.promptTokens ??
+      usage?.inputTokens ??
+      0
+    );
+    const output = Number(
+      usage?.completion_tokens ??
+      usage?.output_tokens ??
+      usage?.completionTokens ??
+      usage?.outputTokens ??
+      0
+    );
+    return {
+      inputTokens: Number.isFinite(input) && input > 0 ? input : 0,
+      outputTokens: Number.isFinite(output) && output > 0 ? output : 0,
+    };
+  }
+
+  _estimateUsageCostUsd(provider, usage) {
+    const config = provider?.config || {};
+    const inputRate = this._normalizeCostRate(config.inputCostPerMillionUsd) ?? DEFAULT_INPUT_COST_PER_MILLION_USD;
+    const outputRate = this._normalizeCostRate(config.outputCostPerMillionUsd) ?? DEFAULT_OUTPUT_COST_PER_MILLION_USD;
+    const { inputTokens, outputTokens } = this._usageTokenCounts(usage);
+    if (!inputTokens && !outputTokens) return 0;
+    return ((inputTokens * inputRate) + (outputTokens * outputRate)) / TOKENS_PER_MILLION;
+  }
+
+  _extractUsageCostUsd(provider, usage) {
+    if (!usage || typeof usage !== 'object') return 0;
+    const raw = usage.cost_usd ?? usage.costUsd ?? usage.total_cost_usd ?? usage.total_cost ?? usage.totalCost ?? usage.cost;
+    if (raw != null && raw !== '') {
+      const n = typeof raw === 'string' ? Number.parseFloat(raw) : Number(raw);
+      if (Number.isFinite(n) && n >= 0) return n;
+    }
+    return this._estimateUsageCostUsd(provider, usage);
+  }
+
+  _newCostRunState() {
+    return { spentUsd: 0 };
+  }
+
+  async _getCostAllowanceState() {
+    try {
+      const stored = await chrome.storage.local.get([
+        COST_ALLOWANCE_SESSION_KEY,
+        COST_ALLOWANCE_TOTAL_KEY,
+        CLOUD_COST_SPENT_KEY,
+      ]);
+      this.costAllowanceSessionUsd = this._normalizeCostLimit(stored[COST_ALLOWANCE_SESSION_KEY]);
+      this.costAllowanceTotalUsd = this._normalizeCostLimit(stored[COST_ALLOWANCE_TOTAL_KEY]);
+      this.cloudCostSpentUsd = this._normalizeCostSpent(stored[CLOUD_COST_SPENT_KEY]);
+    } catch { /* keep in-memory defaults */ }
+    return {
+      sessionLimitUsd: this.costAllowanceSessionUsd,
+      totalLimitUsd: this.costAllowanceTotalUsd,
+      totalSpentUsd: this.cloudCostSpentUsd,
+    };
+  }
+
+  _costAllowanceMessage(scope, spentUsd, limitUsd) {
+    const scopeText = scope === 'session' ? 'this session' : 'total cloud/router usage';
+    return `Cloud cost allowance reached: ${scopeText} is ${this._formatUsd(spentUsd)} against the ${this._formatUsd(limitUsd)} limit. Stopping before further cloud/router model calls. Increase or reset the allowance in Settings.`;
+  }
+
+  _checkCostAllowanceState(state, costState) {
+    const sessionSpent = this._normalizeCostSpent(costState?.spentUsd);
+    if (sessionSpent + COST_EPSILON >= state.sessionLimitUsd) {
+      return this._costAllowanceMessage('session', sessionSpent, state.sessionLimitUsd);
+    }
+    if (state.totalSpentUsd + COST_EPSILON >= state.totalLimitUsd) {
+      return this._costAllowanceMessage('total', state.totalSpentUsd, state.totalLimitUsd);
+    }
+    return null;
+  }
+
+  async _checkCostAllowance(provider, costState) {
+    if (!this._isCostMeteredProvider(provider)) return null;
+    const state = await this._getCostAllowanceState();
+    return this._checkCostAllowanceState(state, costState);
+  }
+
+  async _recordCostUsage(provider, usage, costState) {
+    if (!this._isCostMeteredProvider(provider)) return null;
+    const costUsd = this._extractUsageCostUsd(provider, usage);
+    if (!costUsd) return null;
+    return this._enqueueCostUpdate(async () => {
+      const state = await this._getCostAllowanceState();
+      const nextTotal = state.totalSpentUsd + costUsd;
+      if (costState) costState.spentUsd = this._normalizeCostSpent(costState.spentUsd) + costUsd;
+      this.cloudCostSpentUsd = nextTotal;
+      try { await chrome.storage.local.set({ [CLOUD_COST_SPENT_KEY]: nextTotal }); } catch {}
+      return this._checkCostAllowanceState({ ...state, totalSpentUsd: nextTotal }, costState);
+    });
+  }
+
+  _enqueueCostUpdate(fn) {
+    const run = this._costUpdateQueue.then(fn, fn);
+    this._costUpdateQueue = run.catch(() => {});
+    return run;
+  }
+
+  _costAllowanceError(message) {
+    const err = new Error(message);
+    err.code = 'WB_COST_ALLOWANCE';
+    return err;
+  }
+
+  _isCostAllowanceError(err) {
+    return err?.code === 'WB_COST_ALLOWANCE';
+  }
+
+  async _chatWithCostAllowance(provider, messages, options, costState) {
+    const before = await this._checkCostAllowance(provider, costState);
+    if (before) throw this._costAllowanceError(before);
+    const result = await provider.chat(messages, options);
+    const after = await this._recordCostUsage(provider, result?.usage, costState);
+    if (after) result.costAllowanceMessage = after;
+    return result;
   }
 
   /**
@@ -596,7 +815,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * mentioned earlier in the thread. The heavier screenshot context is still
    * limited to the first real user turn.
    */
-  async _enrichUserMessageWithCurrentPage(tabId, messages, userMessage) {
+  async _enrichUserMessageWithCurrentPage(tabId, messages, userMessage, costState = null) {
     const hasPriorUserTurn = messages.some(m => m.role === 'user');
 
     // Collect URL + title via chrome.tabs (cheap, no debugger needed).
@@ -668,7 +887,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // description into the first user message so the main provider never
     // sees the raw pixels.
     if (visionProvider) {
-      const desc = await this._describeScreenshot(tabId, shot.dataUrl, 'initial_user_message');
+      const desc = await this._describeScreenshot(tabId, shot.dataUrl, 'initial_user_message', costState);
       if (desc) {
         // desc.text is page-derived OCR — wrap in the real untrusted boundary
         // (nonce + breakout-strip), not just a prose label.
@@ -1494,10 +1713,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * The sub-call is recorded in the trace under a `vision_sub_call` event
    * so description quality can be inspected alongside the main turn.
    */
-  async _describeScreenshot(tabId, dataUrl, context = 'unknown') {
+  async _describeScreenshot(tabId, dataUrl, context = 'unknown', costState = null) {
     if (!dataUrl) return null;
     const vision = await this.providerManager.getVisionProvider();
     if (!vision) return null;
+    const effectiveCostState = costState || this.currentCostState.get(tabId) || null;
 
     const runId = this.currentRunId.get(tabId);
     const started = Date.now();
@@ -1512,13 +1732,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           ],
         },
       ];
-      const res = await vision.chat(messages, {
+      const res = await this._chatWithCostAllowance(vision, messages, {
         maxTokens: 800,
         temperature: 0,
         // Ask vLLM/sglang-style servers to suppress chain-of-thought for
         // Qwen3/3.5 etc. Harmless on servers that ignore unknown fields.
         extraBody: { chat_template_kwargs: { enable_thinking: false } },
-      });
+      }, effectiveCostState);
       const description = Agent._cleanVisionDescription(res?.content || '');
       if (!description) throw new Error('empty description');
       const latencyMs = Date.now() - started;
@@ -2366,7 +2586,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * When a compaction actually happens, emits onUpdate('context_compacted', …)
    * so the side panel can show the user that context was auto-compacted.
    */
-  async _manageContext(tabId, messages, onUpdate = null) {
+  async _manageContext(tabId, messages, onUpdate = null, costState = null) {
     const totalChars = this._estimateContextChars(messages);
 
     const tokenBudget = this._contextTokenBudget();
@@ -2500,10 +2720,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (summaryText.length > 2000) {
       try {
         const provider = this.providerManager.getActive();
-        const res = await provider.chat([
+        const res = await this._chatWithCostAllowance(provider, [
           { role: 'system', content: 'Summarize this conversation history in 3-5 bullet points. Be very concise.' },
           { role: 'user', content: summaryText },
-        ], { maxTokens: 300, temperature: 0.2 });
+        ], { maxTokens: 300, temperature: 0.2 }, costState);
         if (res.content) {
           summaryText = 'Summary of earlier conversation:\n' + res.content;
         }
@@ -5830,6 +6050,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       return await this._processMessageInner(tabId, userMessage, onUpdate, mode);
     } finally {
+      this.currentCostState.delete(tabId);
       this._runningTabs.delete(tabId);
     }
   }
@@ -5837,13 +6058,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   async _processMessageInner(tabId, userMessage, onUpdate, mode) {
     await this._hydrate(tabId);
     const messages = this.getConversation(tabId, mode);
+    const costState = this._newCostRunState();
+    this.currentCostState.set(tabId, costState);
     // New user turn: drop transient "allow once" / "deny once" permission grants.
     this.permissions.beginTurn(tabId);
 
     // Trim context if it's getting too long
-    await this._manageContext(tabId, messages, onUpdate);
+    await this._manageContext(tabId, messages, onUpdate, costState);
 
-    const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage);
+    const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage, costState);
     messages.push(enriched);
     this._persist(tabId);
 
@@ -5897,7 +6120,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // Auto-compact mid-run when the conversation outgrows the budget — not
       // just between user turns. Uses the previous step's reported token count,
       // so it fires "when it's due" during long autonomous loops.
-      await this._manageContext(tabId, messages, onUpdate);
+      await this._manageContext(tabId, messages, onUpdate, costState);
 
       steps++;
       onUpdate('thinking', { step: steps });
@@ -5910,7 +6133,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         this._logDebug({ type: 'llm_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
         if (runId) trace.recordLLMRequest(runId, steps, { providerClass: provider.constructor.name, model: provider.model, messageCount: prunedMessages.length, toolsCount: (chatOpts.tools || []).length });
         const _llmStart = Date.now();
-        result = await provider.chat(prunedMessages, chatOpts);
+        result = await this._chatWithCostAllowance(provider, prunedMessages, chatOpts, costState);
         if (result?.usage?.prompt_tokens) {
           this._lastInputTokens.set(tabId, result.usage.prompt_tokens);
           // Snapshot the conversation size at this reading so the next
@@ -5922,6 +6145,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (runId) trace.recordLLMResponse(runId, steps, { content: result.content, toolCalls: result.toolCalls, usage: result.usage, latencyMs: _llmLatency, model: provider.model });
       } catch (e) {
         this._logDebug({ type: 'llm_error', step: steps, error: e.message });
+        if (this._isCostAllowanceError(e)) {
+          finalResponse = e.message;
+          _traceStatus = 'cost_limit';
+          messages.push({ role: 'assistant', content: finalResponse });
+          onUpdate('warning', { message: finalResponse });
+          break;
+        }
         // If context overflow, trim aggressively and retry once
         if (this._isContextOverflow(e.message)) {
           onUpdate('thinking', { step: steps, note: 'Context too large, trimming...' });
@@ -5931,10 +6161,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             const chatOpts = { tools: useTools ? tools : undefined, temperature: plannerTemperature, maxTokens: 4096 };
             const prunedMessages = this._pruneOldImages(messages, provider);
             this._logDebug({ type: 'llm_request_retry', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: chatOpts });
-            result = await provider.chat(prunedMessages, chatOpts);
+            result = await this._chatWithCostAllowance(provider, prunedMessages, chatOpts, costState);
             this._logDebug({ type: 'llm_response_retry', step: steps, content: result.content, toolCalls: result.toolCalls });
           } catch (e2) {
             this._logDebug({ type: 'llm_error_retry', step: steps, error: e2.message });
+            if (this._isCostAllowanceError(e2)) {
+              finalResponse = e2.message;
+              _traceStatus = 'cost_limit';
+              messages.push({ role: 'assistant', content: finalResponse });
+              onUpdate('warning', { message: finalResponse });
+              break;
+            }
             onUpdate('error', { message: `Context still too large after trimming: ${e2.message}` });
             finalResponse = 'The conversation got too long. Please start a new conversation (click the + button).';
             messages.push({ role: 'assistant', content: finalResponse });
@@ -5947,10 +6184,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           try {
             const useTools2 = provider.supportsTools;
             const chatOpts2 = { tools: useTools2 ? tools : undefined, temperature: plannerTemperature, maxTokens: 4096 };
-            result = await provider.chat(this._pruneOldImages(messages, provider), chatOpts2);
+            result = await this._chatWithCostAllowance(provider, this._pruneOldImages(messages, provider), chatOpts2, costState);
             this._logDebug({ type: 'llm_response_after_retry', step: steps, content: result.content, toolCalls: result.toolCalls });
           } catch (e2) {
             this._logDebug({ type: 'llm_error_final', step: steps, error: e2.message });
+            if (this._isCostAllowanceError(e2)) {
+              finalResponse = e2.message;
+              _traceStatus = 'cost_limit';
+              messages.push({ role: 'assistant', content: finalResponse });
+              onUpdate('warning', { message: finalResponse });
+              break;
+            }
             onUpdate('error', { message: e2.message });
             finalResponse = `Error communicating with LLM: ${e2.message}`;
             messages.push({ role: 'assistant', content: finalResponse });
@@ -5985,6 +6229,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
       }
 
+      if (result.costAllowanceMessage && result.toolCalls && result.toolCalls.length > 0) {
+        finalResponse = result.costAllowanceMessage;
+        _traceStatus = 'cost_limit';
+        messages.push({ role: 'assistant', content: finalResponse });
+        onUpdate('warning', { message: finalResponse });
+        break;
+      }
+
       if (result.toolCalls && result.toolCalls.length > 0) {
         messages.push({
           role: 'assistant',
@@ -6017,6 +6269,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       //       a transparent failure message instead of silently recording
       //       a "done" run with empty content (the previous behavior).
       const isEmpty = !result.content || !result.content.trim();
+      if (isEmpty && result.costAllowanceMessage) {
+        finalResponse = result.costAllowanceMessage;
+        _traceStatus = 'cost_limit';
+        messages.push({ role: 'assistant', content: finalResponse });
+        onUpdate('warning', { message: finalResponse });
+        break;
+      }
       if (isEmpty) {
         if (!emptyOutputRecoveryAttempted) {
           emptyOutputRecoveryAttempted = true;
@@ -6034,7 +6293,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         break;
       }
       // Genuine final answer — emit and exit.
-      finalResponse = result.content;
+      finalResponse = result.costAllowanceMessage
+        ? `${result.content}\n\n${result.costAllowanceMessage}`
+        : result.content;
       messages.push({ role: 'assistant', content: finalResponse });
       onUpdate('text', { content: finalResponse });
       break;
@@ -6056,6 +6317,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._persist(tabId);
     return finalResponse;
     } finally {
+      this.currentCostState.delete(tabId);
       if (runId) {
         trace.endRun(runId, { status: _traceStatus, finalContent: finalResponse });
         this.currentRunId.delete(tabId);
@@ -6074,6 +6336,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       return await this._processMessageStreamInner(tabId, userMessage, onUpdate, mode);
     } finally {
+      this.currentCostState.delete(tabId);
       this._runningTabs.delete(tabId);
     }
   }
@@ -6081,13 +6344,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   async _processMessageStreamInner(tabId, userMessage, onUpdate, mode) {
     await this._hydrate(tabId);
     const messages = this.getConversation(tabId, mode);
+    const costState = this._newCostRunState();
+    this.currentCostState.set(tabId, costState);
     // New user turn: drop transient "allow once" / "deny once" permission grants.
     this.permissions.beginTurn(tabId);
 
     // Trim context if it's getting too long
-    await this._manageContext(tabId, messages, onUpdate);
+    await this._manageContext(tabId, messages, onUpdate, costState);
 
-    const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage);
+    const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage, costState);
     messages.push(enriched);
     this._persist(tabId);
 
@@ -6114,7 +6379,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // Auto-compact mid-run when the conversation outgrows the budget. The
       // streaming path doesn't get a per-call token count, so this leans on
       // the chars/4 estimate inside _manageContext.
-      await this._manageContext(tabId, messages, onUpdate);
+      await this._manageContext(tabId, messages, onUpdate, costState);
 
       steps++;
       onUpdate('thinking', { step: steps });
@@ -6127,11 +6392,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         const streamOpts = { tools: provider.supportsTools ? tools : undefined, temperature: plannerTemperature, maxTokens: 4096 };
         const prunedMessages = this._pruneOldImages(messages, provider);
         this._logDebug({ type: 'llm_stream_request', step: steps, provider: provider.constructor.name, messages: prunedMessages, options: streamOpts });
+        const beforeCost = await this._checkCostAllowance(provider, costState);
+        if (beforeCost) {
+          messages.push({ role: 'assistant', content: beforeCost });
+          onUpdate('warning', { message: beforeCost });
+          this._persist(tabId);
+          return beforeCost;
+        }
+        let costStopMessage = '';
 
         for await (const chunk of provider.chatStream(prunedMessages, streamOpts)) {
           if (chunk.type === 'text') {
             fullText += chunk.content;
             onUpdate('text_delta', { content: chunk.content });
+          } else if (chunk.type === 'usage') {
+            costStopMessage = (await this._recordCostUsage(provider, chunk.usage, costState)) || costStopMessage;
           } else if (chunk.type === 'tool_call') {
             hasToolCalls = true;
             const calls = Array.isArray(chunk.content) ? chunk.content : [];
@@ -6173,6 +6448,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
 
         if (hasToolCalls) {
+          if (costStopMessage) {
+            messages.push({ role: 'assistant', content: costStopMessage });
+            onUpdate('warning', { message: costStopMessage });
+            this._persist(tabId);
+            return costStopMessage;
+          }
           const toolCalls = Object.values(toolCallsAccumulator);
           this._logDebug({ type: 'llm_stream_response', step: steps, content: fullText, toolCalls });
           messages.push({
@@ -6194,6 +6475,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // failure mode (no text + no tool call after non-trivial reasoning)
         // and recover once via a summary-nudge before giving up.
         this._logDebug({ type: 'llm_stream_response', step: steps, content: fullText, toolCalls: null });
+        if ((!fullText || !fullText.trim()) && costStopMessage) {
+          messages.push({ role: 'assistant', content: costStopMessage });
+          onUpdate('warning', { message: costStopMessage });
+          this._persist(tabId);
+          return costStopMessage;
+        }
         if (!fullText || !fullText.trim()) {
           if (!emptyOutputRecoveryAttempted) {
             emptyOutputRecoveryAttempted = true;
@@ -6211,6 +6498,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           return failMsg;
         }
         emptyOutputRecoveryAttempted = false;
+        if (costStopMessage) {
+          onUpdate('text_delta', { content: `\n\n${costStopMessage}` });
+          fullText = `${fullText}\n\n${costStopMessage}`;
+        }
         messages.push({ role: 'assistant', content: fullText });
         this._persist(tabId);
         return fullText;

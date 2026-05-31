@@ -17,6 +17,10 @@ const maxStepsRange = document.getElementById('range-max-steps');
 const stepsValueLabel = document.getElementById('steps-value');
 const requestTimeoutRange = document.getElementById('range-request-timeout');
 const requestTimeoutValueLabel = document.getElementById('timeout-value');
+const costSessionLimitInput = document.getElementById('input-cost-session-limit');
+const costTotalLimitInput = document.getElementById('input-cost-total-limit');
+const costSpentValueLabel = document.getElementById('cost-spent-value');
+const btnResetCostSpend = document.getElementById('btn-reset-cost-spend');
 const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
 const notifySoundToggle = document.getElementById('toggle-notify-sound');
@@ -119,6 +123,22 @@ let authToken = '';
 let authEmail = '';
 let authDefaultModel = '';
 
+const DEFAULT_COST_ALLOWANCE_USD = 10;
+
+function normalizeCostAmount(value, fallback = DEFAULT_COST_ALLOWANCE_USD) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+function formatUsd(value) {
+  return '$' + normalizeCostAmount(value, 0).toFixed(2);
+}
+
+function renderCostAllowanceSpent(spent, limit) {
+  if (!costSpentValueLabel) return;
+  costSpentValueLabel.textContent = `${formatUsd(spent)} / ${formatUsd(limit)}`;
+}
+
 // Filter + collapse state for the providers panel. With 11+ providers the
 // flat list is unwieldy — filter keeps the visual surface small, and
 // per-card collapse defaults non-active cards to header-only so the page
@@ -137,7 +157,7 @@ async function init() {
   renderAuthSection();
 
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'providerFilter', 'requestTimeoutMs']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'providerFilter', 'requestTimeoutMs', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'cloudCostSpentUsd']);
   if (typeof stored.providerFilter === 'string' && ['all','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -159,6 +179,12 @@ async function init() {
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   notifySoundToggle.checked = stored.notifySound ?? true; // on by default
   tracingToggle.checked = stored.tracingEnabled === true; // off by default
+  const sessionLimit = normalizeCostAmount(stored.costAllowanceSessionUsd);
+  const totalLimit = normalizeCostAmount(stored.costAllowanceTotalUsd);
+  const totalSpent = normalizeCostAmount(stored.cloudCostSpentUsd, 0);
+  if (costSessionLimitInput) costSessionLimitInput.value = sessionLimit.toFixed(2);
+  if (costTotalLimitInput) costTotalLimitInput.value = totalLimit.toFixed(2);
+  renderCostAllowanceSpent(totalSpent, totalLimit);
   if (strictSecretToggle) {
     strictSecretToggle.checked = stored.strictSecretMode === true; // off by default
   }
@@ -400,6 +426,25 @@ notifySoundToggle.addEventListener('change', () => {
 
 tracingToggle.addEventListener('change', () => {
   chrome.storage.local.set({ tracingEnabled: tracingToggle.checked });
+});
+
+costSessionLimitInput?.addEventListener('change', () => {
+  const value = normalizeCostAmount(costSessionLimitInput.value);
+  costSessionLimitInput.value = value.toFixed(2);
+  chrome.storage.local.set({ costAllowanceSessionUsd: value });
+});
+
+costTotalLimitInput?.addEventListener('change', async () => {
+  const value = normalizeCostAmount(costTotalLimitInput.value);
+  costTotalLimitInput.value = value.toFixed(2);
+  const stored = await chrome.storage.local.get(['cloudCostSpentUsd']);
+  renderCostAllowanceSpent(normalizeCostAmount(stored.cloudCostSpentUsd, 0), value);
+  chrome.storage.local.set({ costAllowanceTotalUsd: value });
+});
+
+btnResetCostSpend?.addEventListener('click', async () => {
+  await chrome.storage.local.set({ cloudCostSpentUsd: 0 });
+  renderCostAllowanceSpent(0, normalizeCostAmount(costTotalLimitInput?.value));
 });
 
 if (strictSecretToggle) {
@@ -659,6 +704,11 @@ const PROMPT_TIER_FIELD = {
   ],
 };
 
+const COST_ESTIMATE_FIELDS = [
+  { key: 'inputCostPerMillionUsd', labelKey: 'st.provider.field.input_cost_per_million', type: 'number', placeholder: '3.00' },
+  { key: 'outputCostPerMillionUsd', labelKey: 'st.provider.field.output_cost_per_million', type: 'number', placeholder: '15.00' },
+];
+
 // Effective tier for the dropdown's initial value — same precedence as the
 // provider getter: cloud is forced full; an explicit promptTier wins; the
 // legacy useCompactPrompt boolean maps to compact; otherwise local → mid.
@@ -708,6 +758,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'gpt-5.5',
           suggestions: ['gpt-5.5', 'gpt-5.4', 'gpt-5.2', 'gpt-5.3-codex'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.openai.com/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     openrouter: {
@@ -725,6 +776,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'claude-opus-4-7',
           suggestions: ['claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.anthropic.com' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     gemini: {
@@ -733,6 +785,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'gemini-3.1-pro',
           suggestions: ['gemini-3.1-pro', 'gemini-3-flash', 'gemini-3.5-flash', 'gemini-3.1-flash-lite'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     mistral: {
@@ -741,6 +794,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'mistral-medium-3.5',
           suggestions: ['mistral-medium-3.5', 'mistral-small-4', 'codestral-25.08', 'devstral-medium'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.mistral.ai/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     deepseek: {
@@ -749,6 +803,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'deepseek-chat',
           suggestions: ['deepseek-chat', 'deepseek-reasoner'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.deepseek.com/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     xai: {
@@ -757,6 +812,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'grok-4.3',
           suggestions: ['grok-4.3', 'grok-4.1-fast', 'grok-build-0.1'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.x.ai/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     nvidia: {
@@ -765,6 +821,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'nvidia/llama-3.3-nemotron-super-49b',
           suggestions: ['nvidia/llama-3.3-nemotron-super-49b', 'nvidia/llama-3.1-nemotron-70b-instruct', 'nvidia/nemotron-nano-9b-v2', 'meta/llama-3.3-70b-instruct', 'deepseek-ai/deepseek-r1'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://integrate.api.nvidia.com/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     minimax: {
@@ -773,6 +830,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'minimax-m2.7',
           suggestions: ['minimax-m2.7', 'minimax-m2', 'minimax-text-01'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.minimax.chat/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     alibaba: {
@@ -781,6 +839,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'qwen-max',
           suggestions: ['qwen-max', 'qwen-plus', 'qwen-turbo', 'qwen3-235b-a22b'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://dashscope.aliyuncs.com/compatible-mode/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     groq: {
@@ -789,6 +848,7 @@ function renderProviders() {
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'openai/gpt-oss-120b',
           suggestions: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'meta-llama/llama-4-scout-17b-16e-instruct', 'llama-3.3-70b-versatile', 'qwen/qwen3-32b'] },
         { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.groq.com/openai/v1' },
+        ...COST_ESTIMATE_FIELDS,
       ],
     },
     // OAuth-based Claude subscription provider. The card body is rendered

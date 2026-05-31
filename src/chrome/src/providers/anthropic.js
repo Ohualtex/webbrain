@@ -231,6 +231,23 @@ export class AnthropicProvider extends BaseLLMProvider {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let usageInputTokens = 0;
+    let usageOutputTokens = 0;
+    const updateUsage = (usage) => {
+      if (!usage || typeof usage !== 'object') return;
+      const input = Number(usage.input_tokens ?? usage.prompt_tokens ?? 0);
+      const output = Number(usage.output_tokens ?? usage.completion_tokens ?? 0);
+      if (Number.isFinite(input) && input > usageInputTokens) usageInputTokens = input;
+      if (Number.isFinite(output) && output > usageOutputTokens) usageOutputTokens = output;
+    };
+    const usageChunk = () => {
+      if (!usageInputTokens && !usageOutputTokens) return null;
+      return {
+        prompt_tokens: usageInputTokens,
+        completion_tokens: usageOutputTokens,
+        total_tokens: usageInputTokens + usageOutputTokens,
+      };
+    };
 
     while (true) {
       const { done, value } = await reader.read();
@@ -246,7 +263,11 @@ export class AnthropicProvider extends BaseLLMProvider {
         const payload = trimmed.slice(6);
         try {
           const event = JSON.parse(payload);
-          if (event.type === 'content_block_delta') {
+          if (event.type === 'message_start') {
+            updateUsage(event.message?.usage);
+          } else if (event.type === 'message_delta') {
+            updateUsage(event.usage);
+          } else if (event.type === 'content_block_delta') {
             if (event.delta?.type === 'text_delta') {
               yield { type: 'text', content: event.delta.text };
             } else if (event.delta?.type === 'input_json_delta') {
@@ -263,6 +284,8 @@ export class AnthropicProvider extends BaseLLMProvider {
               };
             }
           } else if (event.type === 'message_stop') {
+            const usage = usageChunk();
+            if (usage) yield { type: 'usage', usage };
             yield { type: 'done', content: '' };
             return;
           }
@@ -271,6 +294,8 @@ export class AnthropicProvider extends BaseLLMProvider {
         }
       }
     }
+    const usage = usageChunk();
+    if (usage) yield { type: 'usage', usage };
     yield { type: 'done', content: '' };
   }
 }

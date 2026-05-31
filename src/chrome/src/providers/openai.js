@@ -93,6 +93,28 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
     return body;
   }
 
+  _shouldRequestStreamUsage() {
+    const providerName = (this.config.providerName || '').toLowerCase();
+    if (this.config.category === 'local') return false;
+    if (providerName === 'ollama' || providerName === 'lmstudio') return false;
+    if (this.config.supportsStreamUsageOptions != null) {
+      return !!this.config.supportsStreamUsageOptions;
+    }
+    if (!providerName && this.baseUrl === 'https://api.openai.com/v1') return true;
+    return providerName === 'openai'
+      || providerName === 'openrouter'
+      || providerName === 'deepseek'
+      || providerName === 'gemini';
+  }
+
+  _addStreamUsageOptions(body) {
+    if (!this._shouldRequestStreamUsage()) return;
+    const streamOptions = body.stream_options && typeof body.stream_options === 'object'
+      ? body.stream_options
+      : {};
+    body.stream_options = { ...streamOptions, include_usage: true };
+  }
+
   async chat(messages, options = {}) {
     const body = {
       model: this.model,
@@ -158,6 +180,11 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
       body.tool_choice = options.toolChoice || 'auto';
     }
 
+    if (options.extraBody && typeof options.extraBody === 'object') {
+      Object.assign(body, options.extraBody);
+    }
+    this._addStreamUsageOptions(body);
+
     const streamUrl = `${this.baseUrl}/chat/completions`;
     let res;
     try {
@@ -197,6 +224,9 @@ export class OpenAICompatibleProvider extends BaseLLMProvider {
         }
         try {
           const json = JSON.parse(payload);
+          if (json.usage) {
+            yield { type: 'usage', usage: json.usage };
+          }
           const delta = json.choices?.[0]?.delta;
           if (delta?.content) {
             yield { type: 'text', content: delta.content };

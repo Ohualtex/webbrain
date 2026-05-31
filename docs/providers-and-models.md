@@ -111,6 +111,15 @@ Configs are stored in `chrome.storage.local` under the `providers` key, merged a
 
 Deprecated provider entries (`webbrain`, `openai_subscription`) are filtered out.
 
+### Cost Allowances
+
+Settings exposes session and total cloud cost allowances. The agent prefers a provider-reported `usage.cost`/`usage.cost_usd` value when present (OpenRouter reports this directly). For direct cloud providers that only return token counts, WebBrain estimates spend from the provider config fields:
+
+- `inputCostPerMillionUsd`
+- `outputCostPerMillionUsd`
+
+Those rates are editable in the provider card so custom model pricing can be adjusted without code changes. If a metered remote provider has token usage but no configured rates, the agent falls back to conservative default estimates (`$3` input / `$15` output per 1M tokens). Local providers are not counted.
+
 ### Dedicated Vision Provider
 
 The user can configure a separate vision provider for screenshot description. The agent sub-calls this provider to get a text description of the viewport, then feeds only the description (not the raw image) to the main planning provider. This reduces token costs when the main provider is text-only:
@@ -147,9 +156,10 @@ myprovider: {
   providerName: 'myprovider',
   baseUrl: 'https://api.myprovider.com/v1',
   model: 'my-model',
+  supportsStreamUsageOptions: false,
   apiKey: '',
   enabled: false,
 },
 ```
 
-Vision is auto-detected via model-name regex. If the provider has a known set of vision models, add them to the regex in `openai.js`.
+Vision is auto-detected via model-name regex. If the provider has a known set of vision models, add them to the regex in `openai.js`. Set `supportsStreamUsageOptions: true` only for providers that accept OpenAI-style `stream_options.include_usage`; leave it false when a provider returns usage without accepting that request field.
