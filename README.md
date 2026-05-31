@@ -23,7 +23,7 @@ Open-source AI browser agent for Chrome and Firefox. Chat with any web page, aut
 - **Side Panel UI** — Clean chat interface that lives alongside your browsing
 - **Per-Tab Conversations** — Each tab has its own chat history
 - **Streaming** — Real-time token streaming from all providers
-- **Smart Context** — Automatic context trimming, tool result limits, and emergency overflow recovery
+- **Smart Context** — Token-aware auto-compaction (summarizes older turns once the conversation nears the model's context window, with a visible "Context automatically compacted" notice), tool result limits, and emergency overflow recovery
 - **Copy Support** — Copy buttons on code blocks and full messages
 - **Page Inspection Banner** — Visual indicator when the agent is interacting with the page
 - **Stop Button** — Abort the agent mid-execution at any time

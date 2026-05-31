@@ -45,6 +45,15 @@ export class Agent {
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
+    // Fraction of the model's context window at which we auto-compact. Once
+    // the running input-token count crosses this share of provider.contextWindow,
+    // _manageContext summarizes older turns ("Context automatically compacted")
+    // — leaving headroom for the next request plus the output budget.
+    this.contextCompactRatio = 0.75;
+    // tabId -> most recent provider-reported input (prompt) token count. Drives
+    // the token-aware auto-compaction trigger; updated after each LLM response,
+    // reset whenever we compact.
+    this._lastInputTokens = new Map();
     // Auto-screenshot mode. 'off' | 'navigation' | 'state_change' | 'every_step'.
     // Loaded from chrome.storage.local in background.js.
     this.autoScreenshot = 'state_change';
@@ -2143,6 +2152,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this.conversations.delete(tabId);
     this.conversationModes.delete(tabId);
     this.conversationIds.delete(tabId);
+    this._lastInputTokens.delete(tabId);
     this.hydratedTabs.delete(tabId);
     this.apiAllowedTabs.delete(tabId);
     this.apiAllowedInjected.delete(tabId);
@@ -2257,10 +2267,33 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // ─────────────────────────────────────────────────────────────────────
 
   /**
+   * Token budget at which we proactively auto-compact for the active provider:
+   * a fraction (contextCompactRatio) of the model's context window. Compacting
+   * here — before the provider hard-errors on overflow — keeps the run smooth
+   * and lets us surface a clean "Context automatically compacted" notice rather
+   * than the jarring _emergencyTrim fallback.
+   */
+  _contextTokenBudget() {
+    const provider = this.providerManager.getActive();
+    const window = (provider && Number(provider.contextWindow)) || 128000;
+    return Math.floor(window * this.contextCompactRatio);
+  }
+
+  /**
    * Manage context window — trim and summarize when conversation gets too long.
    * Keeps: system prompt, summary of old messages, recent messages.
+   *
+   * Triggers on whichever fires first: message count, raw char budget, or —
+   * the token-aware "when it's due" path — the running input-token count
+   * crossing contextCompactRatio of the model's context window. The token
+   * trigger uses the provider's reported usage when available (most accurate,
+   * since it includes the system prompt + tool schemas that never live in
+   * `messages`) and falls back to a chars/4 estimate for the streaming path.
+   *
+   * When a compaction actually happens, emits onUpdate('context_compacted', …)
+   * so the side panel can show the user that context was auto-compacted.
    */
-  async _manageContext(tabId, messages) {
+  async _manageContext(tabId, messages, onUpdate = null) {
     // Calculate total char length
     let totalChars = 0;
     for (const msg of messages) {
@@ -2269,10 +2302,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (msg.tool_calls) totalChars += JSON.stringify(msg.tool_calls).length;
     }
 
+    const tokenBudget = this._contextTokenBudget();
+    // Prefer the provider's reported input-token count; fall back to a rough
+    // chars/4 estimate when usage isn't available (e.g. mid-stream).
+    const estTokens = Math.ceil(totalChars / 4);
+    const usedTokens = Math.max(this._lastInputTokens.get(tabId) || 0, estTokens);
+
     const tooManyMessages = messages.length > this.maxContextMessages;
     const tooManyChars = totalChars > this.maxContextChars;
+    const tooManyTokens = usedTokens > tokenBudget;
 
-    if (!tooManyMessages && !tooManyChars) return; // context is fine
+    if (!tooManyMessages && !tooManyChars && !tooManyTokens) return; // context is fine
 
     // Strategy: keep system prompt + ORIGINAL USER TASK (pinned) + summarize
     // old messages + keep recent messages.
@@ -2389,7 +2429,25 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (scratchpadMsg) messages.push(scratchpadMsg);
     messages.push(summaryMsg, summaryAck, ...recentMessages);
 
+    // The next LLM call will report a fresh (smaller) input-token count; clear
+    // the stale estimate so we don't immediately re-trigger on the old number.
+    this._lastInputTokens.delete(tabId);
+
     console.log(`[WebBrain] Context trimmed for tab ${tabId}: ${oldMessages.length} old messages → summary. ${messages.length} messages remain.`);
+
+    // Surface the auto-compaction to the user (side panel renders an inline
+    // "Context automatically compacted" note). Best-effort — never let a UI
+    // callback error break the agent loop.
+    if (typeof onUpdate === 'function') {
+      try {
+        onUpdate('context_compacted', {
+          summarized: oldMessages.length,
+          remaining: messages.length,
+          tokens: usedTokens || null,
+          budget: tokenBudget,
+        });
+      } catch { /* ignore */ }
+    }
   }
 
   _truncate(str, len) {
@@ -5677,7 +5735,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this.permissions.beginTurn(tabId);
 
     // Trim context if it's getting too long
-    await this._manageContext(tabId, messages);
+    await this._manageContext(tabId, messages, onUpdate);
 
     const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage);
     messages.push(enriched);
@@ -5730,6 +5788,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         await this._maybeReinjectAdapter(tabId, messages);
       }
 
+      // Auto-compact mid-run when the conversation outgrows the budget — not
+      // just between user turns. Uses the previous step's reported token count,
+      // so it fires "when it's due" during long autonomous loops.
+      await this._manageContext(tabId, messages, onUpdate);
+
       steps++;
       onUpdate('thinking', { step: steps });
 
@@ -5742,6 +5805,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (runId) trace.recordLLMRequest(runId, steps, { providerClass: provider.constructor.name, model: provider.model, messageCount: prunedMessages.length, toolsCount: (chatOpts.tools || []).length });
         const _llmStart = Date.now();
         result = await provider.chat(prunedMessages, chatOpts);
+        if (result?.usage?.prompt_tokens) this._lastInputTokens.set(tabId, result.usage.prompt_tokens);
         const _llmLatency = Date.now() - _llmStart;
         this._logDebug({ type: 'llm_response', step: steps, content: result.content, toolCalls: result.toolCalls });
         if (runId) trace.recordLLMResponse(runId, steps, { content: result.content, toolCalls: result.toolCalls, usage: result.usage, latencyMs: _llmLatency, model: provider.model });
@@ -5910,7 +5974,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this.permissions.beginTurn(tabId);
 
     // Trim context if it's getting too long
-    await this._manageContext(tabId, messages);
+    await this._manageContext(tabId, messages, onUpdate);
 
     const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage);
     messages.push(enriched);
@@ -5935,6 +5999,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (steps > 0) {
         await this._maybeReinjectAdapter(tabId, messages);
       }
+
+      // Auto-compact mid-run when the conversation outgrows the budget. The
+      // streaming path doesn't get a per-call token count, so this leans on
+      // the chars/4 estimate inside _manageContext.
+      await this._manageContext(tabId, messages, onUpdate);
 
       steps++;
       onUpdate('thinking', { step: steps });

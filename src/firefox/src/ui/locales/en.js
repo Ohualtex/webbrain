@@ -37,6 +37,8 @@ export default {
   'sp.activity.thinking_step': 'Thinking (step {step})...',
   'sp.activity.continuing': 'Continuing...',
   'sp.activity.stopping': 'Stopping...',
+  'sp.context_compacted': 'Context automatically compacted',
+  'sp.context_compacted_detail': '{summarized} earlier messages summarized · {remaining} kept',
 
   'sp.copy': 'Copy',
   'sp.copied': 'Copied!',

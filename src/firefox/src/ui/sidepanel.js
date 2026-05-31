@@ -752,6 +752,13 @@ browser.runtime.onMessage.addListener((msg) => {
       hideActivity();
       break;
 
+    case 'context_compacted':
+      // The agent auto-summarized older turns to stay within the model's
+      // context window. Show a subtle inline separator so the user knows
+      // earlier history was compacted (not lost to a bug).
+      addContextCompactedNote(data);
+      break;
+
     case 'clarify':
       // Agent paused to ask the user a question. Render an inline card
       // in the current assistant bubble; the user picks an option or
@@ -1101,6 +1108,25 @@ function addMessage(role, content) {
   scrollToBottom();
 
   return msgEl;
+}
+
+/**
+ * Render the "Context automatically compacted" notice as a centered inline
+ * separator in the conversation. Fired by the agent's onUpdate('context_compacted')
+ * when older turns were summarized to stay within the model's context window.
+ */
+function addContextCompactedNote(data) {
+  const note = document.createElement('div');
+  note.className = 'context-compacted-note';
+  note.textContent = t('sp.context_compacted');
+  if (data && data.summarized != null && data.remaining != null) {
+    note.title = t('sp.context_compacted_detail', {
+      summarized: data.summarized,
+      remaining: data.remaining,
+    });
+  }
+  messagesEl.appendChild(note);
+  scrollToBottom();
 }
 
 function showContinueButton() {

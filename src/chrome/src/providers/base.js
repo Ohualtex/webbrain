@@ -45,6 +45,21 @@ export class BaseLLMProvider {
   }
 
   /**
+   * Approximate context window (in tokens) for the active model. The agent
+   * uses this to decide when to auto-compact the conversation ("Context
+   * automatically compacted"): once the running input-token count crosses a
+   * fraction of this window, older turns are summarized away.
+   *
+   * Providers can pass an exact value via `config.contextWindow` (e.g. an
+   * 8k local model, or a 200k cloud model). Otherwise we assume a
+   * conservative modern default so the char/message heuristics still govern.
+   */
+  get contextWindow() {
+    const n = Number(this.config.contextWindow);
+    return Number.isFinite(n) && n > 0 ? n : 128000;
+  }
+
+  /**
    * Whether this provider is running a small/local model that benefits from
    * a compact system prompt. When true, the agent uses SYSTEM_PROMPT_ACT_COMPACT
    * instead of the full SYSTEM_PROMPT_ACT to save context budget.
