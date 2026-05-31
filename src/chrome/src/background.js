@@ -12,7 +12,7 @@ import { getBalance as capsolverGetBalance } from './agent/captcha-solver.js';
 import {
   startTabRecording,
   stopTabRecording,
-  getRecordingState,
+  getRecordingStateFresh,
   setProviderManager as setRecorderProviderManager,
 } from './recorder/host.js';
 
@@ -650,7 +650,7 @@ async function handleMessage(msg, sender) {
       return await stopTabRecording();
     }
     case 'get_recording_state': {
-      return { ok: true, state: getRecordingState() };
+      return { ok: true, state: await getRecordingStateFresh() };
     }
 
     // --- Page Info (quick, no agent loop) ---

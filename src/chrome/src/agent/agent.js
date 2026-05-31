@@ -23,7 +23,6 @@ import { solveCaptcha, detectCaptcha, injectToken } from './captcha-solver.js';
 import {
   startTabRecording as recorderStart,
   stopTabRecording as recorderStop,
-  getRecordingState as recorderGetState,
 } from '../recorder/host.js';
 import { Capability, CAPABILITY_LABEL, capabilitiesFor, requiredHosts, frameHostMatches, isNetworkMutation, PermissionManager, UNTRUSTED_CONTENT_TOOLS } from './permission-gate.js';
 
@@ -112,6 +111,7 @@ export class Agent {
     this.captchaSolverEnabled = false;
     // Stale click detection: per-tab last clicked element identity.
     this._lastCdpClickIdent = new Map(); // tabId -> string
+    this._lastClickProgress = new Map(); // tabId -> { ident, snapshot }
     // Loop detection: per-tab ring buffer of recent tool calls + nudge count.
     this.recentCalls = new Map(); // tabId -> [{ key, name, ts }]
     this.loopNudges = new Map();  // tabId -> consecutive-nudge counter
@@ -429,7 +429,7 @@ export class Agent {
     // URL-family tools (fetch_url, research_url, …) bucket by resource
     // identity so the agent can't escape loop detection by fetching the
     // same logical file via 8 different API endpoints. See loop-bucket.js.
-    const errored = !!(result && (result.error || result.success === false));
+    const errored = !!(result && (result.error || result.success === false || result.noProgress));
     const argsHash = bucketArgsKey(name, args);
     const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
     const buf = this.recentCalls.get(tabId) || [];
@@ -1186,6 +1186,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // our own trusted notes (the loop nudge), so the nudge stays outside the
       // <untrusted_page_content> box and is read as an instruction, not data.
       let resultContent = this._wrapUntrusted(fnName, this._limitToolResult(toolResult));
+      if (toolResult?.noProgress) {
+        resultContent = resultContent +
+          '\n[NO PROGRESS DETECTED: The last click returned from the page, but the visible page snapshot did not change. Do not repeat the same click. Re-observe the page with get_accessibility_tree({filter:"visible"}) or screenshot({coord_aligned:true}), then choose a different target or explain the blocker.]';
+        onUpdate('warning', { message: 'Click made no visible progress.' });
+      }
       if (effectiveKind === 'nudge') {
         resultContent = resultContent + '\n' + nudgeWarning;
         onUpdate('warning', { message: 'Loop detected — nudging the agent.' });
@@ -2362,6 +2367,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   _cleanupTab(tabId, { preserveRunGuard = false } = {}) {
     this._isPdfTabCache.delete(tabId);
     this._lastCdpClickIdent?.delete(tabId);
+    this._lastClickProgress?.delete(tabId);
     this.lastAutoScreenshotTs.delete(tabId);
     this.lastSeenAdapter.delete(tabId);
     this._lastInteractionRect.delete(tabId);
@@ -3071,7 +3077,100 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * to the side panel mid-call (currently just `clarify`, which pauses and
    * waits for a user response). All other tools ignore it.
    */
+  async _getWindowInfo(tabId) {
+    let tab = null;
+    let win = null;
+    try { tab = await chrome.tabs.get(tabId); } catch (e) {
+      return { success: false, error: `Could not read active tab: ${e.message}` };
+    }
+    try {
+      if (tab?.windowId != null) win = await chrome.windows.get(tab.windowId);
+    } catch {}
+
+    let viewport = null;
+    try {
+      const probe = await this._captureViewportProbe(tabId);
+      if (probe) {
+        viewport = {
+          width: probe.innerWidth,
+          height: probe.innerHeight,
+          devicePixelRatio: probe.dpr,
+          scrollX: probe.scrollX,
+          scrollY: probe.scrollY,
+        };
+      }
+    } catch {}
+
+    return {
+      success: true,
+      // Keep this safe to expose as trusted metadata: title and URL can
+      // contain page-controlled text and should stay out of this tool result.
+      tab: tab ? { id: tab.id, windowId: tab.windowId, active: tab.active } : null,
+      window: win ? {
+        id: win.id,
+        left: win.left,
+        top: win.top,
+        width: win.width,
+        height: win.height,
+        state: win.state,
+        type: win.type,
+        focused: win.focused,
+      } : null,
+      viewport,
+      aspectRatio: win?.width && win?.height ? Number((win.width / win.height).toFixed(4)) : null,
+      viewportAspectRatio: viewport?.width && viewport?.height ? Number((viewport.width / viewport.height).toFixed(4)) : null,
+      note: 'Window width/height are outer browser-window pixels. Viewport width/height are page CSS pixels and may be smaller because of browser chrome/sidebar UI.',
+    };
+  }
+
+  async _resizeWindow(tabId, args = {}) {
+    const width = Math.round(Number(args.width));
+    const height = Math.round(Number(args.height));
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+      return { success: false, error: 'resize_window requires numeric width and height in pixels.' };
+    }
+    if (width < 320 || height < 240 || width > 10000 || height > 10000) {
+      return { success: false, error: `resize_window width/height look invalid: ${width}x${height}. Use outer browser-window pixels, e.g. 1280x720 or 1920x1080.` };
+    }
+
+    let tab;
+    try { tab = await chrome.tabs.get(tabId); } catch (e) {
+      return { success: false, error: `Could not read active tab: ${e.message}` };
+    }
+    if (tab?.windowId == null) return { success: false, error: 'Active tab has no windowId.' };
+
+    const update = { width, height };
+    if (args.left != null && Number.isFinite(Number(args.left))) update.left = Math.round(Number(args.left));
+    if (args.top != null && Number.isFinite(Number(args.top))) update.top = Math.round(Number(args.top));
+
+    try {
+      const win = await chrome.windows.get(tab.windowId);
+      if (win?.state && win.state !== 'normal') {
+        await chrome.windows.update(tab.windowId, { state: 'normal' });
+        await new Promise(r => setTimeout(r, 150));
+      }
+      await chrome.windows.update(tab.windowId, update);
+      await new Promise(r => setTimeout(r, 250));
+      const info = await this._getWindowInfo(tabId);
+      return {
+        ...info,
+        resized: true,
+        requested: update,
+        note: `${info.note} Requested outer size ${width}x${height}; actual values may differ if the OS/window manager constrained the window.`,
+      };
+    } catch (e) {
+      return { success: false, error: `resize_window failed: ${e.message}` };
+    }
+  }
+
   async executeTool(tabId, name, args, onUpdate = null) {
+    if (name === 'get_window_info') {
+      return await this._getWindowInfo(tabId);
+    }
+    if (name === 'resize_window') {
+      return await this._resizeWindow(tabId, args || {});
+    }
+
     // clarify: pause the run and wait for the user to answer. This tool does
     // NOT touch the page — it's a meta-action that bridges agent ↔ user.
     // The handler resolves when background.js routes the user's response via
@@ -3685,16 +3784,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       return {
         success: true,
         state: s,
+        microphone: {
+          requested: opts.mic,
+          included: !!s.hasMic,
+          error: s.micError || null,
+        },
         note: `Recording started at ${new Date(s.startedAt).toISOString()}.` +
               (s.hasMic ? '' : ' (Microphone unavailable — recording tab audio only.)') +
               ' Tell the user the red banner at the top of the sidebar shows the live timer and a Stop button; call `stop_recording` when they ask you to stop, or just let them click Stop themselves.',
       };
     }
     if (name === 'stop_recording') {
-      const cur = recorderGetState();
-      if (!cur.active) {
-        return { success: false, error: 'No active recording to stop.' };
-      }
       const r = await recorderStop();
       if (!r.ok) return { success: false, error: r.error };
       return {
@@ -5030,6 +5130,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // link that spawns a background tab instead of navigating in-place
           // (see _redirectTargetBlankClick).
           const clickUrl = await this._currentUrl(tabId);
+          const progressBeforeText = await this._clickProgressSnapshot(tabId);
           const beforeTabIdsText = new Set((await chrome.tabs.query({})).map(t => t.id));
           await new Promise(r => setTimeout(r, 100));
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', info.x, info.y);
@@ -5084,13 +5185,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             })()
           `);
           const isEditableTarget = postEditable?.result?.value === true;
-          const clickIdent = `${info.tag}|${(info.text || '').slice(0, 50)}`;
-          const prevIdent = this._lastCdpClickIdent.get(tabId);
-          this._lastCdpClickIdent.set(tabId, clickIdent);
-          const warning = (prevIdent === clickIdent && !isEditableTarget)
-            ? 'Same element clicked again with no page change. Try click({x, y}) with coordinates from a screenshot, or click({index: N}) from get_interactive_elements.'
-            : undefined;
-
           const redirectedText = await newTabPromiseText;
           if (redirectedText?.redirected) {
             // The clicked link had target="_blank". We closed the spawned
@@ -5113,7 +5207,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const clickX = Math.round(info.x);
           const clickY = Math.round(info.y);
           this._lastInteractionRect.set(tabId, { x: clickX, y: clickY, w: 1, h: 1, ts: Date.now(), url: clickUrl });
-          return {
+          const clickResponse = {
             success: true,
             method: 'cdp-by-text',
             textMatch: info.mode || (args.textMatch || 'exact'),
@@ -5123,8 +5217,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             x: clickX,
             y: clickY,
             rect: { x: clickX, y: clickY, w: 1, h: 1 },
-            ...(warning ? { warning } : {}),
           };
+          return await this._annotateClickProgress(tabId, 'click', args, clickResponse, progressBeforeText, { editable: isEditableTarget });
         }
         if (args.selector) {
           // Check if the selector targets a <select> element before clicking.
@@ -5150,6 +5244,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               hint: `This is a <select> dropdown (current: "${selTag.current}"). Do NOT click it — use type_text({text: "option name"}) to select an option. Available options: ${selTag.options.join(', ')}`,
             };
           }
+          const progressBeforeSel = await this._clickProgressSnapshot(tabId);
           const beforeTabIdsSel = new Set((await chrome.tabs.query({})).map(t => t.id));
           const selResult = await cdpClient.clickElement(tabId, args.selector);
           const redirectedSel = await this._redirectTargetBlankClick(tabId, beforeTabIdsSel);
@@ -5161,7 +5256,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               hint: `The selector resolved to a target="_blank" link. The spawned tab was closed and this tab was navigated to ${redirectedSel.url} so the agent stays on a single tab.`,
             };
           }
-          return selResult;
+          return await this._annotateClickProgress(tabId, 'click', args, selResult, progressBeforeSel);
         }
         if (args.x != null && args.y != null) {
           // Check if the element at these coordinates is or is near a <select>.
@@ -5295,6 +5390,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const clickY = redir ? redir.y : args.y;
 
           const clickUrl = await this._currentUrl(tabId);
+          const progressBeforeCoord = await this._clickProgressSnapshot(tabId);
           const beforeTabIdsCoord = new Set((await chrome.tabs.query({})).map(t => t.id));
           await cdpClient.dispatchMouseEvent(tabId, 'mouseMoved', clickX, clickY);
           await cdpClient.dispatchMouseEvent(tabId, 'mousePressed', clickX, clickY);
@@ -5342,7 +5438,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             ts: Date.now(),
             url: clickUrl,
           });
-          return { success: true, method: 'cdp-coords', x: args.x, y: args.y };
+          const coordResponse = { success: true, method: 'cdp-coords', x: args.x, y: args.y };
+          return await this._annotateClickProgress(tabId, 'click', args, coordResponse, progressBeforeCoord);
         }
         // index-based: fall through to content-script path which knows the
         // interactive-elements ordering.
@@ -5780,6 +5877,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (name === 'scroll') {
       args = await this._augmentScrollArgsWithLastInteraction(tabId, args);
     }
+    const clickProgressBefore = (name === 'click' || name === 'click_ax')
+      ? await this._clickProgressSnapshot(tabId)
+      : '';
 
     try {
       const response = await chrome.tabs.sendMessage(tabId, {
@@ -5787,6 +5887,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         action,
         params: args,
       });
+      await this._annotateClickProgress(tabId, name, args, response, clickProgressBefore);
       this._recordInteractionRect(tabId, name, response, interactionUrl);
       this._annotateCredentialField(name, response);
       return response;
@@ -5805,6 +5906,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           action,
           params: args,
         });
+        await this._annotateClickProgress(tabId, name, args, response, clickProgressBefore);
         this._recordInteractionRect(tabId, name, response, interactionUrl);
         this._annotateCredentialField(name, response);
         return response;
@@ -5848,6 +5950,118 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         response.note = CREDENTIAL_NOTE_STRICT;
       }
     } catch { /* never let detection failure break the tool call */ }
+  }
+
+  async _clickProgressSnapshot(tabId) {
+    try {
+      await cdpClient.attach(tabId);
+      const res = await cdpClient.evaluate(tabId, `
+        (() => {
+          function visible(el) {
+            try {
+              const r = el.getBoundingClientRect();
+              if (r.width < 1 || r.height < 1) return false;
+              const s = getComputedStyle(el);
+              return s.display !== 'none' && s.visibility !== 'hidden' && Number(s.opacity || 1) > 0;
+            } catch { return false; }
+          }
+          const text = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1800);
+          const media = Array.from(document.querySelectorAll('img,video,source'))
+            .filter(visible)
+            .map(el => el.currentSrc || el.src || el.poster || '')
+            .filter(Boolean)
+            .slice(0, 25)
+            .join('|');
+          const controls = Array.from(document.querySelectorAll('button,[role="button"],a[href],input,textarea,select'))
+            .filter(visible)
+            .map(el => {
+              const state = [
+                (el.type === 'checkbox' || el.type === 'radio') ? (el.checked ? 'checked' : 'unchecked') : '',
+                el.tagName === 'SELECT' ? ('selectedIndex=' + el.selectedIndex) : '',
+                el.disabled ? 'disabled' : '',
+                el.getAttribute('aria-checked') || '',
+                el.getAttribute('aria-pressed') || '',
+                el.getAttribute('aria-expanded') || '',
+                el.getAttribute('aria-selected') || ''
+              ].filter(Boolean).join(',');
+              return [
+                el.tagName,
+                el.getAttribute('role') || '',
+                el.getAttribute('aria-label') || el.title || el.value || el.innerText || '',
+                state,
+                Math.round(el.getBoundingClientRect().x),
+                Math.round(el.getBoundingClientRect().y)
+              ].join(':');
+            })
+            .slice(0, 60)
+            .join('|');
+          return { url: location.href, text, media, controls };
+        })()
+      `);
+      const value = res?.result?.value;
+      return value ? JSON.stringify(value) : '';
+    } catch {
+      return '';
+    }
+  }
+
+  _clickProgressIdent(toolName, args, response) {
+    if (!response || response.success !== true) return '';
+    if (toolName === 'click_ax') {
+      const r = response.rect || {};
+      return [
+        'click_ax',
+        response.ref_id || args?.ref_id || '',
+        response.tag || '',
+        response.name || '',
+        Math.round(Number(r.x) || 0),
+        Math.round(Number(r.y) || 0),
+        Math.round(Number(r.w) || 0),
+        Math.round(Number(r.h) || 0),
+      ].join('|');
+    }
+    if (toolName === 'click') {
+      if (args?.x != null && args?.y != null) {
+        return `click|coord|${Math.round(Number(args.x) / 5) * 5}|${Math.round(Number(args.y) / 5) * 5}`;
+      }
+      return [
+        'click',
+        response.method || '',
+        args?.text || response.matched || '',
+        args?.selector || '',
+        args?.index ?? '',
+        response.tag || '',
+        response.text || '',
+      ].join('|');
+    }
+    return '';
+  }
+
+  async _annotateClickProgress(tabId, toolName, args, response, beforeSnapshot, opts = {}) {
+    if (!response || response.success !== true) return response;
+    if (toolName !== 'click' && toolName !== 'click_ax') return response;
+    if (opts.editable) return response;
+
+    const ident = this._clickProgressIdent(toolName, args, response);
+    if (!ident) return response;
+
+    await new Promise(r => setTimeout(r, 250));
+    const afterSnapshot = await this._clickProgressSnapshot(tabId);
+    const previous = this._lastClickProgress.get(tabId);
+    this._lastClickProgress.set(tabId, { ident, snapshot: afterSnapshot || beforeSnapshot || '' });
+
+    if (
+      previous?.ident === ident &&
+      beforeSnapshot &&
+      afterSnapshot &&
+      beforeSnapshot === afterSnapshot
+    ) {
+      response.noProgress = true;
+      response.success = false;
+      response.error = 'Click returned, but the visible page did not change. Do not repeat this same click; re-observe the page and choose a different target or explain what is blocking progress.';
+      delete response.warning;
+    }
+    return response;
   }
 
   /**
