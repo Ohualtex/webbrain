@@ -29,6 +29,7 @@ import { transcribeAudio } from '../agent/transcribe.js';
 
 let recordingState = { active: false };
 const RECORDING_STATE_KEY = 'recordingState';
+let recordingStateReady = null;
 
 let providerManagerRef = null;
 
@@ -46,11 +47,20 @@ async function loadRecordingState() {
     if (stored[RECORDING_STATE_KEY]) recordingState = stored[RECORDING_STATE_KEY];
   } catch { /* session storage unavailable */ }
 }
+recordingStateReady = loadRecordingState();
+
+async function ensureRecordingStateLoaded() {
+  try { await recordingStateReady; } catch {}
+}
 
 function saveRecordingState() {
   chrome.storage.session?.set({ [RECORDING_STATE_KEY]: recordingState }).catch(() => {});
 }
-loadRecordingState();
+
+export async function getRecordingStateFresh() {
+  await ensureRecordingStateLoaded();
+  return recordingState;
+}
 
 function broadcast(event, payload = {}) {
   try {
@@ -75,6 +85,7 @@ function broadcast(event, payload = {}) {
  * @returns {Promise<{ok:true, state}|{ok:false, error}>}
  */
 export async function startTabRecording(tabId, options = {}) {
+  await ensureRecordingStateLoaded();
   if (recordingState.active) {
     return {
       ok: false,
@@ -153,6 +164,7 @@ export async function startTabRecording(tabId, options = {}) {
  * @returns {Promise<{ok:true, filename, downloadId, ...}|{ok:false, error}>}
  */
 export async function stopTabRecording() {
+  await ensureRecordingStateLoaded();
   if (!recordingState.active) {
     return { ok: false, error: 'No active recording.' };
   }

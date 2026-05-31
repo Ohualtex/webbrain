@@ -47,6 +47,7 @@ const { Capability, capabilityFor, capabilitiesFor, normalizeHost, hostForCapabi
   'file://' + path.join(ROOT, 'src/firefox/src/agent/permission-gate.js').replace(/\\/g, '/')
 );
 const {
+  Capability: CapabilityCh,
   capabilityFor: capabilityForCh,
   PermissionManager: PermissionManagerCh,
   normalizeHost: normalizeHostCh,
@@ -183,7 +184,7 @@ class LoopDetectorShim {
     // via 8 different API endpoints. Falls back to exact JSON for other
     // tools.
     const argsHash = bucketArgsKey(name, args);
-    const errored = !!(result && (result.error || result.success === false));
+    const errored = !!(result && (result.error || result.success === false || result.noProgress));
     const key = `${name}|${argsHash}|${errored ? 'err' : 'ok'}`;
     const buf = this.recentCalls.get(tabId) || [];
     buf.push({ key, name, ts: Date.now() });
@@ -387,6 +388,15 @@ test('three identical errored calls also trigger nudge', () => {
   d._checkLoop(tab, 'click', { selector: '#missing' }, { success: false });
   d._checkLoop(tab, 'click', { selector: '#missing' }, { success: false });
   const result = d._checkLoop(tab, 'click', { selector: '#missing' }, { success: false });
+  assert.equal(result.kind, 'nudge');
+});
+
+test('three identical no-progress clicks also trigger nudge', () => {
+  const d = new LoopDetectorShim();
+  const tab = 33;
+  d._checkLoop(tab, 'click', { text: 'Like' }, { success: false, noProgress: true });
+  d._checkLoop(tab, 'click', { text: 'Like' }, { success: false, noProgress: true });
+  const result = d._checkLoop(tab, 'click', { text: 'Like' }, { success: false, noProgress: true });
   assert.equal(result.kind, 'nudge');
 });
 
@@ -2101,12 +2111,14 @@ test('capabilityFor: state-changing tools map to capabilities', () => {
 });
 
 test('capabilityFor: no side-effecting tool slips through ungated', () => {
-  // iframe + drag + upload + chrome download alias
+  // iframe + drag + chrome download alias
   assert.equal(capabilityFor('iframe_click', {}), Capability.CLICK);
   assert.equal(capabilityFor('iframe_type', {}), Capability.TYPE);
   assert.equal(capabilityFor('drag_drop', {}), Capability.CLICK);
-  assert.equal(capabilityFor('upload_file', {}), Capability.UPLOAD);
   assert.equal(capabilityFor('download_file', {}), Capability.DOWNLOAD);
+  // upload_file is Chrome-only.
+  assert.equal(capabilityForCh('upload_file', {}), CapabilityCh.UPLOAD);
+  assert.equal(capabilityFor('upload_file', {}), null);
 });
 
 test('set_field with submit:true requires CLICK, not the weaker TYPE', () => {
@@ -2130,9 +2142,14 @@ test('press_keys: Enter is a submit (CLICK); Tab/Escape are benign (null)', () =
   assert.equal(capabilityFor('press_keys', {}), Capability.CLICK); // unknown → gate, fail safe
 });
 
-test('record_tab (tab + microphone capture) is gated', () => {
-  assert.equal(capabilityFor('record_tab', {}), Capability.RECORD);
-  assert.equal(capabilityForCh('record_tab', {}), Capability.RECORD);
+test('record_tab (tab + microphone capture) is gated in Chrome and absent in Firefox', () => {
+  assert.equal(capabilityForCh('record_tab', {}), CapabilityCh.RECORD);
+  assert.equal(capabilityFor('record_tab', {}), null);
+});
+
+test('resize_window is gated as a browser-window action', () => {
+  assert.equal(capabilityFor('resize_window', { width: 1280, height: 720 }), Capability.WINDOW);
+  assert.equal(capabilityForCh('resize_window', { width: 1280, height: 720 }), CapabilityCh.WINDOW);
 });
 
 test('navigation host resolves relative / protocol-relative against current page', () => {
@@ -2324,6 +2341,7 @@ test('parity: chrome & firefox permission-gate behave identically', async () => 
 const KNOWN_SAFE_TOOLS = new Set([
   'clarify',              // relays a question to the user (trusted user input)
   'scratchpad_write',     // writes an internal agent note, not the page
+  'get_window_info',      // reads browser/window metadata, not page content
   // NOTE: hover and list_downloads were moved to UNTRUSTED_CONTENT_TOOLS — both
   // return attacker-influenced bytes (hover: the element's accessible name;
   // list_downloads: url + Content-Disposition filename). "Doesn't act

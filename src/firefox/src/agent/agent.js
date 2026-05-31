@@ -2298,7 +2298,98 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * `onUpdate` is optional and only consumed by tools that need to talk
    * back to the side panel mid-call (currently just `clarify`).
    */
+  async _getWindowInfo(tabId) {
+    let tab = null;
+    let win = null;
+    try { tab = await browser.tabs.get(tabId); } catch (e) {
+      return { success: false, error: `Could not read active tab: ${e.message}` };
+    }
+    try {
+      if (tab?.windowId != null) win = await browser.windows.get(tab.windowId);
+    } catch {}
+
+    let viewport = null;
+    try {
+      const values = await browser.tabs.executeScript(tabId, {
+        code: `(() => ({
+          width: window.innerWidth,
+          height: window.innerHeight,
+          devicePixelRatio: window.devicePixelRatio || 1,
+          scrollX: Math.round(window.scrollX || 0),
+          scrollY: Math.round(window.scrollY || 0)
+        }))()`,
+      });
+      viewport = Array.isArray(values) ? values[0] : null;
+    } catch {}
+
+    return {
+      success: true,
+      tab: tab ? { id: tab.id, windowId: tab.windowId, active: tab.active, title: tab.title || '', url: tab.url || '' } : null,
+      window: win ? {
+        id: win.id,
+        left: win.left,
+        top: win.top,
+        width: win.width,
+        height: win.height,
+        state: win.state,
+        type: win.type,
+        focused: win.focused,
+      } : null,
+      viewport,
+      aspectRatio: win?.width && win?.height ? Number((win.width / win.height).toFixed(4)) : null,
+      viewportAspectRatio: viewport?.width && viewport?.height ? Number((viewport.width / viewport.height).toFixed(4)) : null,
+      note: 'Window width/height are outer browser-window pixels. Viewport width/height are page CSS pixels and may be smaller because of browser chrome/sidebar UI.',
+    };
+  }
+
+  async _resizeWindow(tabId, args = {}) {
+    const width = Math.round(Number(args.width));
+    const height = Math.round(Number(args.height));
+    if (!Number.isFinite(width) || !Number.isFinite(height)) {
+      return { success: false, error: 'resize_window requires numeric width and height in pixels.' };
+    }
+    if (width < 320 || height < 240 || width > 10000 || height > 10000) {
+      return { success: false, error: `resize_window width/height look invalid: ${width}x${height}. Use outer browser-window pixels, e.g. 1280x720 or 1920x1080.` };
+    }
+
+    let tab;
+    try { tab = await browser.tabs.get(tabId); } catch (e) {
+      return { success: false, error: `Could not read active tab: ${e.message}` };
+    }
+    if (tab?.windowId == null) return { success: false, error: 'Active tab has no windowId.' };
+
+    const update = { width, height };
+    if (args.left != null && Number.isFinite(Number(args.left))) update.left = Math.round(Number(args.left));
+    if (args.top != null && Number.isFinite(Number(args.top))) update.top = Math.round(Number(args.top));
+
+    try {
+      const win = await browser.windows.get(tab.windowId);
+      if (win?.state && win.state !== 'normal') {
+        await browser.windows.update(tab.windowId, { state: 'normal' });
+        await new Promise(r => setTimeout(r, 150));
+      }
+      await browser.windows.update(tab.windowId, update);
+      await new Promise(r => setTimeout(r, 250));
+      const info = await this._getWindowInfo(tabId);
+      return {
+        ...info,
+        resized: true,
+        requested: update,
+        note: `${info.note} Requested outer size ${width}x${height}; actual values may differ if the OS/window manager constrained the window.`,
+      };
+    } catch (e) {
+      return { success: false, error: `resize_window failed: ${e.message}` };
+    }
+  }
+
   async executeTool(tabId, name, args, onUpdate = null) {
+    if (name === 'get_window_info') {
+      return await this._getWindowInfo(tabId);
+    }
+    if (name === 'resize_window') {
+      return await this._resizeWindow(tabId, args || {});
+    }
+
     // clarify: pause the run and wait for the user to answer. This tool
     // does NOT touch the page — it's a meta-action that bridges agent ↔
     // user. The handler resolves when background.js routes the user's

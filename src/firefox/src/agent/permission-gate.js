@@ -28,6 +28,7 @@ export const Capability = {
   EXECUTE_JS: 'execute_js',      // execute_js
   NETWORK: 'network_write',      // fetch_url / research_url with a write method
   DOWNLOAD: 'download',          // download_* tools
+  WINDOW: 'window',              // resize_window (changes browser window bounds)
   // NOTE: no UPLOAD / RECORD here — upload_file and record_tab are Chrome-only
   // (CDP file injection / tabCapture+OffscreenDocument). Firefox's AGENT_TOOLS
   // does not implement them, so there is nothing to gate.
@@ -41,6 +42,7 @@ export const CAPABILITY_LABEL = {
   [Capability.EXECUTE_JS]: 'run JavaScript on',
   [Capability.NETWORK]: 'make a network request to',
   [Capability.DOWNLOAD]: 'download files from',
+  [Capability.WINDOW]: 'resize the browser window for',
 };
 
 /**
@@ -127,6 +129,7 @@ const TOOL_CAPABILITY = {
   type_ax: Capability.TYPE,
   iframe_type: Capability.TYPE,
   execute_js: Capability.EXECUTE_JS,
+  resize_window: Capability.WINDOW,
   download_file: Capability.DOWNLOAD,
   download_files: Capability.DOWNLOAD,
   download_resource_from_page: Capability.DOWNLOAD,

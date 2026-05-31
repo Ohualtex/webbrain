@@ -30,6 +30,7 @@ export const Capability = {
   DOWNLOAD: 'download',          // download_* tools
   UPLOAD: 'upload',              // upload_file (selects a local file)
   RECORD: 'record',              // record_tab (captures the tab + microphone)
+  WINDOW: 'window',              // resize_window (changes browser window bounds)
 };
 
 // Human-readable verb for the permission prompt: "WebBrain wants to <label> <host>".
@@ -42,6 +43,7 @@ export const CAPABILITY_LABEL = {
   [Capability.DOWNLOAD]: 'download files from',
   [Capability.UPLOAD]: 'upload a file to',
   [Capability.RECORD]: 'record the tab (and microphone) on',
+  [Capability.WINDOW]: 'resize the browser window for',
 };
 
 /**
@@ -130,6 +132,7 @@ const TOOL_CAPABILITY = {
   execute_js: Capability.EXECUTE_JS,
   upload_file: Capability.UPLOAD,
   record_tab: Capability.RECORD,
+  resize_window: Capability.WINDOW,
   download_file: Capability.DOWNLOAD,
   download_files: Capability.DOWNLOAD,
   download_resource_from_page: Capability.DOWNLOAD,
