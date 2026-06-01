@@ -2485,6 +2485,19 @@ test('Agent enrich: corrects stale "recording started" once no recording is acti
   assert.match(enriched.content, /record again$/);
 });
 
+test('Agent enrich: correction survives context compaction (record_tab in summary, not tool_calls)', async () => {
+  const agent = new AgentCh({});
+  // After _manageContext compacts, the structured record_tab tool_calls turn is
+  // gone — collapsed into a "- record_tab → ..." line inside a summary message.
+  // A tool_calls-only scan would miss this and skip the correction.
+  const messages = [
+    { role: 'user', content: '[Context window was trimmed to stay within budget. Previous conversation summary:\n- User asked: Record this meeting\n- record_tab → Recording started at 2026-06-01T09:32:10.733Z.]' },
+    { role: 'assistant', content: 'Recording started.' },
+  ];
+  const enriched = await agent._enrichUserMessageWithCurrentPage(999, messages, 'record again');
+  assert.match(enriched.content, /Recording status: no recording is currently active/i);
+});
+
 test('Agent enrich: no recording status note when the conversation never recorded', async () => {
   const agent = new AgentCh({});
   const messages = [

@@ -851,10 +851,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       const rec = await recorderStateFresh();
       const recActive = !!(rec && rec.active);
-      const startedRecording = messages.some(
-        (m) => m.role === 'assistant' && Array.isArray(m.tool_calls) &&
-          m.tool_calls.some((tc) => tc?.function?.name === 'record_tab')
-      );
+      // Did this conversation ever start a recording? Check structured
+      // tool_calls AND text content. Once context compaction runs, the
+      // structured record_tab turn is collapsed into a "- record_tab → ..."
+      // summary line (the tool name survives via toolNameById), so a
+      // tool_calls-only scan would miss long conversations and skip the
+      // correction exactly when stale memory is most likely to mislead.
+      const refersToRecording = (m) => {
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls) &&
+            m.tool_calls.some((tc) => tc?.function?.name === 'record_tab')) return true;
+        const c = m.content;
+        if (typeof c === 'string') return c.includes('record_tab');
+        if (Array.isArray(c)) return c.some((b) => typeof b?.text === 'string' && b.text.includes('record_tab'));
+        return false;
+      };
+      const startedRecording = messages.some(refersToRecording);
       if (recActive) {
         const since = rec.startedAt ? ` (started ${new Date(rec.startedAt).toISOString()})` : '';
         contextLine += `[Recording status: a tab recording is currently ACTIVE${since}. Call stop_recording to end it; do not start another.]\n\n`;
