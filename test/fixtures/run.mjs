@@ -20,6 +20,7 @@ import path from 'node:path';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..', '..');
 const contentJsPath = path.join(root, 'src', 'chrome', 'src', 'content', 'content.js');
+const smdJsPath = path.join(root, 'src', 'chrome', 'src', 'agent', 'social-media-downloader.js');
 
 function fixtureUrl(name) {
   return 'file://' + path.join(__dirname, name);
@@ -57,6 +58,27 @@ async function call(page, action, params) {
 
 async function clickedSentinel(page) {
   return page.evaluate(() => window.__clicked);
+}
+
+async function setupSmd(page, url, html) {
+  const u = new URL(url);
+  await page.route(`${u.origin}/**`, route => {
+    if (route.request().resourceType() === 'document') {
+      return route.fulfill({ body: html, contentType: 'text/html' });
+    }
+    return route.fulfill({ body: '', contentType: 'text/plain' });
+  });
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  const src = await readFile(smdJsPath, 'utf-8');
+  await page.addScriptTag({ content: src });
+  await page.waitForFunction(() => typeof window.SocialMediaDownloader === 'object');
+}
+
+async function collectSmd(page, mode = 'auto') {
+  return page.evaluate((m) => {
+    const r = window.SocialMediaDownloader._collect(m);
+    return { urls: r.urls, mode: r.mode, profile: r.profile.name };
+  }, mode);
 }
 
 const tests = [];
@@ -124,6 +146,148 @@ test('ambiguity: two Cancels return rich candidates with ancestor', async (page)
 });
 
 // ─── main ─────────────────────────────────────────────────────────────────
+// Social media downloader focus safety
+test('SMD: Instagram auto mode downloads the open dialog image, not the feed', async (page) => {
+  await setupSmd(page, 'https://www.instagram.com/natgeo/', `<!doctype html>
+    <style>
+      body { margin: 0; }
+      main { display: grid; grid-template-columns: repeat(3, 220px); gap: 12px; }
+      main img { width: 220px; height: 220px; object-fit: cover; }
+      [role="dialog"] { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.8); }
+      [role="dialog"] img { width: 640px; height: 640px; object-fit: contain; }
+    </style>
+    <main>
+      <article>
+        ${Array.from({ length: 9 }, (_, i) =>
+          `<img width="220" height="220" src="https://cdninstagram.com/feed-${i}.jpg">`
+        ).join('')}
+      </article>
+    </main>
+    <div role="dialog" aria-modal="true">
+      <img width="640" height="640" src="https://cdninstagram.com/open-dialog-current.jpg">
+    </div>`);
+
+  const auto = await collectSmd(page, 'auto');
+  if (auto.profile !== 'instagram') throw new Error(`expected instagram profile, got ${auto.profile}`);
+  if (auto.mode !== 'focused') throw new Error(`expected focused mode, got ${auto.mode}`);
+  if (auto.urls.length !== 1) throw new Error(`expected one focused URL, got ${auto.urls.length}: ${auto.urls.join(', ')}`);
+  if (!/open-dialog-current\.jpg/.test(auto.urls[0])) {
+    throw new Error(`expected dialog image, got ${auto.urls[0]}`);
+  }
+
+  const all = await collectSmd(page, 'all');
+  if (all.urls.length <= 1) throw new Error(`explicit all mode should still expose bulk media, got ${all.urls.length}`);
+});
+
+test('SMD: Instagram focused video keeps blob URL ahead of poster image', async (page) => {
+  await setupSmd(page, 'https://www.instagram.com/reel/abc123/', `<!doctype html>
+    <style>
+      body { margin: 0; }
+      main img { width: 220px; height: 220px; display: block; }
+      [role="dialog"] { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.85); }
+      video { width: 540px; height: 720px; background: #000; }
+    </style>
+    <main>
+      <img width="220" height="220" src="https://cdninstagram.com/feed-still.jpg">
+    </main>
+    <div role="dialog" aria-modal="true">
+      <video width="540" height="720"
+        src="blob:https://www.instagram.com/focused-reel-video"
+        poster="https://cdninstagram.com/focused-reel-poster.jpg"></video>
+    </div>`);
+
+  const auto = await collectSmd(page, 'auto');
+  if (auto.profile !== 'instagram') throw new Error(`expected instagram profile, got ${auto.profile}`);
+  if (auto.mode !== 'focused') throw new Error(`expected focused mode, got ${auto.mode}`);
+  if (auto.urls.length !== 1) throw new Error(`expected one focused URL, got ${auto.urls.length}: ${auto.urls.join(', ')}`);
+  if (!auto.urls[0].startsWith('blob:https://www.instagram.com/focused-reel-video')) {
+    throw new Error(`expected focused blob video before poster, got ${auto.urls[0]}`);
+  }
+});
+
+test('SMD: main mode orders focused video before poster when caller limits to one', async (page) => {
+  await setupSmd(page, 'https://www.instagram.com/p/video123/', `<!doctype html>
+    <style>
+      body { margin: 0; }
+      main article video { width: 640px; height: 640px; background: #000; }
+    </style>
+    <main>
+      <article>
+        <video width="640" height="640"
+          src="blob:https://www.instagram.com/main-post-video"
+          poster="https://cdninstagram.com/main-post-poster.jpg"></video>
+      </article>
+    </main>`);
+
+  const main = await collectSmd(page, 'main');
+  if (main.profile !== 'instagram') throw new Error(`expected instagram profile, got ${main.profile}`);
+  if (main.mode !== 'main') throw new Error(`expected main mode, got ${main.mode}`);
+  if (!main.urls.length) throw new Error('expected main-mode URLs');
+  if (!main.urls[0].startsWith('blob:https://www.instagram.com/main-post-video')) {
+    throw new Error(`expected main-mode video before poster, got ${main.urls[0]}`);
+  }
+});
+
+test('SMD: YouTube focused video prefers signed HTTP video over blob and poster', async (page) => {
+  await setupSmd(page, 'https://www.youtube.com/watch?v=abc123', `<!doctype html>
+    <script>
+      window.ytInitialPlayerResponse = {
+        streamingData: {
+          formats: [
+            { url: 'https://rr1---sn.googlevideo.com/videoplayback?expire=999&mime=video%2Fmp4&itag=18' }
+          ]
+        }
+      };
+    </script>
+    <style>
+      body { margin: 0; }
+      #movie_player { width: 960px; height: 540px; }
+      #movie_player video { width: 960px; height: 540px; background: #000; }
+    </style>
+    <div id="movie_player">
+      <video width="960" height="540"
+        src="blob:https://www.youtube.com/focused-player-video"
+        poster="https://i.ytimg.com/vi/abc123/hqdefault.jpg"></video>
+    </div>`);
+
+  const auto = await collectSmd(page, 'auto');
+  if (auto.profile !== 'youtube') throw new Error(`expected youtube profile, got ${auto.profile}`);
+  if (auto.mode !== 'focused') throw new Error(`expected focused mode, got ${auto.mode}`);
+  if (auto.urls.length !== 1) throw new Error(`expected one focused URL, got ${auto.urls.length}: ${auto.urls.join(', ')}`);
+  if (!/googlevideo\.com\/videoplayback/.test(auto.urls[0])) {
+    throw new Error(`expected signed HTTP video before blob/poster, got ${auto.urls[0]}`);
+  }
+});
+
+test('SMD: X photo modal wins over background timeline media', async (page) => {
+  await setupSmd(page, 'https://x.com/NASA/status/123/photo/1', `<!doctype html>
+    <style>
+      body { margin: 0; }
+      main article img { width: 300px; height: 300px; display: block; margin: 16px; }
+      [aria-modal="true"] { position: fixed; inset: 0; display: grid; place-items: center; background: #000; }
+      [aria-modal="true"] img { width: 720px; height: 480px; object-fit: contain; }
+    </style>
+    <main>
+      <article data-testid="tweet">
+        <div data-testid="tweetPhoto"><img width="300" height="300" src="https://pbs.twimg.com/media/background-one.jpg?name=small"></div>
+        <div data-testid="tweetPhoto"><img width="300" height="300" src="https://pbs.twimg.com/media/background-two.jpg?name=small"></div>
+      </article>
+    </main>
+    <div aria-modal="true" role="dialog">
+      <div data-testid="tweetPhoto">
+        <img width="720" height="480" src="https://pbs.twimg.com/media/current-photo.jpg?name=small">
+      </div>
+    </div>`);
+
+  const auto = await collectSmd(page, 'auto');
+  if (auto.profile !== 'twitter') throw new Error(`expected twitter profile, got ${auto.profile}`);
+  if (auto.mode !== 'focused') throw new Error(`expected focused mode, got ${auto.mode}`);
+  if (auto.urls.length !== 1) throw new Error(`expected one focused URL, got ${auto.urls.length}: ${auto.urls.join(', ')}`);
+  if (!/current-photo\.jpg\?name=orig/.test(auto.urls[0])) {
+    throw new Error(`expected upgraded modal photo URL, got ${auto.urls[0]}`);
+  }
+});
+
 (async () => {
   const browser = await chromium.launch();
   const context = await browser.newContext();

@@ -8,6 +8,7 @@
  */
 
 import { strict as assert } from 'node:assert';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -641,6 +642,30 @@ test('4K and 1440p converge to the same max-budget dims', () => {
   const [w4k, h4k] = fitImageDimensions(3840, 2160);
   assert.equal(w1440, w4k);
   assert.equal(h1440, h4k);
+});
+
+test('visible media localization parser accepts fenced JSON and clamps to viewport', () => {
+  const raw = '```json\n{"found":true,"x":-10,"y":20,"right":330,"bottom":220,"confidence":87,"mediaType":"image"}\n```';
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const rect = AgentClass._normalizeVisibleMediaLocation(raw, { width: 300, height: 200 });
+    assert.deepEqual(rect, {
+      found: true,
+      x: 0,
+      y: 20,
+      width: 300,
+      height: 180,
+      confidence: 0.87,
+      mediaType: 'image',
+      reason: '',
+    });
+  }
+});
+
+test('visible media localization parser rejects no-target and tiny boxes', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    assert.equal(AgentClass._normalizeVisibleMediaLocation('{"found":false}', { width: 300, height: 200 }), null);
+    assert.equal(AgentClass._normalizeVisibleMediaLocation('{"found":true,"x":10,"y":10,"width":10,"height":10}', { width: 300, height: 200 }), null);
+  }
 });
 
 test('tall portrait caps the long side at maxTargetPx', () => {
@@ -1408,6 +1433,47 @@ test('getToolsForMode: compact flag does not shrink ask mode', () => {
       getTools('ask', { compact: true }).map(t => t.function.name).sort(),
       getTools('ask').map(t => t.function.name).sort(),
     );
+  }
+});
+
+test('download_social_media exposes merged DOM/vision strategy in act tiers only', () => {
+  for (const [label, getTools] of [
+    ['chrome', getToolsForModeCh],
+    ['firefox', getToolsForModeFx],
+  ]) {
+    assert.equal(getTools('ask').some(t => t.function.name === 'download_social_media'), false, `[${label}] ask mode should not expose downloads`);
+    for (const opts of [{}, { tier: 'mid' }, { tier: 'compact' }]) {
+      const tool = getTools('act', opts).find(t => t.function.name === 'download_social_media');
+      assert.ok(tool, `[${label}] download_social_media missing for ${JSON.stringify(opts)}`);
+      const props = tool.function.parameters.properties;
+      assert.deepEqual(props.strategy.enum, ['auto', 'dom', 'vision']);
+      assert.deepEqual(props.target.enum, ['image', 'video', 'media']);
+      assert.match(props.strategy.description, /falls back to DOM/i);
+    }
+  }
+});
+
+test('social media downloader copies stay in sync', () => {
+  const chrome = fs.readFileSync(path.join(ROOT, 'src/chrome/src/agent/social-media-downloader.js'), 'utf8');
+  const firefox = fs.readFileSync(path.join(ROOT, 'src/firefox/src/agent/social-media-downloader.js'), 'utf8');
+  const fixture = fs.readFileSync(path.join(ROOT, 'test/smd-tests/social-media-downloader.js'), 'utf8');
+
+  assert.equal(firefox, chrome);
+  assert.equal(fixture, chrome);
+});
+
+test('social media downloader names extensionless HTTP videos as videos', () => {
+  const downloaderPaths = [
+    'src/chrome/src/agent/social-media-downloader.js',
+    'src/firefox/src/agent/social-media-downloader.js',
+    'test/smd-tests/social-media-downloader.js',
+  ];
+
+  for (const relPath of downloaderPaths) {
+    const source = fs.readFileSync(path.join(ROOT, relPath), 'utf8');
+    assert.match(source, /const isHttpVideoUrl = url =>[\s\S]*googlevideo\\.com\\\/videoplayback\\b[\s\S]*mime\|type\)=video/);
+    assert.match(source, /const isVideoDownloadUrl = url =>\s*isHttpVideoUrl\(url\) \|\|[\s\S]*v\\.redd\\.it/);
+    assert.match(source, /const isVideo = isVideoDownloadUrl\(url\);/);
   }
 });
 
