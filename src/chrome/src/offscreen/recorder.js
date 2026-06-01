@@ -54,6 +54,14 @@
 
   async function start({ streamId, tabId, options }) {
     if (session) {
+      const state = session.recorder?.state || '';
+      if (state === 'inactive' && !session.stopping) {
+        log('discarding stale inactive session before start');
+        try { await releaseSession(session); } catch {}
+        session = null;
+      }
+    }
+    if (session) {
       throw new Error('A recording is already in progress.');
     }
     const { video = true, mic = true, mimeType: requestedMime } = options || {};
@@ -177,6 +185,7 @@
       micStream,
       audioContext,
       chunks,
+      stopping: false,
       get bytes() { return bytes; },
     };
 
@@ -221,24 +230,13 @@
   async function stop() {
     if (!session) throw new Error('No active recording.');
     const s = session;
+    s.stopping = true;
 
     // Finalize the recorder, wait for the last dataavailable + the stop event.
-    await new Promise((resolve) => {
-      const onStop = () => {
-        s.recorder.removeEventListener('stop', onStop);
-        resolve();
-      };
-      s.recorder.addEventListener('stop', onStop);
-      try { s.recorder.requestData(); } catch {}
-      try { s.recorder.stop(); } catch {}
-    });
+    await waitForRecorderStop(s);
 
     // Release the streams + AudioContext.
-    try { for (const t of s.tabStream.getTracks()) t.stop(); } catch {}
-    if (s.micStream) {
-      try { for (const t of s.micStream.getTracks()) t.stop(); } catch {}
-    }
-    try { await s.audioContext.close(); } catch {}
+    await releaseSession(s);
 
     // IMPORTANT: strip the codecs= parameter from the blob's type before
     // serializing to a data URL. MediaRecorder gives us something like
@@ -266,6 +264,41 @@
       durationMs: Date.now() - s.startedAt,
       dataUrl,
     };
+  }
+
+  function waitForRecorderStop(s) {
+    if (!s?.recorder || s.recorder.state === 'inactive') return Promise.resolve();
+    return new Promise((resolve) => {
+      let done = false;
+      let timeout = null;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        if (timeout) clearTimeout(timeout);
+        try { s.recorder.removeEventListener('stop', finish); } catch {}
+        resolve();
+      };
+      try { s.recorder.addEventListener('stop', finish); } catch {}
+      try { s.recorder.requestData(); } catch {}
+      timeout = setTimeout(() => {
+        log('timed out waiting for MediaRecorder stop event; finalizing with collected chunks');
+        finish();
+      }, 3000);
+      try {
+        if (s.recorder.state === 'inactive') finish();
+        else s.recorder.stop();
+      } catch {
+        finish();
+      }
+    });
+  }
+
+  async function releaseSession(s) {
+    try { for (const t of s.tabStream?.getTracks?.() || []) t.stop(); } catch {}
+    try { for (const t of s.micStream?.getTracks?.() || []) t.stop(); } catch {}
+    try {
+      if (s.audioContext && s.audioContext.state !== 'closed') await s.audioContext.close();
+    } catch {}
   }
 
   // ─── runtime.onMessage router ─────────────────────────────────────

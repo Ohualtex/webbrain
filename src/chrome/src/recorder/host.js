@@ -59,6 +59,7 @@ function saveRecordingState() {
 
 export async function getRecordingStateFresh() {
   await ensureRecordingStateLoaded();
+  if (recordingState.active) await reconcileStaleRecordingState();
   return recordingState;
 }
 
@@ -71,6 +72,35 @@ function broadcast(event, payload = {}) {
       ...payload,
     }).catch(() => {});
   } catch {}
+}
+
+async function readOffscreenRecorderState() {
+  try {
+    await ensureOffscreen();
+    return await chrome.runtime.sendMessage({ type: 'recorder-state' });
+  } catch {
+    return null;
+  }
+}
+
+async function reconcileStaleRecordingState({ finalizeInactiveSession = false } = {}) {
+  const offscreenState = await readOffscreenRecorderState();
+  if (!offscreenState || offscreenState.recording || offscreenState.paused) return false;
+  if (offscreenState.tabId && finalizeInactiveSession) {
+    await stopTabRecording();
+    return recordingState.active === false;
+  }
+  if (offscreenState.tabId) return false;
+  recordingState = { active: false };
+  saveRecordingState();
+  broadcast('stopped', {
+    result: {
+      ok: true,
+      alreadyStopped: true,
+      staleCleared: true,
+    },
+  });
+  return true;
 }
 
 /**
@@ -87,6 +117,8 @@ function broadcast(event, payload = {}) {
 export async function startTabRecording(tabId, options = {}) {
   await ensureRecordingStateLoaded();
   if (recordingState.active) {
+    const cleared = await reconcileStaleRecordingState({ finalizeInactiveSession: true });
+    if (cleared) return startTabRecording(tabId, options);
     return {
       ok: false,
       error: `A recording is already in progress on tab ${recordingState.tabId}.`,
