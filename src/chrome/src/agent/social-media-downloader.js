@@ -1296,6 +1296,11 @@ window.SocialMediaDownloader = (() => {
     return s;
   };
 
+  const focusedDownloadUrls = urls => {
+    const blobUrl = urls.find(u => u.startsWith("blob:"));
+    return blobUrl ? [blobUrl] : urls.slice(0, 1);
+  };
+
   // ---------- HLS m3u8 stitching ----------
   const fetchText = async u =>
     (await fetch(u, { credentials: "include" })).text();
@@ -1519,7 +1524,7 @@ window.SocialMediaDownloader = (() => {
         try { return profile.urlFilter(u); } catch { return true; }
       });
     }
-    if (sourceMode === 'focused') finalUrls = finalUrls.slice(0, 1);
+    if (sourceMode === 'focused') finalUrls = focusedDownloadUrls(finalUrls);
     return { urls: finalUrls, profile,
              mode: sourceMode,
              dashGroups: groups };

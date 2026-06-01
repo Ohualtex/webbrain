@@ -179,6 +179,32 @@ test('SMD: Instagram auto mode downloads the open dialog image, not the feed', a
   if (all.urls.length <= 1) throw new Error(`explicit all mode should still expose bulk media, got ${all.urls.length}`);
 });
 
+test('SMD: Instagram focused video keeps blob URL ahead of poster image', async (page) => {
+  await setupSmd(page, 'https://www.instagram.com/reel/abc123/', `<!doctype html>
+    <style>
+      body { margin: 0; }
+      main img { width: 220px; height: 220px; display: block; }
+      [role="dialog"] { position: fixed; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.85); }
+      video { width: 540px; height: 720px; background: #000; }
+    </style>
+    <main>
+      <img width="220" height="220" src="https://cdninstagram.com/feed-still.jpg">
+    </main>
+    <div role="dialog" aria-modal="true">
+      <video width="540" height="720"
+        src="blob:https://www.instagram.com/focused-reel-video"
+        poster="https://cdninstagram.com/focused-reel-poster.jpg"></video>
+    </div>`);
+
+  const auto = await collectSmd(page, 'auto');
+  if (auto.profile !== 'instagram') throw new Error(`expected instagram profile, got ${auto.profile}`);
+  if (auto.mode !== 'focused') throw new Error(`expected focused mode, got ${auto.mode}`);
+  if (auto.urls.length !== 1) throw new Error(`expected one focused URL, got ${auto.urls.length}: ${auto.urls.join(', ')}`);
+  if (!auto.urls[0].startsWith('blob:https://www.instagram.com/focused-reel-video')) {
+    throw new Error(`expected focused blob video before poster, got ${auto.urls[0]}`);
+  }
+});
+
 test('SMD: X photo modal wins over background timeline media', async (page) => {
   await setupSmd(page, 'https://x.com/NASA/status/123/photo/1', `<!doctype html>
     <style>
