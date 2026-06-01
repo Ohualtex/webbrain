@@ -23,6 +23,7 @@ import { solveCaptcha, detectCaptcha, injectToken } from './captcha-solver.js';
 import {
   startTabRecording as recorderStart,
   stopTabRecording as recorderStop,
+  getRecordingStateFresh as recorderStateFresh,
 } from '../recorder/host.js';
 import { Capability, CAPABILITY_LABEL, capabilitiesFor, requiredHosts, frameHostMatches, isNetworkMutation, PermissionManager, UNTRUSTED_CONTENT_TOOLS } from './permission-gate.js';
 
@@ -838,6 +839,40 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let contextLine = url
       ? `[Current page context — applies to this user message and supersedes older page context for phrases like "this page". URL: ${safeField(url)}${title ? ` — Title: ${safeField(title)}` : ''}]\n\n`
       : '';
+
+    // Recording status (ground truth). The tab recorder can be stopped
+    // out-of-band — the sidebar/toolbar Stop button, the safety-cap auto-stop,
+    // or stale-state reconciliation — none of which write to this conversation.
+    // So the history can hold a "Recording started" with no matching stop and
+    // fool the model into thinking a capture is still running. Inject the live
+    // state on every turn so it supersedes the stale memory. Only emit when
+    // there's something to say: a recording is active now, or one was started
+    // earlier in this conversation (and thus may need correcting).
+    try {
+      const rec = await recorderStateFresh();
+      const recActive = !!(rec && rec.active);
+      // Did this conversation ever start a recording? Check structured
+      // tool_calls AND text content. Once context compaction runs, the
+      // structured record_tab turn is collapsed into a "- record_tab → ..."
+      // summary line (the tool name survives via toolNameById), so a
+      // tool_calls-only scan would miss long conversations and skip the
+      // correction exactly when stale memory is most likely to mislead.
+      const refersToRecording = (m) => {
+        if (m.role === 'assistant' && Array.isArray(m.tool_calls) &&
+            m.tool_calls.some((tc) => tc?.function?.name === 'record_tab')) return true;
+        const c = m.content;
+        if (typeof c === 'string') return c.includes('record_tab');
+        if (Array.isArray(c)) return c.some((b) => typeof b?.text === 'string' && b.text.includes('record_tab'));
+        return false;
+      };
+      const startedRecording = messages.some(refersToRecording);
+      if (recActive) {
+        const since = rec.startedAt ? ` (started ${new Date(rec.startedAt).toISOString()})` : '';
+        contextLine += `[Recording status: a tab recording is currently ACTIVE${since}. Call stop_recording to end it; do not start another.]\n\n`;
+      } else if (startedRecording) {
+        contextLine += `[Recording status: no recording is currently active. Any earlier "recording started" in this conversation has since been stopped (for example via the sidebar Stop button). It is safe to start a new recording if the user asks.]\n\n`;
+      }
+    } catch (e) { /* recorder state unavailable — skip the status note */ }
 
     // API mutation override: prepend a strong note when the user has set
     // /allow-api for this tab. Inject only once per "allowed run" to avoid
