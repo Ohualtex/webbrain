@@ -643,6 +643,30 @@ test('4K and 1440p converge to the same max-budget dims', () => {
   assert.equal(h1440, h4k);
 });
 
+test('visible media localization parser accepts fenced JSON and clamps to viewport', () => {
+  const raw = '```json\n{"found":true,"x":-10,"y":20,"right":330,"bottom":220,"confidence":87,"mediaType":"image"}\n```';
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const rect = AgentClass._normalizeVisibleMediaLocation(raw, { width: 300, height: 200 });
+    assert.deepEqual(rect, {
+      found: true,
+      x: 0,
+      y: 20,
+      width: 300,
+      height: 180,
+      confidence: 0.87,
+      mediaType: 'image',
+      reason: '',
+    });
+  }
+});
+
+test('visible media localization parser rejects no-target and tiny boxes', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    assert.equal(AgentClass._normalizeVisibleMediaLocation('{"found":false}', { width: 300, height: 200 }), null);
+    assert.equal(AgentClass._normalizeVisibleMediaLocation('{"found":true,"x":10,"y":10,"width":10,"height":10}', { width: 300, height: 200 }), null);
+  }
+});
+
 test('tall portrait caps the long side at maxTargetPx', () => {
   // A 1920×8000 full-page capture — the long side here is height.
   const [w, h] = fitImageDimensions(1920, 8000);
@@ -1408,6 +1432,23 @@ test('getToolsForMode: compact flag does not shrink ask mode', () => {
       getTools('ask', { compact: true }).map(t => t.function.name).sort(),
       getTools('ask').map(t => t.function.name).sort(),
     );
+  }
+});
+
+test('download_social_media exposes merged DOM/vision strategy in act tiers only', () => {
+  for (const [label, getTools] of [
+    ['chrome', getToolsForModeCh],
+    ['firefox', getToolsForModeFx],
+  ]) {
+    assert.equal(getTools('ask').some(t => t.function.name === 'download_social_media'), false, `[${label}] ask mode should not expose downloads`);
+    for (const opts of [{}, { tier: 'mid' }, { tier: 'compact' }]) {
+      const tool = getTools('act', opts).find(t => t.function.name === 'download_social_media');
+      assert.ok(tool, `[${label}] download_social_media missing for ${JSON.stringify(opts)}`);
+      const props = tool.function.parameters.properties;
+      assert.deepEqual(props.strategy.enum, ['auto', 'dom', 'vision']);
+      assert.deepEqual(props.target.enum, ['image', 'video', 'media']);
+      assert.match(props.strategy.description, /falls back to DOM/i);
+    }
   }
 });
 

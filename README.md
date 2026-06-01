@@ -163,7 +163,7 @@ Deeper docs live in [`docs/`](docs/): [architecture](docs/architecture.md), [sit
 | `research_url` | Yes | Yes | -- | Open a URL in a hidden tab, wait for JS rendering, return content |
 | `download_files` | -- | Yes | -- | Download one or more files (single url or array, max 3 concurrent) |
 | `download_resource_from_page` | -- | Yes | -- | Download an `<img>`/`<video>`/blob URL from the current page |
-| `download_social_media` | -- | Yes | Yes | One-shot media download from Facebook, Instagram, X, LinkedIn, Reddit, Pinterest, YouTube |
+| `download_social_media` | -- | Yes | Yes | One-shot social media download; DOM/CDN first, optional visible-media vision crop fallback |
 | `list_downloads` | Yes | Yes | -- | List recent downloads with status and source URLs |
 | `read_downloaded_file` | -- | Yes | -- | Re-fetch a downloaded file's content (text or base64) |
 | `iframe_read` / `iframe_click` / `iframe_type` | -- | Yes | -- | Read/click/type inside cross-origin iframes |

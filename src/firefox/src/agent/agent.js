@@ -1353,6 +1353,270 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 
+  static _extractFirstJsonObject(raw) {
+    const text = String(raw || '').trim();
+    if (!text) return null;
+    const candidates = [];
+    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+    if (fenced) candidates.push(fenced[1].trim());
+    candidates.push(text);
+
+    for (const candidate of candidates) {
+      const start = candidate.indexOf('{');
+      if (start < 0) continue;
+      let depth = 0;
+      let inString = false;
+      let escaped = false;
+      for (let i = start; i < candidate.length; i++) {
+        const ch = candidate[i];
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (ch === '\\') {
+            escaped = true;
+          } else if (ch === '"') {
+            inString = false;
+          }
+          continue;
+        }
+        if (ch === '"') {
+          inString = true;
+        } else if (ch === '{') {
+          depth += 1;
+        } else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            try {
+              return JSON.parse(candidate.slice(start, i + 1));
+            } catch (_) {
+              break;
+            }
+          }
+        }
+      }
+    }
+    return null;
+  }
+
+  static _normalizeVisibleMediaLocation(raw, viewport = {}) {
+    const obj = typeof raw === 'string' ? Agent._extractFirstJsonObject(raw) : raw;
+    if (!obj || typeof obj !== 'object') return null;
+    if (obj.found === false || obj.noMedia === true || obj.no_media === true) return null;
+
+    const box = obj.bbox || obj.box || obj.rect || obj.crop || {};
+    let x = Number(obj.x ?? obj.left ?? box.x ?? box.left);
+    let y = Number(obj.y ?? obj.top ?? box.y ?? box.top);
+    let width = Number(obj.width ?? obj.w ?? box.width ?? box.w);
+    let height = Number(obj.height ?? obj.h ?? box.height ?? box.h);
+    const right = Number(obj.right ?? box.right);
+    const bottom = Number(obj.bottom ?? box.bottom);
+    if (!Number.isFinite(width) && Number.isFinite(right) && Number.isFinite(x)) width = right - x;
+    if (!Number.isFinite(height) && Number.isFinite(bottom) && Number.isFinite(y)) height = bottom - y;
+    if (![x, y, width, height].every(Number.isFinite)) return null;
+
+    const imageW = Math.max(1, Math.round(Number(viewport.width || viewport.w || 0)));
+    const imageH = Math.max(1, Math.round(Number(viewport.height || viewport.h || 0)));
+    if (!imageW || !imageH) return null;
+
+    if (x < 0) {
+      width += x;
+      x = 0;
+    }
+    if (y < 0) {
+      height += y;
+      y = 0;
+    }
+    width = Math.min(width, imageW - x);
+    height = Math.min(height, imageH - y);
+    if (width < 24 || height < 24) return null;
+
+    let confidence = Number(obj.confidence ?? obj.score ?? obj.probability ?? 0.75);
+    if (!Number.isFinite(confidence)) confidence = 0.75;
+    if (confidence > 1 && confidence <= 100) confidence /= 100;
+    confidence = Math.max(0, Math.min(1, confidence));
+
+    const mediaType = String(obj.mediaType || obj.media_type || obj.type || 'media').toLowerCase();
+    return {
+      found: true,
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(width),
+      height: Math.round(height),
+      confidence,
+      mediaType: ['image', 'video', 'media'].includes(mediaType) ? mediaType : 'media',
+      reason: String(obj.reason || obj.notes || '').slice(0, 300),
+    };
+  }
+
+  async _captureVisibleMediaScreenshot(tabId) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      if (!tab?.active) return null;
+      let width = 1024;
+      let height = 768;
+      try {
+        const dims = await browser.tabs.executeScript(tabId, {
+          code: 'JSON.stringify({w: window.innerWidth, h: window.innerHeight})',
+        });
+        if (dims && dims[0]) {
+          const parsed = JSON.parse(dims[0]);
+          width = Math.max(1, Math.round(parsed.w));
+          height = Math.max(1, Math.round(parsed.h));
+        }
+      } catch (_) {}
+      const cropDataUrl = await this._withIndicatorsHidden(tabId, () =>
+        browser.tabs.captureVisibleTab(tab.windowId, {
+          format: 'png',
+          scale: 1,
+        })
+      );
+      if (!cropDataUrl) return null;
+      const dataUrl = await this._compressJpegToByteCeiling(cropDataUrl);
+      return { dataUrl, cropDataUrl, width, height, coordAligned: true };
+    } catch (_) {
+      const fallback = await this._captureAutoScreenshot(tabId);
+      return fallback ? { ...fallback, cropDataUrl: fallback.dataUrl } : null;
+    }
+  }
+
+  async _locateVisibleMediaWithVision(tabId, screenshot, opts = {}) {
+    if (!screenshot?.dataUrl) {
+      return { success: false, error: 'visible media localization needs a screenshot.' };
+    }
+    const activeProvider = this.providerManager.getActive();
+    const visionProvider = await this.providerManager.getVisionProvider();
+    const vision = visionProvider || (activeProvider?.supportsVision ? activeProvider : null);
+    if (!vision) {
+      return {
+        success: false,
+        error: 'vision_unavailable',
+        message: 'No vision-capable active model or dedicated vision model is configured.',
+      };
+    }
+
+    const target = ['image', 'video', 'media'].includes(opts.target) ? opts.target : 'media';
+    const width = Math.max(1, Math.round(screenshot.width || 0));
+    const height = Math.max(1, Math.round(screenshot.height || 0));
+    const started = Date.now();
+    const runId = this.currentRunId.get(tabId);
+    const costState = opts.costState || this.currentCostState.get(tabId) || null;
+    const prompt = [
+      `Image size: ${width}x${height} pixels.`,
+      `Task: locate the single visible ${target} the user most likely means by "this image", "this video", or "this media" on the current page.`,
+      'Return JSON only with this exact shape:',
+      '{"found":true,"x":0,"y":0,"width":100,"height":100,"confidence":0.9,"mediaType":"image","reason":"largest central visible media"}',
+      'Coordinates must be image pixels. Use a tight box around only the visible media content, excluding captions, comments, buttons, browser UI, avatars, icons, and unrelated thumbnails. If there is no obvious single target, return {"found":false,"confidence":0,"reason":"..."} only.',
+    ].join('\n');
+
+    try {
+      const res = await this._chatWithCostAllowance(vision, [
+        { role: 'system', content: 'You are a precise viewport media localizer. Return one JSON object only; no prose, no markdown.' },
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: prompt },
+            { type: 'image_url', image_url: { url: screenshot.dataUrl } },
+          ],
+        },
+      ], {
+        maxTokens: 220,
+        temperature: 0,
+        extraBody: { chat_template_kwargs: { enable_thinking: false } },
+      }, costState);
+
+      const raw = res?.content || '';
+      const rect = Agent._normalizeVisibleMediaLocation(raw, { width, height });
+      if (!rect) throw new Error('vision model did not return a usable media box');
+      if (rect.confidence < 0.45) throw new Error(`vision confidence too low (${rect.confidence})`);
+      const latencyMs = Date.now() - started;
+      trace.recordVisionSubCall(runId, {
+        context: 'download_social_media_visible_media',
+        model: vision.config?.model || vision.model,
+        baseUrl: vision.config?.baseUrl || vision.baseUrl || null,
+        description: raw.slice(0, 1000),
+        latencyMs,
+      });
+      return {
+        success: true,
+        rect,
+        model: vision.config?.model || vision.model || null,
+        provider: vision.name || vision.config?.providerName || null,
+      };
+    } catch (e) {
+      trace.recordVisionSubCall(runId, {
+        context: 'download_social_media_visible_media',
+        model: vision.config?.model || vision.model,
+        baseUrl: vision.config?.baseUrl || vision.baseUrl || null,
+        latencyMs: Date.now() - started,
+        error: e?.message || String(e),
+      });
+      return { success: false, error: e?.message || String(e) };
+    }
+  }
+
+  async _cropDataUrl(dataUrl, rect, mimeType = 'image/png') {
+    const img = await this._loadImageFromDataUrl(dataUrl);
+    const sourceW = img.naturalWidth || img.width;
+    const sourceH = img.naturalHeight || img.height;
+    const x = Math.max(0, Math.min(sourceW - 1, Math.round(rect.x)));
+    const y = Math.max(0, Math.min(sourceH - 1, Math.round(rect.y)));
+    const width = Math.max(1, Math.min(sourceW - x, Math.round(rect.width)));
+    const height = Math.max(1, Math.min(sourceH - y, Math.round(rect.height)));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, x, y, width, height, 0, 0, width, height);
+    const outBlob = await this._canvasToBlob(canvas, mimeType, 0.95);
+    const buf = await outBlob.arrayBuffer();
+    return {
+      dataUrl: Agent._bufferToDataUrl(buf, mimeType),
+      width,
+      height,
+      mimeType,
+      bytes: buf.byteLength,
+    };
+  }
+
+  async _saveVisibleMediaCrop(tabId, args = {}) {
+    const screenshot = await this._captureVisibleMediaScreenshot(tabId);
+    if (!screenshot) {
+      return { success: false, error: 'Could not capture the visible page for media localization.' };
+    }
+    const located = await this._locateVisibleMediaWithVision(tabId, screenshot, {
+      target: args.target,
+      costState: this.currentCostState.get(tabId) || null,
+    });
+    if (!located.success) return located;
+
+    const crop = await this._cropDataUrl(screenshot.cropDataUrl || screenshot.dataUrl, located.rect, 'image/png');
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
+    let filename = String(args.filename || `webbrain-visible-media-${stamp}.png`).trim();
+    filename = filename.split('/').pop().split('\\').pop();
+    if (!/\.(png|jpg|jpeg|webp)$/i.test(filename)) filename += '.png';
+    const downloadId = await browser.downloads.download({ url: crop.dataUrl, filename, saveAs: false });
+
+    return {
+      success: true,
+      method: 'vision_crop',
+      mode: 'vision',
+      site: 'visible_viewport',
+      count: 1,
+      triggeredCount: 1,
+      completedCount: 1,
+      openedInTabCount: 0,
+      failedCount: 0,
+      savedFile: { downloadId, filename, mimeType: crop.mimeType, bytes: crop.bytes },
+      visibleMedia: {
+        rect: located.rect,
+        cropSize: { width: crop.width, height: crop.height },
+        model: located.model,
+        provider: located.provider,
+      },
+      note: 'Saved a screenshot crop of the single visible media item. This is a visual fallback, not the original CDN asset.',
+    };
+  }
+
   /**
    * Attach the current page's URL/title to every user message so deictic
    * phrases like "this page" resolve to the active tab, not an older page
@@ -2846,7 +3110,22 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
 
     if (name === 'download_social_media') {
-      try {
+      const toolArgs = args || {};
+      const summarizeResult = (result) => {
+        if (!result) return null;
+        return {
+          success: result.success !== false,
+          method: result.method || null,
+          site: result.site || null,
+          count: result.count ?? null,
+          completedCount: result.completedCount ?? null,
+          openedInTabCount: result.openedInTabCount ?? null,
+          failedCount: result.failedCount ?? null,
+          error: result.error || null,
+          recommendationKind: result.recommendation?.kind || null,
+        };
+      };
+      const runDomDownloader = async () => {
         // Inject the SocialMediaDownloader library into the page (isolated
         // content-script world — Firefox MV2 has no MAIN-world option for
         // executeScript). The script defines window.SocialMediaDownloader,
@@ -2855,12 +3134,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         await browser.tabs.executeScript(tabId, {
           file: 'src/agent/social-media-downloader.js',
         });
-        const bulkSocialDownload = !!args.scroll || args.mode === 'all';
+        const bulkSocialDownload = !!toolArgs.scroll || toolArgs.mode === 'all';
         const opts = {
-          mode: args.mode || 'auto',
-          all: !!args.scroll,
-          limit: typeof args.limit === 'number' && args.limit > 0
-            ? args.limit
+          mode: toolArgs.mode || 'auto',
+          all: !!toolArgs.scroll,
+          limit: typeof toolArgs.limit === 'number' && toolArgs.limit > 0
+            ? toolArgs.limit
             : (bulkSocialDownload ? Number.MAX_SAFE_INTEGER : 1),
         };
         const code = `
@@ -2940,7 +3219,80 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (!result) {
           return { success: false, error: 'download_social_media: no result returned (tab may have navigated away).' };
         }
-        return result;
+        return {
+          method: result.method || 'dom',
+          strategy: 'dom',
+          ...result,
+        };
+      };
+      const runVisionCrop = async () => {
+        try {
+          return await this._saveVisibleMediaCrop(tabId, toolArgs);
+        } catch (e) {
+          return { success: false, error: `vision crop failed: ${e.message}` };
+        }
+      };
+      const hasCompletedDownload = (result) => result && result.success !== false && Number(result.completedCount || 0) > 0;
+
+      try {
+        const strategy = ['auto', 'dom', 'vision'].includes(toolArgs.strategy) ? toolArgs.strategy : 'auto';
+        const bulkSocialDownload = !!toolArgs.scroll || toolArgs.mode === 'all';
+        const activeProvider = this.providerManager.getActive();
+        const visionProvider = await this.providerManager.getVisionProvider();
+        const visionAvailable = !!visionProvider || !!activeProvider?.supportsVision;
+
+        if (strategy === 'vision') {
+          if (visionAvailable && !bulkSocialDownload) {
+            const visionResult = await runVisionCrop();
+            if (visionResult.success) return visionResult;
+            const domResult = await runDomDownloader();
+            return {
+              ...domResult,
+              visionFallback: {
+                success: false,
+                error: visionResult.error || 'visible media crop failed',
+              },
+            };
+          }
+          const domResult = await runDomDownloader();
+          return {
+            ...domResult,
+            visionFallback: {
+              success: false,
+              error: visionAvailable
+                ? 'vision strategy is disabled for bulk social-media downloads; fell back to DOM extraction.'
+                : 'vision_unavailable',
+              message: visionAvailable
+                ? 'Bulk requests use DOM extraction so they do not crop one arbitrary visible item.'
+                : 'No vision-capable active model or dedicated vision model is configured, so download_social_media used DOM extraction instead.',
+            },
+          };
+        }
+
+        const domResult = await runDomDownloader();
+        if (strategy === 'dom' || bulkSocialDownload || hasCompletedDownload(domResult)) {
+          return domResult;
+        }
+        const recommendationKind = domResult?.recommendation?.kind || null;
+        if (recommendationKind && !['empty_result', 'unsupported_site'].includes(recommendationKind)) {
+          return domResult;
+        }
+        if (!visionAvailable) return domResult;
+
+        const visionResult = await runVisionCrop();
+        if (visionResult.success) {
+          return {
+            ...visionResult,
+            domFallback: summarizeResult(domResult),
+          };
+        }
+        return {
+          ...domResult,
+          visionFallback: {
+            success: false,
+            error: visionResult.error || 'visible media crop failed',
+          },
+        };
       } catch (e) {
         return { success: false, error: `download_social_media failed: ${e.message}` };
       }

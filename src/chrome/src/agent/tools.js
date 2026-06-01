@@ -671,6 +671,20 @@ export const AGENT_TOOLS = [
       parameters: {
         type: 'object',
         properties: {
+          strategy: {
+            type: 'string',
+            enum: ['auto', 'dom', 'vision'],
+            description: '"auto" (default): try the DOM/CDN social downloader first; if it cannot save the focused media and vision is available, crop the single visible media from a screenshot. "dom": never spend a vision call. "vision": crop exactly the visible media when vision is available; if not, automatically falls back to DOM.',
+          },
+          target: {
+            type: 'string',
+            enum: ['image', 'video', 'media'],
+            description: 'Hint for the vision crop path. Use "image" for "download this image", "video" for "download this video", otherwise omit.',
+          },
+          filename: {
+            type: 'string',
+            description: 'Optional filename for the screenshot-crop fallback. Directory components are ignored.',
+          },
           mode: {
             type: 'string',
             enum: ['auto', 'main', 'all'],
@@ -1114,7 +1128,7 @@ SCROLLING — read this:
 
 SOCIAL MEDIA DOWNLOADS — read this:
 - When the user asks to download images or videos from Facebook, Instagram, X/Twitter, LinkedIn, Reddit, Pinterest, or YouTube (thumbnails), call \`download_social_media\` — it is a SINGLE tool call that handles the per-site DOM, picks the right resolution, and saves to the Downloads folder. Do NOT inspect the page with \`get_accessibility_tree\` + \`download_files\` to figure it out yourself; the tool already knows.
-- Defaults: on single-content pages (e.g. /photo/, /p/, /reel/, /status/.../photo/, /pin/, /comments/) it grabs the main item; pass \`scroll:true\` to walk a feed/profile/timeline and capture everything that lazy-loads.
+- Defaults: strategy:"auto" tries the DOM/CDN path first (original asset quality, no extra LLM call). If that cannot save the focused media and vision is available, the same tool uses a screenshot+vision sub-call to crop the single visible image/video; if no vision model is configured, it falls back to DOM only. Pass strategy:"vision" only for "download this visible image/video" when a screenshot crop is acceptable; pass strategy:"dom" or scroll:true for bulk/original-asset requests.
 - After it returns, optionally call \`list_downloads\` to surface the saved filenames for the user. Some CDNs (notably media.licdn.com) block CORS and the tool will open the media in a new tab as fallback — that is expected behavior, not a failure.
 - The tool may return a \`recommendation\` field with shape \`{ kind, message }\`. This means SMD knowingly cannot handle the request well — most often YouTube full video (Widevine DRM + signatureCipher), an MSE blob the player hasn't loaded yet, or a site outside SMD's supported list. When it appears, RELAY \`recommendation.message\` to the user verbatim in your reply — it points them at the right external CLI tool (\`yt-dlp\` for video, \`gallery-dl\` for images) with a copy-pasteable command. Do NOT try to work around it with \`get_accessibility_tree\` or repeated tool calls — the recommendation exists precisely because those paths cannot help.
 
@@ -1181,7 +1195,7 @@ TOOLS — use ONLY these:
 - new_tab({url}): Open a URL in a new tab.
 - wait_for_element({selector}): Wait for an element to appear.
 - fetch_url({url}): Fetch a URL for its content.
-- download_social_media: Download images/videos from social sites.
+- download_social_media: Download images/videos from social sites. Use strategy:"vision" only when the user wants the single visible item cropped; without vision it falls back to DOM.
 - scratchpad_write({text}): Save notes that persist across steps.
 - done({summary}): Signal completion.
 
@@ -1244,7 +1258,7 @@ TOOLS — use only these:
 - wait_for_element({selector}) / wait_for_stable({quietMs}): wait for an element / for the page to go quiet after an action.
 - iframe_read / iframe_click / iframe_type ({urlFilter, selector, text}): interact inside cross-origin iframes (Stripe, payment widgets, embeds).
 - fetch_url({url}) / research_url({url}): read OTHER URLs (not the active tab). list_downloads, download_files, read_downloaded_file, upload_file({filePath, selector}): file workflows.
-- download_social_media: one-shot image/video download from supported social sites.
+- download_social_media: one-shot image/video download from supported social sites; strategy:"auto" uses DOM first, then vision crop only when needed and available.
 - verify_form: check a form's field values before submitting. scratchpad_write({text}): pin facts that survive context summarization.
 - clarify({question}): ask the user only when materially blocked/ambiguous (budget 1-2 per run). solve_captcha: once, only when CapSolver is configured.
 - record_tab / stop_recording: record the current tab (video + audio) when the user asks to "record".
