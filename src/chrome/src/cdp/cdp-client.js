@@ -378,6 +378,60 @@ export class CDPClient {
   }
 
   /**
+   * Probe whether a local file path is readable, WITHOUT routing it through
+   * the page's real upload widget. Many uploaders (GitHub's include-fragment
+   * release-asset attacher, drag-drop zones) consume the file on the input's
+   * `change` event and then clear or swap the <input>, so reading the TARGET
+   * input back can't distinguish "consumed a valid file" from "got a bad
+   * path and there was never anything real to upload". We create a throwaway
+   * hidden <input type=file> that has no listeners — it keeps whatever we set
+   * on it — set the path via CDP (which attaches a phantom 0-byte entry for a
+   * missing path instead of throwing), then try to read 1 byte: a real file,
+   * even an empty one, reads fine; a missing/unreadable path rejects. The
+   * probe input is removed immediately. Returns {exists, readable, size}, or
+   * null if the probe could not run (caller should not block on null).
+   */
+  async probeLocalFile(tabId, filePath) {
+    try {
+      await this.sendCommand(tabId, 'DOM.enable');
+      await this.sendCommand(tabId, 'Runtime.enable');
+      const created = await this.sendCommand(tabId, 'Runtime.evaluate', {
+        expression: `(() => {
+          const i = document.createElement('input');
+          i.type = 'file';
+          i.style.display = 'none';
+          i.setAttribute('data-wb-upload-probe', '');
+          document.documentElement.appendChild(i);
+          return i;
+        })()`,
+      });
+      const objectId = created?.result?.objectId;
+      if (!objectId) return null;
+      await this.sendCommand(tabId, 'DOM.setFileInputFiles', { objectId, files: [filePath] });
+      const res = await this.sendCommand(tabId, 'Runtime.callFunctionOn', {
+        functionDeclaration: `async function () {
+          try {
+            const f = this.files && this.files[0];
+            if (!f) return { exists: false, readable: null, size: 0 };
+            let readable = null;
+            try { await f.slice(0, 1).arrayBuffer(); readable = true; }
+            catch (e) { readable = false; }
+            return { exists: true, readable, size: f.size };
+          } finally {
+            this.remove();
+          }
+        }`,
+        objectId,
+        returnByValue: true,
+        awaitPromise: true,
+      });
+      return res?.result?.value ?? null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
    * Dispatch mouse event.
    */
   async dispatchMouseEvent(tabId, type, x, y, button = 'left') {
