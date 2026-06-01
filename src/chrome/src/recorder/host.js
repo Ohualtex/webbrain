@@ -76,23 +76,57 @@ function broadcast(event, payload = {}) {
   } catch {}
 }
 
+// Probe the offscreen recorder for its live state. The return value is a
+// discriminated verdict the reconciler can act on safely:
+//   • { absent: true }  — no offscreen document exists (couldn't be created, or
+//     it's confirmed gone). Nothing can be recording, so a stale active flag is
+//     safe to clear.
+//   • null              — a document exists but didn't answer (transient
+//     failure). Ambiguous: it MIGHT be hosting a live recording, so the
+//     reconciler must NOT clear on this.
+//   • the recorder's state object on success.
 async function readOffscreenRecorderState() {
   try {
     await ensureOffscreen();
-    return await chrome.runtime.sendMessage({ type: 'recorder-state' });
   } catch {
-    return null;
+    // The offscreen document can't even be established — definitively no
+    // MediaRecorder running anywhere.
+    return { absent: true };
+  }
+  try {
+    const state = await chrome.runtime.sendMessage({ type: 'recorder-state' });
+    return state || null;
+  } catch {
+    // The document didn't answer. Tell a truly-gone document (evicted — safe to
+    // treat as no recorder) apart from a transient message failure on a live
+    // document (ambiguous — must not clear a recording out from under the user).
+    let exists = true;
+    try { exists = await chrome.offscreen.hasDocument(); } catch {}
+    return exists ? null : { absent: true };
   }
 }
 
 async function reconcileStaleRecordingState({ finalizeInactiveSession = false } = {}) {
   const offscreenState = await readOffscreenRecorderState();
-  if (!offscreenState || offscreenState.recording || offscreenState.paused || offscreenState.stopping) return false;
+  // Couldn't reach a verdict (document exists but didn't answer). Stay
+  // conservative and leave the flag as-is rather than risk tearing down a live
+  // recording on a transient message failure.
+  if (offscreenState === null) return false;
+  // A genuinely live recording — never clear it out from under the user.
+  if (offscreenState.recording || offscreenState.paused || offscreenState.stopping) return false;
+  // The offscreen recorder still holds a finished-but-unflushed session (its
+  // MediaRecorder stopped before the Stop message landed). Finalize it so the
+  // captured bytes are saved instead of dropped.
   if (offscreenState.tabId && finalizeInactiveSession) {
     await stopTabRecording();
     return recordingState.active === false;
   }
   if (offscreenState.tabId) return false;
+  // Either the offscreen recorder reports idle (no session) or it's absent
+  // entirely ({ absent: true }) — the document that would host a capture is
+  // gone. In both cases no live recording can be relying on the flag, so clear
+  // the stuck active state instead of leaving the banner/agent to believe a
+  // capture is still running.
   recordingState = { active: false };
   saveRecordingState();
   broadcast('stopped', {
