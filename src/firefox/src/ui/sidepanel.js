@@ -454,7 +454,7 @@ async function refreshRecommendedActions() {
       btn.className = 'recommended-action-chip';
       btn.textContent = action.label;
       btn.dataset.prompt = action.prompt;
-      btn.addEventListener('click', () => runRecommendedAction(action.prompt));
+      btn.addEventListener('click', () => runRecommendedAction(action));
       recommendedActionsListEl.appendChild(btn);
     });
     recommendedActionsEl.classList.toggle('hidden', actions.length === 0);
@@ -463,8 +463,13 @@ async function refreshRecommendedActions() {
   }
 }
 
-function runRecommendedAction(prompt) {
+async function runRecommendedAction(action) {
+  const prompt = typeof action === 'string' ? action : action?.prompt;
   if (!prompt || isProcessing) return;
+  if (action?.mode === 'act') {
+    const ok = await ensureActMode();
+    if (!ok) return;
+  }
   inputEl.value = prompt;
   autoResizeInput();
   sendMessage();
@@ -1473,19 +1478,26 @@ function setMode(mode) {
   }
 }
 
-modeAskBtn.addEventListener('click', () => setMode('ask'));
-
-modeActBtn.addEventListener('click', async () => {
-  if (agentMode === 'act') return; // already active
+async function ensureActMode() {
+  if (agentMode === 'act') return true;
+  // Recommended action chips share the same first-run warning as the Act
+  // toggle so they cannot silently bypass the Act-mode confirmation.
   try {
     const stored = await browser.storage.local.get('actConfirmed');
     if (!stored.actConfirmed) {
       const ok = confirm(t('sp.mode.act.confirm'));
-      if (!ok) return;
+      if (!ok) return false;
       browser.storage.local.set({ actConfirmed: true }).catch(() => {});
     }
   } catch (e) { /* ignore */ }
   setMode('act');
+  return true;
+}
+
+modeAskBtn.addEventListener('click', () => setMode('ask'));
+
+modeActBtn.addEventListener('click', () => {
+  ensureActMode();
 });
 
 

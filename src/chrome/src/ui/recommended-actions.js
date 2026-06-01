@@ -80,6 +80,7 @@ export function buildRecommendedActions(pageInfo = {}, options = {}) {
       id: 'record-meeting',
       label: 'Record this meeting',
       prompt: 'Record this meeting and transcribe it when the recording stops.',
+      mode: 'act',
     });
   }
 
@@ -88,6 +89,7 @@ export function buildRecommendedActions(pageInfo = {}, options = {}) {
       id: 'github-release',
       label: 'Create a new release',
       prompt: 'Create a new GitHub release for this repository. Ask me for the tag, title, and release notes if needed.',
+      mode: 'act',
     });
   }
 
@@ -96,6 +98,7 @@ export function buildRecommendedActions(pageInfo = {}, options = {}) {
       id: 'like-profile',
       label: 'Like this person',
       prompt: 'Like this profile/person on the page.',
+      mode: 'act',
     });
   }
 
@@ -104,6 +107,7 @@ export function buildRecommendedActions(pageInfo = {}, options = {}) {
       id: 'download-media',
       label: 'Download this video/photo',
       prompt: 'Download the video or photo from this post.',
+      mode: 'act',
     });
   }
 
@@ -112,6 +116,7 @@ export function buildRecommendedActions(pageInfo = {}, options = {}) {
       id: 'fill-profile',
       label: 'Fill this form with my saved profile info',
       prompt: 'Fill this form with my saved profile information. Ask before submitting.',
+      mode: 'act',
     });
   }
 

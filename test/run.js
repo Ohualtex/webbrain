@@ -1387,6 +1387,23 @@ test('recommended actions match issue scenarios', () => {
   }
 });
 
+test('actionable recommendations opt into Act mode', () => {
+  const actionablePages = [
+    { url: 'https://meet.google.com/abc-defg-hij', title: 'Team meeting' },
+    { url: 'https://github.com/esokullu/webbrain/releases', title: 'Releases · esokullu/webbrain' },
+    { url: 'https://tinder.com/app/recs', title: 'Profile' },
+    { url: 'https://www.instagram.com/p/abc/', title: 'Post', media: { imageCount: 1, videoCount: 0 } },
+    { url: 'https://checkout.example.com/', title: 'Checkout', forms: [{ inputs: [{ type: 'email', name: 'email' }, { type: 'text', name: 'name' }] }] },
+  ];
+  const readOnlyPage = { url: 'https://news.example.com/article/story', title: 'Long article', text: 'word '.repeat(500) };
+
+  for (const pageInfo of actionablePages) {
+    const actions = buildRecommendedActionsCh(pageInfo);
+    assert.ok(actions.some((action) => action.mode === 'act'), `expected an Act-mode action for ${pageInfo.url}`);
+  }
+  assert.equal(buildRecommendedActionsCh(readOnlyPage).find((a) => a.id === 'summarize-page')?.mode, undefined);
+});
+
 test('firefox recommended actions match chrome', () => {
   const page = {
     url: 'https://github.com/esokullu/webbrain/releases',

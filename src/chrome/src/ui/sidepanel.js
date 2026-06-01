@@ -564,7 +564,7 @@ async function refreshRecommendedActions() {
       btn.className = 'recommended-action-chip';
       btn.textContent = action.label;
       btn.dataset.prompt = action.prompt;
-      btn.addEventListener('click', () => runRecommendedAction(action.prompt));
+      btn.addEventListener('click', () => runRecommendedAction(action));
       recommendedActionsListEl.appendChild(btn);
     });
     recommendedActionsEl.classList.toggle('hidden', actions.length === 0);
@@ -573,8 +573,13 @@ async function refreshRecommendedActions() {
   }
 }
 
-function runRecommendedAction(prompt) {
+async function runRecommendedAction(action) {
+  const prompt = typeof action === 'string' ? action : action?.prompt;
   if (!prompt || isProcessing) return;
+  if (action?.mode === 'act') {
+    const ok = await ensureActMode();
+    if (!ok) return;
+  }
   inputEl.value = prompt;
   autoResizeInput();
   sendMessage();
@@ -1861,22 +1866,28 @@ function setMode(mode) {
   }
 }
 
-modeAskBtn.addEventListener('click', () => setMode('ask'));
-
-modeActBtn.addEventListener('click', async () => {
-  if (agentMode === 'act') return; // already active
+async function ensureActMode() {
+  if (agentMode === 'act') return true;
   // Show a confirmation dialog the very first time the user enables Act
   // mode on this install — tracked via chrome.storage.local so it only
-  // happens once, not on every click.
+  // happens once, not on every click. Recommended action chips share this
+  // path so they cannot silently bypass the Act-mode warning.
   try {
     const stored = await chrome.storage.local.get('actConfirmed');
     if (!stored.actConfirmed) {
       const ok = confirm(t('sp.mode.act.confirm'));
-      if (!ok) return;
+      if (!ok) return false;
       chrome.storage.local.set({ actConfirmed: true }).catch(() => {});
     }
   } catch (e) { /* storage unavailable, fall through */ }
   setMode('act');
+  return true;
+}
+
+modeAskBtn.addEventListener('click', () => setMode('ask'));
+
+modeActBtn.addEventListener('click', () => {
+  ensureActMode();
 });
 
 
