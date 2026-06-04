@@ -225,7 +225,6 @@ La règle UI-d'abord par défaut existe parce que les actions API sont invisible
   - Les adaptateurs de sites, la détection par vision, la détection de boucle, la boucle de capture d'écran automatique et l'ensemble prompt/outils compact opt-in *sont* reflétés sur Firefox.
 - **Détection de navigation SPA dans Firefox.** Certaines applications monopages peuvent ne pas déclencher la réinjection du content-script après une navigation côté client.
 - **Module complémentaire temporaire Firefox** — Firefox exige que l'extension soit chargée en tant que module complémentaire temporaire pendant le développement, ce qui est supprimé au redémarrage.
-- **Le fournisseur Claude (abonnement Pro/Max) est en zone grise.** La connexion utilise le même flux OAuth que Claude Code (le CLI propre à Anthropic), y compris son client_id public. Les conditions d'Anthropic restreignent l'utilisation d'un abonnement Pro/Max avec des outils non-Anthropic, et Anthropic peut révoquer le client OAuth de son CLI à tout moment — auquel cas ce fournisseur cesse de fonctionner. Le prompt système est aussi automatiquement préfixé par `"You are Claude Code, Anthropic's official CLI for Claude."` car la passerelle OAuth d'Anthropic signale les requêtes qui l'omettent. Pour une utilisation en production, préférez le fournisseur Anthropic avec clé API.
 
 ## Nouveautés
 

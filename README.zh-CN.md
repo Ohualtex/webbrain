@@ -225,7 +225,6 @@ WebBrain 接受作为输入框某行开头的斜杠命令。在面板内输入 `
   - 站点适配器、视觉检测、循环检测、自动截图循环以及可选的压缩提示/工具集 *确实* 已镜像到 Firefox。
 - **Firefox 中的 SPA 导航检测。** 某些单页应用在客户端导航后可能不会触发内容脚本重新注入。
 - **Firefox 临时附加组件** — Firefox 在开发期间要求扩展作为临时附加组件加载，重启后会被移除。
-- **Claude（Pro/Max 订阅）提供商属灰色地带。** 登录使用与 Claude Code（Anthropic 自家 CLI）相同的 OAuth 流程，包括其公开的 client_id。Anthropic 的条款限制将 Pro/Max 订阅用于非 Anthropic 工具，且 Anthropic 可随时撤销其 CLI 的 OAuth 客户端——届时此提供商将停止工作。系统提示也会自动前缀 `"You are Claude Code, Anthropic's official CLI for Claude."`，因为 Anthropic 的 OAuth 网关会标记省略它的请求。生产使用请优先选择使用 API 密钥的 Anthropic 提供商。
 
 ## 更新内容
 

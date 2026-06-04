@@ -225,7 +225,6 @@ The default UI-first rule exists because API actions are invisible (you don't se
   - Site adapters, vision detection, loop detection, the auto-screenshot loop, and the opt-in compact prompt/tool set *are* mirrored to Firefox.
 - **SPA navigation detection in Firefox.** Some single-page applications may not trigger content-script re-injection after client-side navigation.
 - **Firefox temporary add-on** — Firefox requires the extension to be loaded as a temporary add-on during development, which is removed on restart.
-- **Claude (Pro/Max subscription) provider is grey-area.** Sign-in uses the same OAuth flow Claude Code (Anthropic's own CLI) ships, including its public client_id. Anthropic's terms restrict using a Pro/Max subscription with non-Anthropic tools, and Anthropic can revoke their CLI's OAuth client at any time — at which point this provider stops working. The system prompt is also auto-prefixed with `"You are Claude Code, Anthropic's official CLI for Claude."` because Anthropic's OAuth gate flags requests that omit it. For production use prefer the API-key Anthropic provider.
 
 ## What's New
 
