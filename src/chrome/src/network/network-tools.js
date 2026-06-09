@@ -689,6 +689,41 @@ export async function downloadResourceFromPage(tabId, args = {}) {
 const DOWNLOAD_BATCH_CONCURRENCY = 3;
 const DOWNLOAD_BATCH_MAX = 50;
 
+// chrome.downloads.download() resolves to an id immediately, before the local
+// path is decided — so the freshly-returned result can't carry the filename.
+// Poll for it. Returns the resolved on-disk path + state once the download
+// reaches a terminal state, or the best-known info if it's still in progress
+// when we time out. Best-effort: never throws.
+async function resolveDownloadInfo(downloadId, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    let items;
+    try {
+      items = await new Promise((resolve, reject) => {
+        chrome.downloads.search({ id: downloadId }, (res) => {
+          if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+          else resolve(res);
+        });
+      });
+    } catch {
+      return last;
+    }
+    const it = items && items[0];
+    if (it) {
+      last = {
+        filename: it.filename || null,
+        state: it.state,
+        bytesReceived: it.bytesReceived ?? null,
+        totalBytes: it.totalBytes ?? null,
+      };
+      if (it.state === 'complete' || it.state === 'interrupted') return last;
+    }
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return last; // timed out — return best-known (may still be in_progress)
+}
+
 export async function downloadFiles(args = {}) {
   const urls = args.urls;
   if (!Array.isArray(urls) || urls.length === 0) {
@@ -727,6 +762,23 @@ export async function downloadFiles(args = {}) {
   await Promise.all(
     Array.from({ length: Math.min(DOWNLOAD_BATCH_CONCURRENCY, urls.length) }, () => worker())
   );
+
+  // Resolve the on-disk path for each successful download. We do this AFTER the
+  // download workers return so waiting on completion doesn't hold a concurrency
+  // slot. Surfacing the path in download_files' OWN result (not just
+  // list_downloads) lets the caller pin it immediately — see the auto-scratchpad
+  // note in agent.js — and pass the downloadId straight to upload_file.
+  await Promise.all(results.map(async (r) => {
+    if (r && r.success && r.downloadId != null) {
+      const info = await resolveDownloadInfo(r.downloadId);
+      if (info) {
+        if (info.filename) r.filename = info.filename;
+        if (info.state) r.state = info.state;
+        if (info.bytesReceived != null) r.bytesReceived = info.bytesReceived;
+        if (info.totalBytes != null) r.totalBytes = info.totalBytes;
+      }
+    }
+  }));
 
   return {
     success: true,

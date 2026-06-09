@@ -1133,6 +1133,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         });
       }
 
+      // Pin any durable download handle this tool produced, so a later
+      // upload/read survives context compaction even if the model never calls
+      // scratchpad_write itself — the failure that made it invent file paths.
+      this._pinDownloadHandles(tabId, fnName, toolResult);
+
       // Detect unintended navigation. Give the page a beat to fire SPA
       // history events / commit a real nav before re-reading the URL.
       if (NAV_PRONE_TOOLS.has(fnName) && beforeUrl && !toolResult?.error) {
@@ -2790,6 +2795,85 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       note: replace ? 'scratchpad replaced' : 'line appended to scratchpad',
     };
   }
+
+  /**
+   * Append a line to the pinned scratchpad WITHOUT the model having to call
+   * scratchpad_write. Used to durably record facts the model reliably needs
+   * later but routinely forgets to pin itself — chiefly download paths + ids
+   * (see the download_files dispatch). Because the scratchpad survives
+   * compaction (_manageContext / _emergencyTrim re-pin it), this is what makes
+   * the path outlive the verbatim window — closing the gap that made the model
+   * invent paths like "/Users/Shared/..." after older tool results were
+   * summarized away. Dedups on the whole line so re-downloading the same file
+   * doesn't stack duplicates. Best-effort: never throws into the caller.
+   */
+  _autoScratchpadNote(tabId, line) {
+    try {
+      const clean = String(line == null ? '' : line)
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/[`[\]]/g, '')
+        .trim();
+      if (!clean) return;
+      const messages = this.conversations.get(tabId);
+      if (!messages) return;
+      const idx = this._findScratchpadIndex(messages);
+      const body = idx >= 0 ? this._extractScratchpadBody(messages[idx].content) : '';
+      if (body && body.includes(clean)) return; // already recorded
+      this._scratchpadWrite(tabId, { text: clean });
+    } catch { /* best-effort: pinning must never break a tool call */ }
+  }
+
+  /**
+   * Short human label for a download — basename of a path or URL, query/hash
+   * stripped. Best-effort; the value is page-influenced (Content-Disposition /
+   * href) so _autoScratchpadNote sanitizes it before it lands in the pad.
+   */
+  _downloadLabel(s) {
+    if (!s) return '';
+    try {
+      const bare = String(s).split('?')[0].split('#')[0];
+      return bare.split(/[\\/]/).filter(Boolean).pop() || '';
+    } catch { return ''; }
+  }
+
+  /**
+   * Pin a downloaded file's id (+ short label) to the scratchpad so it survives
+   * compaction. id-only by design: upload_file and read_downloaded_file both
+   * accept a downloadId and resolve the real path themselves, so the model never
+   * needs the path string — and keeping the (Content-Disposition-settable)
+   * filename out of durable context shrinks the untrusted surface.
+   */
+  _pinDownloadId(tabId, downloadId, label) {
+    if (downloadId == null) return;
+    const hint = label ? ` "${String(label).slice(0, 60)}"` : '';
+    this._autoScratchpadNote(tabId, `[auto] Downloaded${hint} -> downloadId ${downloadId}. Attach with upload_file({downloadId: ${downloadId}, selector}); re-read with read_downloaded_file({downloadId: ${downloadId}}).`);
+  }
+
+  /**
+   * After any download-producing tool returns, pin the durable handle(s) it
+   * yielded so a later upload/read survives context compaction. Centralized
+   * here (rather than in each dispatch) so download_files, download_resource_
+   * from_page, stop_recording, and download_social_media are covered uniformly,
+   * and so social media — which exposes no per-file id — degrades to a
+   * list_downloads pointer instead of an invented id. Best-effort.
+   */
+  _pinDownloadHandles(tabId, name, result) {
+    try {
+      if (!result || result.error || result.success === false) return;
+      if (name === 'download_files' || name === 'download_file') {
+        for (const d of (result.downloads || [])) {
+          if (d && d.success && d.downloadId != null) this._pinDownloadId(tabId, d.downloadId, this._downloadLabel(d.filename || d.url));
+        }
+      } else if (name === 'download_resource_from_page') {
+        this._pinDownloadId(tabId, result.downloadId, this._downloadLabel(result.sourceUrl) || 'resource');
+      } else if (name === 'stop_recording') {
+        this._pinDownloadId(tabId, result.downloadId, this._downloadLabel(result.filename));
+      } else if (name === 'download_social_media') {
+        const n = Number(result.completedCount || 0);
+        if (n > 0) this._autoScratchpadNote(tabId, `[auto] download_social_media saved ${n} file(s) — find their ids/paths via list_downloads.`);
+      }
+    } catch { /* best-effort */ }
+  }
   // ─────────────────────────────────────────────────────────────────────
 
   /**
@@ -3118,6 +3202,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       case 'download_file':
       case 'download_files': {
+        if (Array.isArray(parsed.downloads)) {
+          const ok = parsed.downloads.filter(d => d?.success);
+          // Safe to echo the integer downloadIds — they are NOT attacker-
+          // controllable and map straight to upload_file({downloadId}). Do NOT
+          // echo filenames here; a Content-Disposition header could smuggle page
+          // text into the trusted summary. The full (sanitized) path lives in
+          // the scratchpad if the model needs it.
+          const ids = ok.map(d => d.downloadId).filter(x => x != null);
+          if (ids.length) return `${ok.length}/${parsed.downloads.length} downloaded (downloadId ${ids.join(', ')})`;
+          return `${ok.length}/${parsed.downloads.length} downloaded`;
+        }
         if (Array.isArray(parsed.results)) {
           const ok = parsed.results.filter(r => r?.success).length;
           return `${ok}/${parsed.results.length} downloaded`;
@@ -4770,6 +4865,31 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // download_file is now handled by download_files (normalized above)
 
     if (name === 'upload_file') {
+      // Accept a downloadId as an alternative to filePath. After context
+      // compaction the model often can't recall the exact on-disk path, but the
+      // small integer id (returned by download_files/list_downloads and
+      // auto-pinned to the scratchpad) is easy to carry. Resolve it to the real
+      // path here so the rest of the handler is unchanged.
+      if (args.downloadId != null && !args.filePath) {
+        try {
+          const items = await new Promise((resolve, reject) => {
+            chrome.downloads.search({ id: Number(args.downloadId) }, (res) => {
+              if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+              else resolve(res);
+            });
+          });
+          const it = items && items[0];
+          if (!it) return { success: false, error: `No download found for downloadId ${args.downloadId}. Use list_downloads to see valid ids.` };
+          if (it.state !== 'complete') return { success: false, error: `Download ${args.downloadId} is "${it.state}", not complete — wait for it to finish (wait_for_stable) then retry.` };
+          if (!it.filename) return { success: false, error: `Download ${args.downloadId} has no resolved local path yet. Retry shortly, or use list_downloads to find the path and pass filePath.` };
+          args.filePath = it.filename;
+        } catch (e) {
+          return { success: false, error: `Could not resolve downloadId ${args.downloadId}: ${e.message}` };
+        }
+      }
+      if (!args.filePath) {
+        return { success: false, error: 'upload_file needs either downloadId (from download_files / list_downloads — preferred) or filePath (absolute local path).' };
+      }
       try {
         await cdpClient.attach(tabId);
         const nodeIds = await cdpClient.querySelectorPierce(tabId, args.selector);
