@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': '操作モードでは WebBrain があなたの代わりにクリック・入力・スクロール・遷移を行います。\n\nログイン済みのブラウザセッション内で動くため、あなたがログインしている各サイトで、あなたと同じアクセス権を持ちます。\n\n動作を見守り、◼ ボタンでいつでも停止してください。\n\n続行しますか？',
 
   'sp.input.ask_placeholder': 'このページについて何でも聞いてください...',
+  'sp.input.placeholder_tip.help': '/help でスラッシュコマンドの詳細を確認できます',
+  'sp.input.placeholder_tip.record': '「このページを記録して」と言うと、このタブ/ウィンドウでの操作を保存できます',
   'sp.input.act_placeholder': 'このページで何をするか指示してください...',
 
   'sp.activity.thinking': '考え中...',

@@ -39,6 +39,8 @@ export default {
   'sp.mode.act.confirm': 'Act mode lets WebBrain click, type, scroll, and navigate on your behalf.\n\nIt runs inside your authenticated browser session, so it has the same access as you do on every site you\'re logged into.\n\nWatch what it does and stop it any time with the ◼ button.\n\nContinue?',
 
   'sp.input.ask_placeholder': 'Ask anything about this page...',
+  'sp.input.placeholder_tip.help': 'Use /help to learn more about slash commands',
+  'sp.input.placeholder_tip.record': 'Say "record this page" to save this tab/window interaction',
   'sp.input.act_placeholder': 'Tell me what to do on this page...',
   'sp.recommended.title': 'Suggested actions',
 

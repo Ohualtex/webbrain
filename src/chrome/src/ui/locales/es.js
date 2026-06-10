@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': 'El modo Actuar permite a WebBrain hacer clic, escribir, desplazar y navegar en tu nombre.\n\nSe ejecuta dentro de tu sesión autenticada del navegador, por lo que tiene el mismo acceso que tú en cada sitio en el que has iniciado sesión.\n\nObserva lo que hace y detenlo en cualquier momento con el botón ◼.\n\n¿Continuar?',
 
   'sp.input.ask_placeholder': 'Pregunta lo que quieras sobre esta página...',
+  'sp.input.placeholder_tip.help': 'Usa /help para obtener más información sobre los comandos con barra',
+  'sp.input.placeholder_tip.record': 'Di "graba esta página" para guardar la interacción de esta pestaña/ventana',
   'sp.input.act_placeholder': 'Dime qué hacer en esta página...',
 
   'sp.activity.thinking': 'Pensando...',

@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': '执行模式允许 WebBrain 代你点击、输入、滚动和导航。\n\n它在你已登录的浏览器会话中运行，因此在每个你登录的站点上拥有和你一样的权限。\n\n请注意观察其行为，并可随时通过 ◼ 按钮停止。\n\n是否继续？',
 
   'sp.input.ask_placeholder': '针对此页面随便问点什么...',
+  'sp.input.placeholder_tip.help': '使用 /help 了解更多斜杠命令',
+  'sp.input.placeholder_tip.record': '说"记录此页面"即可保存此标签页/窗口中的互动',
   'sp.input.act_placeholder': '告诉我在此页面要做什么...',
 
   'sp.activity.thinking': '思考中...',

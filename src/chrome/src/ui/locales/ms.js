@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': 'Mod Lakukan membenarkan WebBrain mengklik, menaip, menatal dan menavigasi bagi pihak anda.\n\nIa berjalan di dalam sesi pelayar anda yang telah disahkan, jadi ia mempunyai akses yang sama seperti anda pada setiap laman web yang anda log masuk.\n\nPerhatikan tindakannya dan hentikan bila-bila masa dengan butang ◼.\n\nTeruskan?',
 
   'sp.input.ask_placeholder': 'Tanya apa-apa sahaja tentang halaman ini...',
+  'sp.input.placeholder_tip.help': 'Gunakan /help untuk mengetahui lebih lanjut tentang perintah slash',
+  'sp.input.placeholder_tip.record': 'Sebut "rakam halaman ini" untuk menyimpan interaksi dalam tab/tetingkap ini',
   'sp.input.act_placeholder': 'Beritahu saya apa yang perlu dilakukan pada halaman ini...',
 
   'sp.activity.thinking': 'Sedang berfikir...',

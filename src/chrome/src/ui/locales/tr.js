@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': 'Uygula modu, WebBrain\'in senin adına tıklamasına, yazmasına, kaydırmasına ve gezinmesine izin verir.\n\nKimliği doğrulanmış tarayıcı oturumunun içinde çalışır, yani giriş yaptığın her sitede senin sahip olduğun erişim yetkisine sahiptir.\n\nNe yaptığını izle ve istediğin an ◼ düğmesiyle durdur.\n\nDevam edilsin mi?',
 
   'sp.input.ask_placeholder': 'Bu sayfayla ilgili istediğini sor...',
+  'sp.input.placeholder_tip.help': 'Eğik çizgi komutları hakkında daha fazla bilgi için /help kullanın',
+  'sp.input.placeholder_tip.record': 'Bu sekme/penceredeki etkileşimi kaydetmek için "bu sayfayı kaydet" deyin',
   'sp.input.act_placeholder': 'Bu sayfada ne yapmam gerektiğini söyle...',
 
   'sp.activity.thinking': 'Düşünüyor...',

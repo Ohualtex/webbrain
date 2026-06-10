@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': 'Hinahayaan ng Aksyon mode ang WebBrain na mag-click, mag-type, mag-scroll, at mag-navigate para sa iyo.\n\nTumatakbo ito sa loob ng iyong naka-authenticate na browser session, kaya may parehong access ito na tulad mo sa bawat site kung saan ka naka-log in.\n\nBantayan ang ginagawa nito at itigil ito anumang oras gamit ang ◼ button.\n\nMagpatuloy?',
 
   'sp.input.ask_placeholder': 'Magtanong kahit ano tungkol sa pahinang ito...',
+  'sp.input.placeholder_tip.help': 'Gamitin ang /help para matuto pa tungkol sa mga slash command',
+  'sp.input.placeholder_tip.record': 'Sabihin ang "i-record ang pahinang ito" para i-save ang interaksyon sa tab/window na ito',
   'sp.input.act_placeholder': 'Sabihin sa akin ang gagawin sa pahinang ito...',
 
   'sp.activity.thinking': 'Iniisip...',

@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': 'Le mode Agir permet à WebBrain de cliquer, taper, défiler et naviguer à votre place.\n\nIl s\'exécute dans votre session de navigateur authentifiée et a donc le même accès que vous sur chaque site auquel vous êtes connecté.\n\nSurveillez ce qu\'il fait et arrêtez-le à tout moment avec le bouton ◼.\n\nContinuer ?',
 
   'sp.input.ask_placeholder': 'Posez une question sur cette page...',
+  'sp.input.placeholder_tip.help': 'Utilisez /help pour en savoir plus sur les commandes slash',
+  'sp.input.placeholder_tip.record': 'Dites « enregistrer cette page » pour sauvegarder l’interaction de cet onglet/cette fenêtre',
   'sp.input.act_placeholder': 'Dites-moi quoi faire sur cette page...',
 
   'sp.activity.thinking': 'Réflexion...',

@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': 'Mode aksi memungkinkan WebBrain mengeklik, mengetik, menggulir, dan menavigasi atas nama Anda.\n\nIa berjalan di dalam sesi peramban Anda yang sudah terautentikasi, jadi memiliki akses yang sama seperti Anda di setiap situs tempat Anda masuk.\n\nPerhatikan tindakannya dan hentikan kapan saja dengan tombol ◼.\n\nLanjutkan?',
 
   'sp.input.ask_placeholder': 'Tanyakan apa saja tentang halaman ini...',
+  'sp.input.placeholder_tip.help': 'Gunakan /help untuk mempelajari perintah garis miring',
+  'sp.input.placeholder_tip.record': 'Katakan "rekam halaman ini" untuk menyimpan interaksi di tab/jendela ini',
   'sp.input.act_placeholder': 'Beri tahu saya apa yang harus dilakukan di halaman ini...',
 
   'sp.activity.thinking': 'Berpikir...',

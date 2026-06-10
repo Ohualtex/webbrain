@@ -88,6 +88,8 @@ export default {
   'sp.mode.act.confirm': '실행 모드에서는 WebBrain이 사용자를 대신해 클릭, 입력, 스크롤, 이동을 수행합니다.\n\n로그인된 브라우저 세션 안에서 동작하므로, 로그인되어 있는 모든 사이트에서 사용자와 동일한 권한을 갖습니다.\n\n동작을 잘 살피시고, ◼ 버튼으로 언제든지 중지할 수 있습니다.\n\n계속하시겠어요?',
 
   'sp.input.ask_placeholder': '이 페이지에 대해 무엇이든 물어보세요...',
+  'sp.input.placeholder_tip.help': '/help를 사용해 슬래시 명령어에 대해 자세히 알아보세요',
+  'sp.input.placeholder_tip.record': '"이 페이지 기록해"라고 말하면 이 탭/창의 상호작용을 저장할 수 있습니다',
   'sp.input.act_placeholder': '이 페이지에서 무엇을 할지 알려 주세요...',
 
   'sp.activity.thinking': '생각 중...',

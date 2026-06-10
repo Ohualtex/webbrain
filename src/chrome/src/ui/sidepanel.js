@@ -264,6 +264,14 @@ const inputArea = document.getElementById('input-area');
 const recommendedActionsEl = document.getElementById('recommended-actions');
 const recommendedActionsListEl = document.getElementById('recommended-actions-list');
 const stopBtn = document.getElementById('btn-stop');
+const PLACEHOLDER_ROTATION_INTERVAL_MS = 10_000;
+const ASK_PLACEHOLDER_KEYS = [
+  'sp.input.ask_placeholder',
+  'sp.input.placeholder_tip.help',
+  'sp.input.placeholder_tip.record',
+];
+let placeholderRotationIndex = 0;
+let placeholderRotationTimer = null;
 // Tab Recorder (v7.4) — recording is started entirely via the agent's
 // `record_tab` tool (prompt-driven). The live red banner that appears
 // during a recording carries its own Stop button; that's the only UI
@@ -1825,6 +1833,33 @@ function autoResizeInput() {
   inputEl.style.height = Math.min(inputEl.scrollHeight, 120) + 'px';
 }
 
+function getInputPlaceholderKeys() {
+  return agentMode === 'ask' ? ASK_PLACEHOLDER_KEYS : ['sp.input.act_placeholder'];
+}
+
+function updateInputPlaceholder() {
+  const keys = getInputPlaceholderKeys();
+  const key = keys[placeholderRotationIndex % keys.length];
+  inputEl.placeholder = t(key);
+  // Keep this attribute aligned with the currently visible placeholder so the
+  // generic i18n pass can refresh it after locale changes without disabling
+  // the rotating tip behavior.
+  inputEl.dataset.i18nPlaceholder = key;
+}
+
+function resetInputPlaceholderRotation() {
+  placeholderRotationIndex = 0;
+  updateInputPlaceholder();
+}
+
+function startInputPlaceholderRotation() {
+  if (placeholderRotationTimer) return;
+  placeholderRotationTimer = setInterval(() => {
+    placeholderRotationIndex += 1;
+    updateInputPlaceholder();
+  }, PLACEHOLDER_ROTATION_INTERVAL_MS);
+}
+
 // --- Communication ---
 
 function sendToBackground(action, data = {}) {
@@ -1855,16 +1890,13 @@ function setMode(mode) {
     modeActBtn.classList.remove('active', 'act');
     updateActWarning();
     inputArea.classList.remove('act-mode');
-    inputEl.placeholder = t('sp.input.ask_placeholder');
-    // Keep the data- attribute in sync so locale changes auto-apply.
-    inputEl.dataset.i18nPlaceholder = 'sp.input.ask_placeholder';
+    resetInputPlaceholderRotation();
   } else {
     modeActBtn.classList.add('active', 'act');
     modeAskBtn.classList.remove('active');
     updateActWarning();
     inputArea.classList.add('act-mode');
-    inputEl.placeholder = t('sp.input.act_placeholder');
-    inputEl.dataset.i18nPlaceholder = 'sp.input.act_placeholder';
+    resetInputPlaceholderRotation();
   }
 }
 
@@ -1971,13 +2003,15 @@ if (languageSelect) {
   languageSelect.value = getLocale();
   languageSelect.addEventListener('change', () => {
     setLocale(languageSelect.value);
-    // Re-apply placeholder since it flips with ask/act mode
     applyDOMTranslations(document);
+    updateInputPlaceholder();
   });
   document.addEventListener('wb-locale-changed', () => {
     languageSelect.value = getLocale();
+    updateInputPlaceholder();
   });
 }
 
 // --- Start ---
+startInputPlaceholderRotation();
 init();
