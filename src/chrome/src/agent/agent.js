@@ -1378,7 +1378,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
           if (pushed) {
             onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-            onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
+            onUpdate('tool_result', {
+              name: 'auto_screenshot',
+              result: {
+                success: true,
+                bytes: shot.dataUrl.length,
+                elements: visible.length,
+                blankFrameRetry: shot.blankFrameRetry || undefined,
+              },
+            });
             const _runIdForShot = this.currentRunId.get(tabId);
             if (_runIdForShot) {
               trace.recordScreenshot(_runIdForShot, null, shot.dataUrl, 'auto-screenshot after tool batch');
@@ -1681,6 +1689,167 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 
+  static BLANK_SCREENSHOT_RETRY_DELAYS_MS = [500, 1000, 1500];
+
+  static _summarizeBlankness(info) {
+    if (!info) return null;
+    return {
+      blank: !!info.blank,
+      reason: info.reason || '',
+      meanLuma: Math.round(info.meanLuma * 10) / 10,
+      lumaStdDev: Math.round(info.lumaStdDev * 10) / 10,
+      whiteRatio: Math.round(info.whiteRatio * 10000) / 10000,
+      blackRatio: Math.round(info.blackRatio * 10000) / 10000,
+    };
+  }
+
+  /**
+   * Detect compositor/lazy-load races where CDP returns an all-white/all-black
+   * frame even though the DOM has content. Sampling a 96px thumbnail keeps this
+   * cheap enough to run on every screenshot path.
+   */
+  async _analyzeScreenshotBlankness(dataUrl) {
+    try {
+      if (!dataUrl) return null;
+      const resp = await fetch(dataUrl);
+      const blob = await resp.blob();
+      const bmp = await createImageBitmap(blob);
+      const sampleW = Math.min(96, bmp.width);
+      const sampleH = Math.min(96, bmp.height);
+      if (!sampleW || !sampleH) return null;
+
+      const canvas = new OffscreenCanvas(sampleW, sampleH);
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(bmp, 0, 0, bmp.width, bmp.height, 0, 0, sampleW, sampleH);
+      const pixels = ctx.getImageData(0, 0, sampleW, sampleH).data;
+      const count = sampleW * sampleH;
+      let sum = 0;
+      let sumSq = 0;
+      let sumR = 0;
+      let sumG = 0;
+      let sumB = 0;
+      let sumRSq = 0;
+      let sumGSq = 0;
+      let sumBSq = 0;
+      let white = 0;
+      let black = 0;
+
+      for (let i = 0; i < pixels.length; i += 4) {
+        const r = pixels[i];
+        const g = pixels[i + 1];
+        const b = pixels[i + 2];
+        const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        sum += luma;
+        sumSq += luma * luma;
+        sumR += r;
+        sumG += g;
+        sumB += b;
+        sumRSq += r * r;
+        sumGSq += g * g;
+        sumBSq += b * b;
+        if (r >= 248 && g >= 248 && b >= 248) white++;
+        if (r <= 7 && g <= 7 && b <= 7) black++;
+      }
+
+      const meanLuma = sum / count;
+      const lumaVariance = Math.max(0, (sumSq / count) - (meanLuma * meanLuma));
+      const lumaStdDev = Math.sqrt(lumaVariance);
+      const rMean = sumR / count;
+      const gMean = sumG / count;
+      const bMean = sumB / count;
+      const rStdDev = Math.sqrt(Math.max(0, (sumRSq / count) - (rMean * rMean)));
+      const gStdDev = Math.sqrt(Math.max(0, (sumGSq / count) - (gMean * gMean)));
+      const bStdDev = Math.sqrt(Math.max(0, (sumBSq / count) - (bMean * bMean)));
+      const maxChannelStdDev = Math.max(rStdDev, gStdDev, bStdDev);
+      const whiteRatio = white / count;
+      const blackRatio = black / count;
+
+      let blank = false;
+      let reason = '';
+      if (whiteRatio >= 0.995 && lumaStdDev < 4) {
+        blank = true;
+        reason = 'near-all-white frame';
+      } else if (blackRatio >= 0.995 && lumaStdDev < 4) {
+        blank = true;
+        reason = 'near-all-black frame';
+      } else if (lumaStdDev < 1.5 && maxChannelStdDev < 1.5) {
+        blank = true;
+        reason = 'near-uniform frame';
+      }
+
+      return {
+        blank,
+        reason,
+        meanLuma,
+        lumaStdDev,
+        maxChannelStdDev,
+        whiteRatio,
+        blackRatio,
+        width: bmp.width,
+        height: bmp.height,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  _pageSignalsContentBehindBlank(probe) {
+    if (!probe) return true;
+    const textChars = Number(probe.documentTextChars || 0);
+    const visibleTextChars = Number(probe.visibleTextChars || 0);
+    const domNodes = Number(probe.domNodes || 0);
+    const imageCount = Number(probe.imageCount || 0);
+    const scrollHeight = Number(probe.scrollHeight || 0);
+    const innerHeight = Number(probe.innerHeight || 0);
+    return (
+      probe.readyState !== 'complete' ||
+      textChars > 20 ||
+      visibleTextChars > 20 ||
+      imageCount > 0 ||
+      domNodes > 150 ||
+      (innerHeight > 0 && scrollHeight > innerHeight + 200)
+    );
+  }
+
+  async _retryBlankScreenshotCapture(firstShot, captureOnce, { probe = null } = {}) {
+    if (!firstShot?.dataUrl || typeof captureOnce !== 'function') return firstShot;
+    let shot = firstShot;
+    let blankness = await this._analyzeScreenshotBlankness(shot.dataUrl);
+    if (!blankness?.blank || !this._pageSignalsContentBehindBlank(probe)) return shot;
+
+    const meta = {
+      detected: true,
+      retries: 0,
+      delaysMs: [],
+      recovered: false,
+      finalBlank: true,
+      firstBlankness: Agent._summarizeBlankness(blankness),
+      finalBlankness: Agent._summarizeBlankness(blankness),
+    };
+
+    for (const delayMs of Agent.BLANK_SCREENSHOT_RETRY_DELAYS_MS) {
+      await new Promise((r) => setTimeout(r, delayMs));
+      const next = await captureOnce();
+      if (!next?.dataUrl) continue;
+
+      shot = next;
+      meta.retries++;
+      meta.delaysMs.push(delayMs);
+      blankness = await this._analyzeScreenshotBlankness(shot.dataUrl);
+      meta.finalBlank = !!blankness?.blank;
+      meta.finalBlankness = Agent._summarizeBlankness(blankness);
+      if (!blankness?.blank) {
+        meta.recovered = true;
+        break;
+      }
+    }
+
+    return { ...shot, blankFrameRetry: meta };
+  }
+
   async _captureAutoScreenshot(tabId, { coordAligned = false } = {}) {
     try {
       await cdpClient.attach(tabId);
@@ -1690,9 +1859,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // Probe the CSS viewport first so we can either (a) clip exactly
       // to it for pixel-accurate captures, or (b) compute a budget-aware
       // CDP-side scale that downsizes during capture rather than after.
-      const vp = await cdpClient.evaluate(tabId, '({w: window.innerWidth, h: window.innerHeight})');
-      const cssW = Math.max(1, Math.round(vp?.result?.value?.w || 1024));
-      const cssH = Math.max(1, Math.round(vp?.result?.value?.h || 768));
+      const probe = await this._captureViewportProbe(tabId);
+      const cssW = Math.max(1, Math.round(probe?.innerWidth || 1024));
+      const cssH = Math.max(1, Math.round(probe?.innerHeight || 768));
 
       if (coordAligned) {
         // Pixel-accuracy mode: image pixels must equal CSS pixels so the
@@ -1701,17 +1870,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // We DO still run the byte-ceiling fallback afterwards: if the
         // CSS viewport happens to be huge, we'd rather lose some JPEG
         // quality than overflow the provider's image cap.
-        const shot = await this._withIndicatorsHidden(tabId, () =>
-          cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
-            format: 'jpeg',
-            quality: 60,
-            clip: { x: 0, y: 0, width: cssW, height: cssH, scale: 1 },
-          })
-        );
-        if (!shot?.data) return null;
-        const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
-        const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
-        return { dataUrl: shrunk, width: cssW, height: cssH, coordAligned: true };
+        const captureOnce = async () => {
+          const shot = await this._withIndicatorsHidden(tabId, () =>
+            cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+              format: 'jpeg',
+              quality: 60,
+              clip: { x: 0, y: 0, width: cssW, height: cssH, scale: 1 },
+            })
+          );
+          if (!shot?.data) return null;
+          const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
+          const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
+          return { dataUrl: shrunk, width: cssW, height: cssH, coordAligned: true };
+        };
+        const first = await captureOnce();
+        return await this._retryBlankScreenshotCapture(first, captureOnce, { probe });
       }
 
       // Non-coord-aligned mode: pre-compute target dims via the budget
@@ -1720,27 +1893,31 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // then have to decode and resize in the service worker.
       const [targetW, targetH] = Agent._fitImageDimensions(cssW, cssH);
       const scale = targetW < cssW ? targetW / cssW : 1;
-      const shot = await this._withIndicatorsHidden(tabId, () =>
-        cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
-          format: 'jpeg',
-          quality: Math.round(Agent.IMAGE_BUDGET.initialJpegQuality * 100),
-          fromSurface: true,
-          clip: { x: 0, y: 0, width: cssW, height: cssH, scale },
-        })
-      );
-      if (!shot?.data) return null;
-      const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
+      const captureOnce = async () => {
+        const shot = await this._withIndicatorsHidden(tabId, () =>
+          cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+            format: 'jpeg',
+            quality: Math.round(Agent.IMAGE_BUDGET.initialJpegQuality * 100),
+            fromSurface: true,
+            clip: { x: 0, y: 0, width: cssW, height: cssH, scale },
+          })
+        );
+        if (!shot?.data) return null;
+        const rawDataUrl = `data:image/jpeg;base64,${shot.data}`;
 
-      // CDP-side resize + JPEG q=75 usually fits. Iterative quality
-      // downgrade is the safety net for high-DPR screens where the
-      // captured image can still exceed the base64 ceiling.
-      const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
-      return {
-        dataUrl: shrunk,
-        width: targetW,
-        height: targetH,
-        coordAligned: false,
+        // CDP-side resize + JPEG q=75 usually fits. Iterative quality
+        // downgrade is the safety net for high-DPR screens where the
+        // captured image can still exceed the base64 ceiling.
+        const shrunk = await this._compressJpegToByteCeiling(rawDataUrl);
+        return {
+          dataUrl: shrunk,
+          width: targetW,
+          height: targetH,
+          coordAligned: false,
+        };
       };
+      const first = await captureOnce();
+      return await this._retryBlankScreenshotCapture(first, captureOnce, { probe });
     } catch (e) {
       return null;
     }
@@ -2114,6 +2291,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             readyState: document.readyState,
             visibility: document.visibilityState,
             domNodes: document.getElementsByTagName('*').length,
+            imageCount: document.images ? document.images.length : 0,
             iframes: document.getElementsByTagName('iframe').length,
             scrollX: Math.round(window.scrollX || 0),
             scrollY: Math.round(window.scrollY || 0),
@@ -3739,6 +3917,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         let description = '';
         let probe = null;
         let coordAligned = false;
+        let blankFrameRetry = null;
         try {
           await cdpClient.attach(tabId);
           await cdpClient.sendCommand(tabId, 'Page.enable');
@@ -3748,22 +3927,26 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const cssW = Math.max(1, Math.round(probe?.innerWidth || 1024));
           const cssH = Math.max(1, Math.round(probe?.innerHeight || 768));
 
-          if (coordAligned) {
-            // Pixel-accuracy mode: image pixels must equal CSS pixels so
-            // click({x,y}) off the screenshot lands on the real element.
-            // PNG (lossless, no quality knob) so no artifacts at glyph edges.
-            const screenshot = await this._withIndicatorsHidden(tabId, () =>
-              cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
-                format: 'png',
-                fromSurface: true,
-                clip: { x: 0, y: 0, width: cssW, height: cssH, scale: 1 },
-              })
-            );
-            dataUrl = `data:image/png;base64,${screenshot.data}`;
-            description = `Screenshot captured via CDP (${screenshot.data.length} bytes, CSS-pixel aligned for pixel clicks)`;
-            // Byte-ceiling fallback only — we don't resize in coord mode.
-            dataUrl = await this._compressJpegToByteCeiling(dataUrl);
-          } else {
+          const captureOnce = async () => {
+            if (coordAligned) {
+              // Pixel-accuracy mode: image pixels must equal CSS pixels so
+              // click({x,y}) off the screenshot lands on the real element.
+              // PNG (lossless, no quality knob) so no artifacts at glyph edges.
+              const screenshot = await this._withIndicatorsHidden(tabId, () =>
+                cdpClient.sendCommand(tabId, 'Page.captureScreenshot', {
+                  format: 'png',
+                  fromSurface: true,
+                  clip: { x: 0, y: 0, width: cssW, height: cssH, scale: 1 },
+                })
+              );
+              if (!screenshot?.data) return null;
+              const rawUrl = `data:image/png;base64,${screenshot.data}`;
+              return {
+                dataUrl: await this._compressJpegToByteCeiling(rawUrl),
+                description: `Screenshot captured via CDP (${screenshot.data.length} bytes, CSS-pixel aligned for pixel clicks)`,
+              };
+            }
+
             // Budget-aware mode (default): pick target dims via binary
             // search, ask CDP to capture + scale in one pass, then run
             // the iterative-quality fallback if bytes are still over.
@@ -3777,11 +3960,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
                 clip: { x: 0, y: 0, width: cssW, height: cssH, scale },
               })
             );
+            if (!screenshot?.data) return null;
             const rawUrl = `data:image/jpeg;base64,${screenshot.data}`;
-            dataUrl = await this._compressJpegToByteCeiling(rawUrl);
             const resized = scale < 1 ? ` (resized ${cssW}×${cssH} → ${targetW}×${targetH} for vision-token budget)` : '';
-            description = `Screenshot captured via CDP (${screenshot.data.length} bytes, JPEG)${resized}`;
-          }
+            return {
+              dataUrl: await this._compressJpegToByteCeiling(rawUrl),
+              description: `Screenshot captured via CDP (${screenshot.data.length} bytes, JPEG)${resized}`,
+            };
+          };
+          const captured = await this._retryBlankScreenshotCapture(await captureOnce(), captureOnce, { probe });
+          if (!captured?.dataUrl) throw new Error('CDP returned an empty screenshot');
+          dataUrl = captured.dataUrl;
+          description = captured.description || '';
+          blankFrameRetry = captured.blankFrameRetry || null;
         } catch {
           const tab = await chrome.tabs.get(tabId);
           if (!tab?.active) {
@@ -3792,17 +3983,33 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           }
           // Tabs API fallback: no clip/scale available. Capture full, then
           // decode + resize + recompress via OffscreenCanvas to fit budget.
-          const rawUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
-          if (!coordAligned) {
-            const cssW = Math.max(1, Math.round(probe?.innerWidth || 1024));
-            const cssH = Math.max(1, Math.round(probe?.innerHeight || 768));
-            const shrunk = await this._shrinkImageForBudget(rawUrl, cssW, cssH);
-            dataUrl = shrunk.dataUrl;
-            description = `Screenshot captured via tabs API (${dataUrl.length} bytes base64, resized to ${shrunk.width}×${shrunk.height})`;
-          } else {
-            dataUrl = await this._compressJpegToByteCeiling(rawUrl);
-            description = `Screenshot captured via tabs API (${dataUrl.length} bytes base64)`;
-          }
+          const captureOnce = async () => {
+            const rawUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png', quality: 80 });
+            if (!coordAligned) {
+              const cssW = Math.max(1, Math.round(probe?.innerWidth || 1024));
+              const cssH = Math.max(1, Math.round(probe?.innerHeight || 768));
+              const shrunk = await this._shrinkImageForBudget(rawUrl, cssW, cssH);
+              return {
+                dataUrl: shrunk.dataUrl,
+                description: `Screenshot captured via tabs API (${shrunk.dataUrl.length} bytes base64, resized to ${shrunk.width}×${shrunk.height})`,
+              };
+            }
+            const compressed = await this._compressJpegToByteCeiling(rawUrl);
+            return {
+              dataUrl: compressed,
+              description: `Screenshot captured via tabs API (${compressed.length} bytes base64)`,
+            };
+          };
+          const captured = await this._retryBlankScreenshotCapture(await captureOnce(), captureOnce, { probe });
+          dataUrl = captured?.dataUrl || null;
+          description = captured?.description || '';
+          blankFrameRetry = captured?.blankFrameRetry || null;
+        }
+        if (!dataUrl) {
+          return {
+            success: false,
+            error: 'Screenshot failed: no image data was captured.',
+          };
         }
 
         // If the user asked to save this screenshot to Downloads, do it
@@ -3850,6 +4057,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               description: `[Screenshot described by vision model ${desc.model}]\n${desc.text}`,
               page: probe || undefined,
               coordAligned,
+              blankFrameRetry: blankFrameRetry || undefined,
               savedFile: savedFile || undefined,
             };
           }
@@ -3868,6 +4076,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             description,
             page: probe || undefined,
             coordAligned,
+            blankFrameRetry: blankFrameRetry || undefined,
             savedFile: savedFile || undefined,
             _attachImage: dataUrl,
           };
@@ -3882,6 +4091,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             savedFile,
             page: probe || undefined,
             coordAligned,
+            blankFrameRetry: blankFrameRetry || undefined,
           };
         }
 

@@ -949,7 +949,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
           if (pushed) {
             onUpdate('tool_call', { name: 'auto_screenshot', args: {} });
-            onUpdate('tool_result', { name: 'auto_screenshot', result: { success: true, bytes: shot.dataUrl.length, elements: visible.length } });
+            onUpdate('tool_result', {
+              name: 'auto_screenshot',
+              result: {
+                success: true,
+                bytes: shot.dataUrl.length,
+                elements: visible.length,
+                blankFrameRetry: shot.blankFrameRetry || undefined,
+              },
+            });
             try {
               const runIdForShot = this.currentRunId.get(tabId);
               if (runIdForShot) {
@@ -1246,6 +1254,214 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 
+  async _captureViewportProbe(tabId) {
+    try {
+      const probeCode = `
+        (() => {
+          let documentTextChars = 0;
+          let visibleTextChars = 0;
+          try { documentTextChars = (document.body && document.body.innerText || '').length; } catch (e) {}
+          try {
+            const sels = 'p, h1, h2, h3, h4, h5, h6, li, td, blockquote, article, section, [role="article"]';
+            const els = document.querySelectorAll(sels);
+            const vw = window.innerWidth, vh = window.innerHeight;
+            for (let i = 0; i < els.length; i++) {
+              const r = els[i].getBoundingClientRect();
+              if (r.bottom < 0 || r.top > vh) continue;
+              if (r.right < 0 || r.left > vw) continue;
+              if (r.width === 0 || r.height === 0) continue;
+              visibleTextChars += (els[i].innerText || '').length;
+              if (visibleTextChars > 20000) break;
+            }
+          } catch (e) {}
+          return {
+            url: location.href,
+            title: document.title || '',
+            readyState: document.readyState,
+            visibility: document.visibilityState,
+            domNodes: document.getElementsByTagName('*').length,
+            imageCount: document.images ? document.images.length : 0,
+            iframes: document.getElementsByTagName('iframe').length,
+            scrollX: Math.round(window.scrollX || 0),
+            scrollY: Math.round(window.scrollY || 0),
+            innerWidth: window.innerWidth,
+            innerHeight: window.innerHeight,
+            scrollHeight: Math.round((document.documentElement && document.documentElement.scrollHeight) || document.body.scrollHeight || 0),
+            documentTextChars,
+            visibleTextChars,
+          };
+        })()
+      `;
+      const results = await browser.tabs.executeScript(tabId, { code: probeCode });
+      return (results && results[0]) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  static BLANK_SCREENSHOT_RETRY_DELAYS_MS = [500, 1000, 1500];
+
+  static _summarizeBlankness(info) {
+    if (!info) return null;
+    return {
+      blank: !!info.blank,
+      reason: info.reason || '',
+      meanLuma: Math.round(info.meanLuma * 10) / 10,
+      lumaStdDev: Math.round(info.lumaStdDev * 10) / 10,
+      whiteRatio: Math.round(info.whiteRatio * 10000) / 10000,
+      blackRatio: Math.round(info.blackRatio * 10000) / 10000,
+    };
+  }
+
+  /**
+   * Detect compositor/lazy-load races where the browser returns an all-white or
+   * all-black frame even though the DOM has content. Sampling a 96px thumbnail
+   * keeps this cheap enough to run on every screenshot path.
+   */
+  async _analyzeScreenshotBlankness(dataUrl) {
+    try {
+      if (!dataUrl) return null;
+      const img = await this._loadImageFromDataUrl(dataUrl);
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
+      const sampleW = Math.min(96, width);
+      const sampleH = Math.min(96, height);
+      if (!sampleW || !sampleH) return null;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = sampleW;
+      canvas.height = sampleH;
+      const ctx = canvas.getContext('2d', { willReadFrequently: true });
+      if (!ctx) return null;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, 0, 0, width, height, 0, 0, sampleW, sampleH);
+      const pixels = ctx.getImageData(0, 0, sampleW, sampleH).data;
+      const count = sampleW * sampleH;
+      let sum = 0;
+      let sumSq = 0;
+      let sumR = 0;
+      let sumG = 0;
+      let sumB = 0;
+      let sumRSq = 0;
+      let sumGSq = 0;
+      let sumBSq = 0;
+      let white = 0;
+      let black = 0;
+
+      for (let i = 0; i < pixels.length; i += 4) {
+        const r = pixels[i];
+        const g = pixels[i + 1];
+        const b = pixels[i + 2];
+        const luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        sum += luma;
+        sumSq += luma * luma;
+        sumR += r;
+        sumG += g;
+        sumB += b;
+        sumRSq += r * r;
+        sumGSq += g * g;
+        sumBSq += b * b;
+        if (r >= 248 && g >= 248 && b >= 248) white++;
+        if (r <= 7 && g <= 7 && b <= 7) black++;
+      }
+
+      const meanLuma = sum / count;
+      const lumaVariance = Math.max(0, (sumSq / count) - (meanLuma * meanLuma));
+      const lumaStdDev = Math.sqrt(lumaVariance);
+      const rMean = sumR / count;
+      const gMean = sumG / count;
+      const bMean = sumB / count;
+      const rStdDev = Math.sqrt(Math.max(0, (sumRSq / count) - (rMean * rMean)));
+      const gStdDev = Math.sqrt(Math.max(0, (sumGSq / count) - (gMean * gMean)));
+      const bStdDev = Math.sqrt(Math.max(0, (sumBSq / count) - (bMean * bMean)));
+      const maxChannelStdDev = Math.max(rStdDev, gStdDev, bStdDev);
+      const whiteRatio = white / count;
+      const blackRatio = black / count;
+
+      let blank = false;
+      let reason = '';
+      if (whiteRatio >= 0.995 && lumaStdDev < 4) {
+        blank = true;
+        reason = 'near-all-white frame';
+      } else if (blackRatio >= 0.995 && lumaStdDev < 4) {
+        blank = true;
+        reason = 'near-all-black frame';
+      } else if (lumaStdDev < 1.5 && maxChannelStdDev < 1.5) {
+        blank = true;
+        reason = 'near-uniform frame';
+      }
+
+      return {
+        blank,
+        reason,
+        meanLuma,
+        lumaStdDev,
+        maxChannelStdDev,
+        whiteRatio,
+        blackRatio,
+        width,
+        height,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  _pageSignalsContentBehindBlank(probe) {
+    if (!probe) return true;
+    const textChars = Number(probe.documentTextChars || 0);
+    const visibleTextChars = Number(probe.visibleTextChars || 0);
+    const domNodes = Number(probe.domNodes || 0);
+    const imageCount = Number(probe.imageCount || 0);
+    const scrollHeight = Number(probe.scrollHeight || 0);
+    const innerHeight = Number(probe.innerHeight || 0);
+    return (
+      probe.readyState !== 'complete' ||
+      textChars > 20 ||
+      visibleTextChars > 20 ||
+      imageCount > 0 ||
+      domNodes > 150 ||
+      (innerHeight > 0 && scrollHeight > innerHeight + 200)
+    );
+  }
+
+  async _retryBlankScreenshotCapture(firstShot, captureOnce, { probe = null } = {}) {
+    if (!firstShot?.dataUrl || typeof captureOnce !== 'function') return firstShot;
+    let shot = firstShot;
+    let blankness = await this._analyzeScreenshotBlankness(shot.dataUrl);
+    if (!blankness?.blank || !this._pageSignalsContentBehindBlank(probe)) return shot;
+
+    const meta = {
+      detected: true,
+      retries: 0,
+      delaysMs: [],
+      recovered: false,
+      finalBlank: true,
+      firstBlankness: Agent._summarizeBlankness(blankness),
+      finalBlankness: Agent._summarizeBlankness(blankness),
+    };
+
+    for (const delayMs of Agent.BLANK_SCREENSHOT_RETRY_DELAYS_MS) {
+      await new Promise((r) => setTimeout(r, delayMs));
+      const next = await captureOnce();
+      if (!next?.dataUrl) continue;
+
+      shot = next;
+      meta.retries++;
+      meta.delaysMs.push(delayMs);
+      blankness = await this._analyzeScreenshotBlankness(shot.dataUrl);
+      meta.finalBlank = !!blankness?.blank;
+      meta.finalBlankness = Agent._summarizeBlankness(blankness);
+      if (!blankness?.blank) {
+        meta.recovered = true;
+        break;
+      }
+    }
+
+    return { ...shot, blankFrameRetry: meta };
+  }
+
   /**
    * Capture a viewport screenshot via the WebExtension tabs API. Firefox
    * supports `scale: 1` on captureVisibleTab to force a CSS-pixel-aligned
@@ -1263,36 +1479,30 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // and feed misleading visual context to the model. Skip in that case;
       // the model will plan from text only this turn.
       if (!tab.active) return null;
-      // Get the actual viewport dimensions from the page so we can include
-      // them in the prompt accompanying the screenshot.
-      let w = 1024, h = 768;
-      try {
-        const dims = await browser.tabs.executeScript(tabId, {
-          code: 'JSON.stringify({w: window.innerWidth, h: window.innerHeight})',
-        });
-        if (dims && dims[0]) {
-          const parsed = JSON.parse(dims[0]);
-          w = Math.max(1, Math.round(parsed.w));
-          h = Math.max(1, Math.round(parsed.h));
-        }
-      } catch (e) { /* fall back to defaults */ }
-      // scale: 1 forces 1 image pixel per CSS pixel (Firefox-specific option,
-      // ignored by Chrome but Chrome path uses CDP anyway).
-      const rawDataUrl = await this._withIndicatorsHidden(tabId, () =>
-        browser.tabs.captureVisibleTab(tab.windowId, {
-          format: 'jpeg',
-          quality: 60,
-          scale: 1,
-        })
-      );
-      if (!rawDataUrl) return null;
+      const probe = await this._captureViewportProbe(tabId);
+      const w = Math.max(1, Math.round(probe?.innerWidth || 1024));
+      const h = Math.max(1, Math.round(probe?.innerHeight || 768));
+      const captureOnce = async () => {
+        // scale: 1 forces 1 image pixel per CSS pixel (Firefox-specific option,
+        // ignored by Chrome but Chrome path uses CDP anyway).
+        const rawDataUrl = await this._withIndicatorsHidden(tabId, () =>
+          browser.tabs.captureVisibleTab(tab.windowId, {
+            format: 'jpeg',
+            quality: 60,
+            scale: 1,
+          })
+        );
+        if (!rawDataUrl) return null;
 
-      // Firefox's captureVisibleTab doesn't take a clip/scale in a way that
-      // lets us downsize during capture (scale:1 is viewport-lock, not a
-      // factor). So we capture at CSS size and shrink via DOM canvas to
-      // the token budget. On small viewports this is a no-op fast-exit.
-      const shrunk = await this._shrinkImageForBudget(rawDataUrl, w, h);
-      return { dataUrl: shrunk.dataUrl, width: shrunk.width, height: shrunk.height };
+        // Firefox's captureVisibleTab doesn't take a clip/scale in a way that
+        // lets us downsize during capture (scale:1 is viewport-lock, not a
+        // factor). So we capture at CSS size and shrink via DOM canvas to
+        // the token budget. On small viewports this is a no-op fast-exit.
+        const shrunk = await this._shrinkImageForBudget(rawDataUrl, w, h);
+        return { dataUrl: shrunk.dataUrl, width: shrunk.width, height: shrunk.height };
+      };
+      const first = await captureOnce();
+      return await this._retryBlankScreenshotCapture(first, captureOnce, { probe });
     } catch (e) {
       return null;
     }
@@ -2883,60 +3093,34 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             error: 'Cannot capture screenshot: this tab is not the active tab in its window. Switch to the tab to take a screenshot, or use a different tool.',
           };
         }
-        // Probe the page for layout + text-volume hints BEFORE capture.
-        // documentTextChars + visibleTextChars let the model detect cases
-        // where a JPEG looks blank (mid-lazy-load) but the page actually
-        // has thousands of chars of text — the trace where scroll'd CNN
-        // misread "blank screenshot" as "page is empty".
-        let probe = null;
-        try {
-          const probeCode = `
-            (() => {
-              let documentTextChars = 0;
-              let visibleTextChars = 0;
-              try { documentTextChars = (document.body && document.body.innerText || '').length; } catch (e) {}
-              try {
-                const sels = 'p, h1, h2, h3, h4, h5, h6, li, td, blockquote, article, section, [role="article"]';
-                const els = document.querySelectorAll(sels);
-                const vw = window.innerWidth, vh = window.innerHeight;
-                for (let i = 0; i < els.length; i++) {
-                  const r = els[i].getBoundingClientRect();
-                  if (r.bottom < 0 || r.top > vh) continue;
-                  if (r.right < 0 || r.left > vw) continue;
-                  if (r.width === 0 || r.height === 0) continue;
-                  visibleTextChars += (els[i].innerText || '').length;
-                  if (visibleTextChars > 20000) break;
-                }
-              } catch (e) {}
-              return {
-                url: location.href,
-                title: document.title || '',
-                readyState: document.readyState,
-                scrollX: Math.round(window.scrollX || 0),
-                scrollY: Math.round(window.scrollY || 0),
-                innerWidth: window.innerWidth,
-                innerHeight: window.innerHeight,
-                scrollHeight: Math.round((document.documentElement && document.documentElement.scrollHeight) || document.body.scrollHeight || 0),
-                documentTextChars,
-                visibleTextChars,
-              };
-            })()
-          `;
-          const probeResults = await browser.tabs.executeScript(tabId, { code: probeCode });
-          probe = (probeResults && probeResults[0]) || null;
-        } catch (_) { /* probe failures are non-fatal */ }
-        const rawUrl = await this._withIndicatorsHidden(tabId, () =>
-          browser.tabs.captureVisibleTab(tab.windowId, {
-            format: 'png',
-            quality: 80,
-          })
-        );
-        // Shrink to the vision budget before handing the image to the
-        // model. Same two-stage dance as Chrome: decode → pick target dims
-        // → draw at target → iterative JPEG quality until bytes fit.
-        const shrunk = await this._shrinkImageForBudget(rawUrl, 0, 0);
-        const dataUrl = shrunk.dataUrl;
-        const description = `Screenshot captured (${dataUrl.length} base64 chars, ${shrunk.width}×${shrunk.height})`;
+        const probe = await this._captureViewportProbe(tabId);
+        const captureOnce = async () => {
+          const rawUrl = await this._withIndicatorsHidden(tabId, () =>
+            browser.tabs.captureVisibleTab(tab.windowId, {
+              format: 'png',
+              quality: 80,
+            })
+          );
+          if (!rawUrl) return null;
+          // Shrink to the vision budget before handing the image to the
+          // model. Same two-stage dance as Chrome: decode → pick target dims
+          // → draw at target → iterative JPEG quality until bytes fit.
+          const shrunk = await this._shrinkImageForBudget(rawUrl, 0, 0);
+          return {
+            dataUrl: shrunk.dataUrl,
+            description: `Screenshot captured (${shrunk.dataUrl.length} base64 chars, ${shrunk.width}×${shrunk.height})`,
+          };
+        };
+        const captured = await this._retryBlankScreenshotCapture(await captureOnce(), captureOnce, { probe });
+        if (!captured?.dataUrl) {
+          return {
+            success: false,
+            error: 'Screenshot failed: no image data was captured.',
+          };
+        }
+        const dataUrl = captured.dataUrl;
+        const description = captured.description || '';
+        const blankFrameRetry = captured.blankFrameRetry || null;
 
         // Route the image through whichever vision path is actually wired up.
         // Returning a bare `{image: dataUrl}` blob looks like success but
@@ -2954,6 +3138,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
               method: 'vision_describe',
               description: `[Screenshot described by vision model ${desc.model}]\n${desc.text}`,
               page: probe || undefined,
+              blankFrameRetry: blankFrameRetry || undefined,
             };
           }
         }
@@ -2966,6 +3151,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             method: 'image_attach',
             description,
             page: probe || undefined,
+            blankFrameRetry: blankFrameRetry || undefined,
             _attachImage: dataUrl,
           };
         }

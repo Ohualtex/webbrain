@@ -748,6 +748,107 @@ test('existing dims under caps stay within the monotonic bound', () => {
   }
 });
 
+test('blank screenshot retry: page-content probe gates retries', () => {
+  const emptyProbe = {
+    readyState: 'complete',
+    documentTextChars: 0,
+    visibleTextChars: 0,
+    domNodes: 20,
+    imageCount: 0,
+    scrollHeight: 800,
+    innerHeight: 800,
+  };
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    assert.equal(agent._pageSignalsContentBehindBlank(emptyProbe), false);
+    assert.equal(agent._pageSignalsContentBehindBlank({ ...emptyProbe, imageCount: 1 }), true);
+    assert.equal(agent._pageSignalsContentBehindBlank({ ...emptyProbe, documentTextChars: 21 }), true);
+    assert.equal(agent._pageSignalsContentBehindBlank({ ...emptyProbe, readyState: 'loading' }), true);
+  }
+});
+
+test('blank screenshot retry: retries and reports recovery', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    const delays = AgentClass.BLANK_SCREENSHOT_RETRY_DELAYS_MS;
+    AgentClass.BLANK_SCREENSHOT_RETRY_DELAYS_MS = [0];
+    agent._analyzeScreenshotBlankness = async (dataUrl) => ({
+      blank: dataUrl === 'blank',
+      reason: dataUrl === 'blank' ? 'near-all-white frame' : '',
+      meanLuma: dataUrl === 'blank' ? 255 : 120,
+      lumaStdDev: dataUrl === 'blank' ? 0 : 35,
+      whiteRatio: dataUrl === 'blank' ? 1 : 0.2,
+      blackRatio: 0,
+    });
+    let recaptures = 0;
+    try {
+      const recovered = await agent._retryBlankScreenshotCapture(
+        { dataUrl: 'blank', description: 'first' },
+        async () => {
+          recaptures++;
+          return { dataUrl: 'real', description: 'retry' };
+        },
+        {
+          probe: {
+            readyState: 'complete',
+            documentTextChars: 0,
+            visibleTextChars: 0,
+            domNodes: 20,
+            imageCount: 1,
+            scrollHeight: 800,
+            innerHeight: 800,
+          },
+        }
+      );
+      assert.equal(recovered.dataUrl, 'real');
+      assert.equal(recovered.description, 'retry');
+      assert.equal(recaptures, 1);
+      assert.equal(recovered.blankFrameRetry.detected, true);
+      assert.equal(recovered.blankFrameRetry.retries, 1);
+      assert.equal(recovered.blankFrameRetry.recovered, true);
+      assert.equal(recovered.blankFrameRetry.finalBlank, false);
+    } finally {
+      AgentClass.BLANK_SCREENSHOT_RETRY_DELAYS_MS = delays;
+    }
+  }
+});
+
+test('blank screenshot retry: skips retry when a blank page has no content signals', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({});
+    agent._analyzeScreenshotBlankness = async () => ({
+      blank: true,
+      reason: 'near-all-white frame',
+      meanLuma: 255,
+      lumaStdDev: 0,
+      whiteRatio: 1,
+      blackRatio: 0,
+    });
+    let recaptures = 0;
+    const result = await agent._retryBlankScreenshotCapture(
+      { dataUrl: 'blank', description: 'first' },
+      async () => {
+        recaptures++;
+        return { dataUrl: 'real', description: 'retry' };
+      },
+      {
+        probe: {
+          readyState: 'complete',
+          documentTextChars: 0,
+          visibleTextChars: 0,
+          domNodes: 20,
+          imageCount: 0,
+          scrollHeight: 800,
+          innerHeight: 800,
+        },
+      }
+    );
+    assert.equal(result.dataUrl, 'blank');
+    assert.equal(result.blankFrameRetry, undefined);
+    assert.equal(recaptures, 0);
+  }
+});
+
 // ────────────────────────────────────────────────────────────────────────
 // Markdown link sanitizer
 // ────────────────────────────────────────────────────────────────────────

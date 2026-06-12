@@ -6,6 +6,17 @@ This changelog was generated from the repository Git history and release tags. V
 
 ## [Unreleased]
 
+## [13.0.1] - 2026-06-12
+
+### Fixed
+- Screenshot capture now mechanically detects near-blank frames and retries after 500ms, 1000ms, and 1500ms before handing the image to a vision model (Chrome + Firefox). This helps recover from compositor / lazy-load races on media-heavy pages such as Instagram, where the DOM already contains content but the first viewport capture can be all white or all black.
+
+### Changed
+- Screenshot probes now include image counts, and screenshot results/traces include `blankFrameRetry` metadata when a blank-frame retry path ran.
+
+### Tests
+- Added Chrome + Firefox unit coverage for blank-frame retry gating, successful recovery, and the no-content/no-retry case.
+
 ## [13.0.0] - 2026-06-10
 
 ### Added
