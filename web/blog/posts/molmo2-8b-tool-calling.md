@@ -1,24 +1,24 @@
 ---
 title: >
-  Molmo2-8B is truly open. On browser tool calling, it is not ready yet.
+  Molmo2-8B is truly open. Our current serving path could not give it a fair browser-tool test.
 slug: molmo2-8b-tool-calling
 sortOrder: 1
 date: 2026-06-12
 readTime: 8 min read
 description: >
-  We ran Molmo2-8B through WebBrain's frozen 100-case browser-agent tool-calling benchmark and prompt-injection scenarios. The open-source story is excellent: open weights, data, and recipe. The comparable first-tool-call result is not: 2 parsed tool calls out of 100, with 0 exact matches.
+  We tried to run Molmo2-8B through WebBrain's frozen 100-case browser-agent tool-calling benchmark. The open-source story is excellent: open weights, data, and recipe. The caveat: LM Studio's Molmo path rejected native structured tools, so the only successful run used a text-call compatibility shim.
 excerpt: >
-  Molmo2-8B deserves praise for being open source in the meaningful sense: weights, data, recipe, and no closed-VLM distillation dependency. But on WebBrain's frozen Sonnet-baseline 100-case browser-agent routing run it produced only 2 parsed tool calls, with 0 exact first-action matches. In prompt-injection scenarios it avoided malicious tool calls, but mostly by refusing or falling back to prose.
+  Molmo2-8B deserves praise for being open source in the meaningful sense: weights, data, recipe, and no closed-VLM distillation dependency. We could not run a fair native OpenAI-tools comparison through the current LM Studio Molmo path: structured tools failed at prompt rendering, and the fallback text-call run produced only 2 parsed tool calls.
 titleTag: >
-  Molmo2-8B is truly open. On browser tool calling, it is not ready yet. - WebBrain Blog
+  Molmo2-8B is truly open. Our current serving path could not give it a fair browser-tool test. - WebBrain Blog
 ogTitle: >
-  Molmo2-8B is truly open. On browser tool calling, it is not ready yet.
+  Molmo2-8B is truly open. Our current serving path could not give it a fair browser-tool test.
 ogDescription: >
-  Open weights, data, and recipe are worth celebrating. The frozen 100-case WebBrain routing run still landed at only 2 parsed tool calls; the injection run was safe but over-conservative.
+  Open weights, data, and recipe are worth celebrating. Native structured tools failed through LM Studio's Molmo path, so the only successful run used a text-call compatibility shim.
 twitterTitle: >
-  Molmo2-8B: truly open, not yet a browser planner
+  Molmo2-8B: truly open, unfairly served for tools
 twitterDescription: >
-  100 frozen WebBrain routing cases. 2 parsed tool calls. 0 exact matches. Prompt-injection run: 0 malicious tool executions, but lots of refusal/prose.
+  Native structured tools failed through LM Studio's Molmo path; the text-call fallback produced 2 parsed calls.
 keywords:
   - Molmo2
   - Molmo2-8B
@@ -34,7 +34,7 @@ keywords:
   - local LLM
 html: true
 lede: >
-  We ran `molmo2-8b` through WebBrain's frozen 100-case first-tool-call benchmark and the 10-case prompt-injection scenario pair. The model deserves real credit for something most "open" model releases still avoid: Molmo2 is open source in the meaningful sense, with open weights, open data, and a published recipe from the Allen Institute for AI (Ai2). But the comparable browser-agent routing result is blunt: **2 parsed tool calls out of 100**, all via text fallback, with **0 exact first-action matches**. The security result is safer than the planner result, but mostly because Molmo2 refuses and answers in prose. This is an openness win, not a planner win.
+  We tried to run `molmo2-8b` through WebBrain's frozen 100-case first-tool-call benchmark and the 10-case prompt-injection scenario pair. The model deserves real credit for something most "open" model releases still avoid: Molmo2 is open source in the meaningful sense, with open weights, open data, and a published recipe from the Allen Institute for AI (Ai2). But we could not give it the same native-tool serving interface as Qwen and Sonnet through the current LM Studio path: OpenAI structured tools failed before inference with a prompt-template error. The only successful run used a text-call compatibility shim; under that unfair fallback path, Molmo produced **2 parsed tool calls out of 100**, with **0 exact first-action matches**.
 ---
 
 ## Why Molmo2 matters
@@ -52,6 +52,8 @@ For WebBrain, that is exactly the kind of model we want to root for. Local brows
 This run used the step-1 routing harness under `test/llm/`: 100 single-turn browser-agent prompts. Each case gives the model the WebBrain system prompt, current tab context, and a user request, then records only the first model turn. The runner does not execute tools or give the model a second chance.
 
 Important correction: the canonical result below is the **frozen baseline** run, pinned to the same May 23, 2026 Sonnet 4.6 prompt/tool snapshot used by the earlier planner benchmark. An earlier draft of this post used a live-schema run against the current 44-tool Chrome schema. That was not comparable because WebBrain's tool list had drifted. The frozen run uses the 41-tool Sonnet baseline instead.
+
+Second correction: this still is **not** fully apples-to-apples with Qwen/Sonnet-style runs. Those runs received the 41 tools as native OpenAI `tools` schemas. We tried that for Molmo2 too: the request used the frozen 41-tool snapshot and kept structured tools enabled. LM Studio rejected all 100 requests before inference with `HTTP 400` / `Error rendering prompt with jinja template: "Conversation roles must alternate user/assistant/user/assistant/..."`. So the runner had to omit structured tools and ask for a textual `<tool_call>{...}</tool_call>` response. The right interpretation is narrower: this measures the current Molmo/LM Studio text-call compatibility path, not Molmo2's native tool-calling ceiling.
 
 Run folder:
 
@@ -79,15 +81,26 @@ Run summary:
 | Average prompt tokens | 8,707 |
 | Average completion tokens | 28 |
 
+Native structured-tool attempt:
+
+| Metric | Result |
+| --- | ---: |
+| Structured tools sent | yes |
+| Frozen tool count | 41 |
+| Cases | 100 |
+| Successful requests | 0 |
+| Errors | 100 |
+| Failure | LM Studio prompt-template render error before inference |
+
 The important caveat is the `alternating` compatibility mode. Molmo-style local chat templates commonly reject OpenAI's `system` / `tool` role structure, so the runner folded the prompt into alternating user/assistant messages and omitted structured OpenAI tool schemas. Instead, it appended a text instruction:
 
 ```
 <tool_call>{"name":"tool_name","arguments":{...}}</tool_call>
 ```
 
-So this is comparable on **prompt and tool snapshot**, but still not a clean comparison against models that receive native structured tool schemas. It is a deployment-realistic test of this local Molmo path: can it follow WebBrain's text tool-call instruction well enough to drive the browser?
+So this is comparable on **prompt and tool snapshot**, but not on **tool-serving interface**. The earlier benchmark models got native schemas; Molmo got a text-only escape hatch because the native path failed at serving time. This is a deployment-realistic test of this local Molmo path, not a fair native-tool benchmark.
 
-In this run, mostly no.
+In this fallback run, mostly no.
 
 ## The parsed calls
 
@@ -98,7 +111,7 @@ The runner officially parsed 2 tool calls:
 | 064 | scroll to the bottom | `scroll` bottom | `scroll_page` with no args | wrong tool shape |
 | 100 | whats the highest rated item here | `read_page` | `get_accessibility_tree({filter:"visible",maxDepth:10})` after prose | wrong first tool |
 
-Zero exact matches out of 100 is not viable for a browser planner. Two parsed tool calls out of 100 is not even close to enough signal for an agent loop.
+Zero exact matches out of 100 would not be viable for a browser planner, but the main lesson here is about the serving path. The model was not given the same native tool interface as the other models; the fairer native run could not be executed on this endpoint.
 
 Case 100 is a useful example of the problem. The model wrote a reasonable sentence about reading the visible Amazon results, then included a parseable tool call. But the benchmark expected the prose-page reader for this first move, and the model violated the "exactly one raw tool call and no prose" instruction. Even when it tries, the output shape is not agent-clean.
 
@@ -122,7 +135,7 @@ For a production browser agent, that distinction matters less than people want i
 
 ## What it did instead
 
-The dominant failure mode was generic assistant behavior leaking through the agent prompt.
+The dominant behavior in the fallback run was generic assistant behavior leaking through the agent prompt.
 
 Across the 98 cases without a parsed tool call:
 
@@ -180,18 +193,19 @@ Fair read:
 
 ## Objective assessment
 
-The result is poor for first-turn browser-agent tool routing.
+The result is poor for this first-turn browser-agent **serving path**.
 
-Molmo2-8B did not fail because the endpoint crashed. There were zero transport errors. It did not fail because the run was slow. Median latency was about 1.2 seconds, which is perfectly usable. It failed because it did not consistently emit executable browser actions.
+Molmo2-8B did not fail because the endpoint crashed in the text-call run. There were zero transport errors there, and median latency was about 1.2 seconds, which is perfectly usable. But the fairer native-tools run did fail at the server/template layer before inference. So we should not treat the 2/100 text-call result as Molmo2's true tool-calling ability.
 
-Compared with the existing WebBrain planner benchmark, this is a different bucket. In the earlier 100-case runs, viable planner models typically produced tool calls in most cases. On the frozen baseline, Molmo2 produced 2 parsed tool calls. Even giving it credit for malformed attempts only raises that to 9 recognizable attempts.
+Compared with the existing WebBrain planner benchmark, this is a different bucket. In the earlier 100-case runs, viable planner models typically produced tool calls in most cases, but they also received native structured tools. On the frozen baseline text-call path, Molmo2 produced 2 parsed tool calls. Even giving it credit for malformed attempts only raises that to 9 recognizable attempts. That says the compatibility shim is not enough; it does not prove Molmo2 would fail with a proper native-tools serving stack.
 
-But the result should not be overread. This was a text-only first-tool-call routing test, not a Molmo2 vision or grounding benchmark. Molmo2's headline capability is VLM grounding; this harness did not ask it to point at pixels, track objects in video, or caption a screenshot. Also, because the local chat template forced text-call compatibility, Molmo2 did not get native structured tool schemas. The frozen baseline means the prompt/tool snapshot is fair; it does not mean the serving path is ideal. A constrained decoder, a model-specific chat template, native tool-schema support, or a small tool-format fine-tune could change this result materially.
+But the result should not be overread. This was a text-only first-tool-call routing test, not a Molmo2 vision or grounding benchmark. Molmo2's headline capability is VLM grounding; this harness did not ask it to point at pixels, track objects in video, or caption a screenshot. Also, because the local chat template forced text-call compatibility, Molmo2 did not get native structured tool schemas. The frozen baseline means the prompt/tool snapshot is controlled; it does **not** mean the benchmark is fair against models that got native tools. A constrained decoder, a model-specific chat template, native tool-schema support, or a small tool-format fine-tune could change this result materially.
 
 So the fair read is:
 
 - **As an open-source VLM release:** excellent, and unusually important.
-- **As a drop-in WebBrain planner today:** no.
+- **As served through this LM Studio text-call path:** not usable as a drop-in WebBrain planner.
+- **As a native structured-tool model:** unmeasured here; the server rejected that path.
 - **As a candidate for model-specific integration work:** yes, because the openness gives us something to work with.
 
 ## What we should try next
@@ -200,14 +214,14 @@ There are three obvious follow-ups.
 
 First, test Molmo2 on the vision side of WebBrain, where it should be stronger: screenshot captioning, UI grounding, pointing, and small visual affordances. The previous vision shootout focused heavily on Qwen, Gemma, Nemotron, and MiMo. Molmo2 deserves a slot there.
 
-Second, run a stricter integration experiment: same 100 frozen cases, but with a Molmo-specific tool prompt and a decoder/parser path that accepts exactly one JSON object. The current run tells us the generic compatibility shim is not enough.
+Second, run the same 100 frozen cases through a serving stack or chat template that accepts native OpenAI structured tools for Molmo2. That is the real apples-to-apples comparison. A different inference engine, such as vLLM if it supports this model/template path cleanly, is the obvious thing to try next.
 
-Third, if the model continues to show latent tool intent but bad syntax, fine-tune the output format. This is where Molmo2's openness matters. With a merely open-weight model, you can prompt around the problem and hope. With a genuinely open release, you can inspect, train, publish the fix, and let other people reproduce it.
+Third, if native tools remain unavailable, run a stricter text integration experiment with a Molmo-specific tool prompt and a decoder/parser path that accepts exactly one JSON object. If the model continues to show latent tool intent but bad syntax, fine-tune the output format. This is where Molmo2's openness matters. With a merely open-weight model, you can prompt around the problem and hope. With a genuinely open release, you can inspect, train, publish the fix, and let other people reproduce it.
 
 ## Bottom line
 
 Molmo2-8B is the kind of release the local-agent ecosystem needs: open weights, open data, disclosed recipe, and no dependency on closed VLMs to generate the core supervision. That deserves praise without qualification.
 
-The WebBrain result does need qualification: on this frozen 100-case browser routing run, Molmo2-8B is not usable as the first-action planner. It was fast and stable, but it produced too few parseable tool calls and fell back too often to generic chatbot refusals.
+The WebBrain result needs heavy qualification: through the current LM Studio text-call compatibility path, Molmo2-8B is not usable as the first-action planner. But we could not run the fair native-tools version at all, so this is not a final verdict on Molmo2 as a tool-calling model. We should check back soon with another inference stack, likely vLLM or a Molmo-specific serving path that can accept native tool schemas.
 
-That does not make the model uninteresting. It makes it exactly the kind of open-source failure we can learn from.
+That does not make the model uninteresting. It makes this exactly the kind of open-source integration gap we can learn from and improve.

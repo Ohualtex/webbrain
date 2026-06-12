@@ -5,7 +5,7 @@
     "url": "https://www.amazon.com/dp/B0EXAMPLE",
     "title": "Acme Earbuds — Amazon"
   },
-  "latencyMs": 1102,
+  "latencyMs": 2168,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

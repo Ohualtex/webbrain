@@ -5,7 +5,7 @@
     "url": "about:home",
     "title": "New Tab"
   },
-  "latencyMs": 675,
+  "latencyMs": 656,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

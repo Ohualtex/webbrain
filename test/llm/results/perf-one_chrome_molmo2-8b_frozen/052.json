@@ -5,7 +5,7 @@
     "url": "https://mail.google.com/mail/u/0/#inbox/abc123",
     "title": "Invoice from Acme — Gmail"
   },
-  "latencyMs": 820,
+  "latencyMs": 1026,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

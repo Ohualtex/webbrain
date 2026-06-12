@@ -5,7 +5,7 @@
     "url": "https://example.com/signup",
     "title": "Sign up"
   },
-  "latencyMs": 761,
+  "latencyMs": 758,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

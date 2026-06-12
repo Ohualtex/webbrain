@@ -5,7 +5,7 @@
     "url": "https://www.amazon.com/",
     "title": "Amazon.com"
   },
-  "latencyMs": 1018,
+  "latencyMs": 1022,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

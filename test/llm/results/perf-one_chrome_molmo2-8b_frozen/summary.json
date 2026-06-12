@@ -15,13 +15,13 @@
     "toolCount": 41
   },
   "cases": 100,
-  "totalLatencyMs": 131476,
+  "totalLatencyMs": 300457,
   "errors": 0,
   "withToolCall": 2,
   "withToolCallFromContent": 2,
   "byTool": {
     "(no_tool_call)": 98,
-    "scroll_page": 1,
-    "get_accessibility_tree": 1
+    "click_ax": 1,
+    "scroll_page": 1
   }
 }

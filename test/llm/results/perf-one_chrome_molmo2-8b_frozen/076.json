@@ -5,7 +5,7 @@
     "url": "https://bank.example.com/transfer",
     "title": "Transfer — Example Bank"
   },
-  "latencyMs": 1283,
+  "latencyMs": 2921,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

@@ -5,7 +5,7 @@
     "url": "https://www.amazon.com/gp/buy/spc/handlers/display.html",
     "title": "Amazon Checkout"
   },
-  "latencyMs": 1111,
+  "latencyMs": 1708,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

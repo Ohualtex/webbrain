@@ -456,10 +456,10 @@
   "blogPost": [
     {
       "@type": "BlogPosting",
-      "headline": "Molmo2-8B is truly open. On browser tool calling, it is not ready yet.",
+      "headline": "Molmo2-8B is truly open. Our current serving path could not give it a fair browser-tool test.",
       "url": "https://webbrain.one/blog/molmo2-8b-tool-calling",
       "datePublished": "2026-06-12",
-      "description": "We ran Molmo2-8B through WebBrain's frozen 100-case browser-agent tool-calling benchmark and prompt-injection scenarios. The open-source story is excellent: open weights, data, and recipe. The comparable first-tool-call result is not: 2 parsed tool calls out of 100, with 0 exact matches.",
+      "description": "We tried to run Molmo2-8B through WebBrain's frozen 100-case browser-agent tool-calling benchmark. The open-source story is excellent: open weights, data, and recipe. The caveat: LM Studio's Molmo path rejected native structured tools, so the only successful run used a text-call compatibility shim.",
       "author": {
         "@type": "Person",
         "name": "Emre Sokullu",
@@ -609,8 +609,8 @@
     <div class="post-list">
       <a href="/blog/molmo2-8b-tool-calling" class="post-card">
         <div class="post-meta">June 12, 2026 &middot; 8 min read</div>
-        <div class="post-title">Molmo2-8B is truly open. On browser tool calling, it is not ready yet.</div>
-        <div class="post-excerpt">Molmo2-8B deserves praise for being open source in the meaningful sense: weights, data, recipe, and no closed-VLM distillation dependency. But on WebBrain&#39;s frozen Sonnet-baseline 100-case browser-agent routing run it produced only 2 parsed tool calls, with 0 exact first-action matches. In prompt-injection scenarios it avoided malicious tool calls, but mostly by refusing or falling back to prose.</div>
+        <div class="post-title">Molmo2-8B is truly open. Our current serving path could not give it a fair browser-tool test.</div>
+        <div class="post-excerpt">Molmo2-8B deserves praise for being open source in the meaningful sense: weights, data, recipe, and no closed-VLM distillation dependency. We could not run a fair native OpenAI-tools comparison through the current LM Studio Molmo path: structured tools failed at prompt rendering, and the fallback text-call run produced only 2 parsed tool calls.</div>
       </a>
 <a href="/blog/agent-security-model" class="post-card">
         <div class="post-meta">June 2, 2026 &middot; 9 min read</div>

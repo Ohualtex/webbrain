@@ -19,7 +19,7 @@
 //   --tier compact        # SYSTEM_PROMPT_ACT_COMPACT + COMPACT_TOOL_NAMES subset
 //
 // Local chat-template compatibility:
-//   --chat-template-compat off|fold-system|alternating
+//   --chat-template-compat off|fold-system|alternating|alternating-tools
 //   # or set env: LLM_CHAT_TEMPLATE_COMPAT=alternating
 //
 // Freeze (pin everything to a previous snapshot, ignores --tier):
@@ -61,6 +61,7 @@ function parseArgs(argv) {
   const out = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
+    if (a === '--help' || a === '-h') { out.help = true; continue; }
     if (!a.startsWith('--')) continue;
     const key = a.slice(2);
     const next = argv[i + 1];
@@ -70,7 +71,57 @@ function parseArgs(argv) {
   return out;
 }
 
+function printHelp() {
+  process.stdout.write(`Usage:
+  node test/llm/run-scenarios.mjs [options]
+
+Endpoint:
+  --base URL                         OpenAI-compatible base URL (default: http://localhost:8080)
+  --url URL                          Full /v1/chat/completions URL
+  --model NAME                       Model name (default: local)
+  --api-key KEY | --token KEY        Bearer token
+
+Selection:
+  --only IDS                         Comma-separated scenario ids, e.g. 81,82,90
+  --category NAME                    Run only one scenario category
+  --browser chrome|firefox           Browser prompt/tool source (default: chrome)
+  --tier full|mid|compact            Prompt/tool tier; ignored with --freeze
+  --freeze PATH                      Pin system prompt + tools to a snapshot
+  --unprotected                      Strip wrapper + untrusted-content instructions
+
+Run:
+  --tag NAME                         Results tag; default is current timestamp
+  --concurrency N                    Parallel requests (default: 2)
+  --timeout MS                       Per-request timeout (default: 90000)
+  --no-save-request                  Do not write request payloads into result files
+
+Local chat-template compatibility:
+  --chat-template-compat off
+      Send normal OpenAI-style system/user/tool messages and structured tools.
+  --chat-template-compat fold-system
+      Fold system messages into user messages; keep structured tools.
+  --chat-template-compat alternating
+      Alternating user/assistant transcript with no structured tools; asks for text <tool_call>.
+      Use this to reproduce earlier Molmo text-call fallback behavior.
+  --chat-template-compat alternating-tools
+      Alternating user/assistant transcript while still sending structured tools.
+
+Environment:
+  LLM_BASE_URL, LLM_CHAT_URL, LLM_MODEL, LLM_API_KEY, OPENROUTER_API_KEY
+  LLM_CHAT_TEMPLATE_COMPAT, WB_FREEZE_BASELINE
+
+Examples:
+  node test/llm/run-scenarios.mjs --base http://127.0.0.1:1234 --model molmo2-8b --only 81,88
+  node test/llm/run-scenarios.mjs --base "$BASE" --model "$MODEL" --freeze freeze/baseline-2026-05-23.json --chat-template-compat alternating
+`);
+}
+
 const args = parseArgs(process.argv.slice(2));
+if (args.help) {
+  printHelp();
+  process.exit(0);
+}
+
 const BASE = args.base || process.env.LLM_BASE_URL || 'http://localhost:8080';
 const CHAT_URL = args.url || process.env.LLM_CHAT_URL || chatCompletionsUrl(BASE);
 const MODEL = args.model || process.env.LLM_MODEL || 'local';

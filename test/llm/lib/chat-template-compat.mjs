@@ -8,7 +8,7 @@ export function getChatTemplateCompat({ model, value } = {}) {
   // LM Studio's Molmo templates commonly reject `system` and `tool` roles with
   // "Conversation roles must alternate user/assistant/user/assistant/...".
   if (/molmo/i.test(model || '')) {
-    return { mode: 'alternating', source: 'auto:molmo', omitStructuredTools: true };
+    return { mode: 'alternating', source: 'auto:molmo', omitStructuredTools: false };
   }
 
   return { mode: 'off', source: 'default' };
@@ -18,7 +18,7 @@ export function chatTemplateCompatLabel(compat) {
   if (!compat || compat.mode === 'off') return 'off';
   const details = [
     compat.source,
-    compat.omitStructuredTools ? 'text tool calls' : null,
+    compat.omitStructuredTools ? 'text tool calls' : 'structured tools',
   ].filter(Boolean).join(', ');
   return `${compat.mode}${details ? ` (${details})` : ''}`;
 }
@@ -48,8 +48,11 @@ function normalizeCompatValue(value) {
   if (['alternating', 'strict-alternating', 'molmo'].includes(key)) {
     return { mode: 'alternating', source: 'explicit', omitStructuredTools: true };
   }
+  if (['alternating-tools', 'alternating-structured', 'molmo-tools', 'molmo-structured'].includes(key)) {
+    return { mode: 'alternating', source: 'explicit', omitStructuredTools: false };
+  }
   throw new Error(
-    `Bad LLM_CHAT_TEMPLATE_COMPAT value: ${value}. Expected off, fold-system, or alternating.`,
+    `Bad LLM_CHAT_TEMPLATE_COMPAT value: ${value}. Expected off, fold-system, alternating, or alternating-tools.`,
   );
 }
 

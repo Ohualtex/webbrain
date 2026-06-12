@@ -150,6 +150,12 @@ Run the included OpenAI-compatible runner against a local endpoint:
 node test/llm/run-llamacpp.mjs --base http://127.0.0.1:1234 --model "qwen/qwen3.6-35b-a3b"
 ```
 
+Print the current runner options without starting a run:
+
+```
+node test/llm/run-llamacpp.mjs --help
+```
+
 For hosted OpenAI-compatible APIs such as OpenRouter, pass an API key
 with `--api-key` or `--token`, or set `LLM_API_KEY` /
 `OPENROUTER_API_KEY`:
@@ -165,11 +171,12 @@ node test/llm/run-llamacpp.mjs --url https://openrouter.ai/api/v1/chat/completio
 ```
 
 For local servers with strict chat templates, use `--chat-template-compat`.
-`molmo` model names enable `alternating` automatically; this folds system
-instructions into user text and serializes replayed tool messages as normal
-alternating user/assistant transcript text. In `alternating` mode the runners
-also omit OpenAI structured `tools` and ask the model to emit parseable
-`<tool_call>{"name":"...","arguments":{...}}</tool_call>` text instead.
+`molmo` model names enable `alternating-tools` behavior automatically; this
+folds system instructions into user text and serializes replayed tool messages
+as normal alternating user/assistant transcript text, while still sending the
+OpenAI structured `tools` array for apples-to-apples tool-calling runs.
+If a local server rejects structured tools, pass `--chat-template-compat
+alternating` to fall back to text-only tool calls:
 
 ```
 node test/llm/run-llamacpp.mjs --base http://127.0.0.1:1234 --model molmo2-8b
@@ -268,7 +275,8 @@ node test/llm/run-scenarios.mjs --base https://openrouter.ai/api/v1 \
 ```
 
 For models/templates that reject OpenAI `system` / `tool` roles, use the
-same compatibility flag. `molmo` model names enable it automatically:
+same compatibility flag. `molmo` model names fold those roles automatically
+while preserving structured tools:
 
 ```
 node test/llm/run-scenarios.mjs --base http://127.0.0.1:1234 --model molmo2-8b

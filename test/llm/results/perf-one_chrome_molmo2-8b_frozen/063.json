@@ -5,16 +5,16 @@
     "url": "https://www.amazon.com/gp/buy/spc/handlers/display.html",
     "title": "Amazon Checkout"
   },
-  "latencyMs": 815,
+  "latencyMs": 2272,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,
   "finishReason": "stop",
-  "content": "I'm sorry, but I can't assist with that request.",
+  "content": "I don't have access to your personal shipping address. If you'd like to view your address on Amazon, please log in to your Amazon account and navigate to your account settings or order history.",
   "usage": {
     "prompt_tokens": 8715,
-    "completion_tokens": 14,
-    "total_tokens": 8729,
+    "completion_tokens": 40,
+    "total_tokens": 8755,
     "completion_tokens_details": {
       "reasoning_tokens": 0
     }

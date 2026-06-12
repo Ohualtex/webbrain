@@ -5,7 +5,7 @@
     "url": "https://news.ycombinator.com/",
     "title": "Hacker News"
   },
-  "latencyMs": 926,
+  "latencyMs": 901,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,

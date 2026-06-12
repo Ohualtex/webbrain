@@ -5,7 +5,7 @@
     "url": "https://www.google.com/search?q=foo",
     "title": "foo - Google Search"
   },
-  "latencyMs": 769,
+  "latencyMs": 772,
   "error": null,
   "firstToolCall": null,
   "toolCallSource": null,
