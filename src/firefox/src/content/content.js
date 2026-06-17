@@ -641,7 +641,7 @@
       const needle = params.text.toLowerCase();
       const explicit = params.textMatch || '';
       // Include inputs/select/textarea so we can match by placeholder, value, or aria-label
-      const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
+      const sels = 'a, button, [role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="menuitemradio"], [role="menuitemcheckbox"], [role="treeitem"], input:not([type="hidden"]), textarea, select, input[type="button"], input[type="submit"], summary, label, [onclick], [data-action]';
       // Modal scoping: if a topmost modal/dialog is open, restrict the search
       // to elements inside it. Prevents the classic failure where the model
       // types "Publish release" and the resolver clicks the dimmed Publish
@@ -650,11 +650,39 @@
       // reachable via coordinate clicks.
       const _modalRoot = _findTopmostModal();
       const _scope = _modalRoot || document;
-      const all = Array.from(_scope.querySelectorAll(sels));
-      const normalized = all.map(e => ({
-        e,
-        txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
-      })).filter(x => !!x.txt);
+      // Candidate filter: listbox/menu option roles are often kept mounted but
+      // hidden while a custom select is collapsed or virtualized (Radix/MUI/
+      // React-Select). Drop hidden ones so click({text}) can't match — and
+      // falsely "succeed" on — an invisible option; the open-listbox fallback
+      // still surfaces them when the control is actually open. Shared by the
+      // primary pass AND the auto-scroll retry below so they can't diverge.
+      const _keepCandidate = (el) => {
+        const role = (el.getAttribute && el.getAttribute('role')) || '';
+        if (role !== 'option' && role !== 'menuitemradio' && role !== 'menuitemcheckbox' && role !== 'treeitem') return true;
+        try {
+          const r = el.getBoundingClientRect();
+          if (r.width < 1 || r.height < 1) return false;
+          const s = window.getComputedStyle(el);
+          if (s.visibility === 'hidden' || s.display === 'none' || parseFloat(s.opacity) === 0) return false;
+          if (el.closest('[aria-hidden="true"],[hidden]')) return false;
+          return true;
+        } catch (e) { return false; }
+      };
+      // A text field's `value` is content the user typed, NOT a click label.
+      // Matching on it makes click({text}) resolve to the field you just filled
+      // (e.g. a combobox/filter box whose value now equals the needle) instead
+      // of the menu option bearing the same text — the "click succeeds but
+      // nothing happens, model loops forever" bug. Only treat `value` as a label
+      // for button-like inputs; non-input elements with .value (<select>) keep it.
+      const _valIsLabel = (el) => {
+        if (el.tagName === 'TEXTAREA') return false;
+        if (el.tagName !== 'INPUT') return true;
+        const t = (el.getAttribute('type') || 'text').toLowerCase();
+        return t === 'button' || t === 'submit' || t === 'reset';
+      };
+      const _normTxt = (el) => (el.innerText || (_valIsLabel(el) ? el.value : '') || el.placeholder || el.ariaLabel || '').trim().toLowerCase();
+      const all = Array.from(_scope.querySelectorAll(sels)).filter(_keepCandidate);
+      const normalized = all.map(e => ({ e, txt: _normTxt(e) })).filter(x => !!x.txt);
 
       // Build label→input map so we can match label text and resolve to associated input
       const labelMap = new Map();
@@ -710,11 +738,8 @@
           // Re-query after scroll. Re-resolve the modal root in case the
           // dialog opened/closed during scroll.
           const _retryScope = _findTopmostModal() || document;
-          const allRetry = Array.from(_retryScope.querySelectorAll(sels));
-          const normRetry = allRetry.map(e => ({
-            e,
-            txt: (e.innerText || e.value || e.placeholder || e.ariaLabel || '').trim().toLowerCase(),
-          })).filter(x => !!x.txt);
+          const allRetry = Array.from(_retryScope.querySelectorAll(sels)).filter(_keepCandidate);
+          const normRetry = allRetry.map(e => ({ e, txt: _normTxt(e) })).filter(x => !!x.txt);
           for (const m of modes) {
             if (m === 'exact') matches = normRetry.filter(x => x.txt === needle);
             else if (m === 'prefix') matches = normRetry.filter(x => x.txt.startsWith(needle));
