@@ -35,6 +35,7 @@
   let targetCursorEl = null;
   let targetOutlineEl = null;
   let targetElement = null;
+  let targetRectOverride = null;
   let targetTimer = null;
   let targetRaf = 0;
   let indicatorsActive = false;
@@ -238,6 +239,7 @@
   }
 
   function getTargetRect() {
+    if (targetRectOverride) return targetRectOverride;
     if (!targetElement || typeof targetElement.getBoundingClientRect !== 'function') return null;
     const rect = targetElement.getBoundingClientRect();
     if (
@@ -298,6 +300,7 @@
 
   function hideTargetCursor() {
     targetElement = null;
+    targetRectOverride = null;
     if (targetTimer) {
       clearTimeout(targetTimer);
       targetTimer = null;
@@ -309,7 +312,7 @@
     if (targetCursorEl) targetCursorEl.style.opacity = '0';
     if (targetOutlineEl) targetOutlineEl.style.opacity = '0';
     setTimeout(() => {
-      if (targetElement) return;
+      if (targetElement || targetRectOverride) return;
       targetCursorEl?.parentNode?.removeChild(targetCursorEl);
       targetOutlineEl?.parentNode?.removeChild(targetOutlineEl);
       targetCursorEl = null;
@@ -329,6 +332,49 @@
     if (!root) return;
 
     targetElement = el;
+    targetRectOverride = null;
+    if (targetOutlineEl) {
+      targetOutlineEl.style.display = '';
+    } else {
+      targetOutlineEl = createTargetOutline();
+      root.appendChild(targetOutlineEl);
+    }
+    if (targetCursorEl) {
+      targetCursorEl.style.display = '';
+    } else {
+      targetCursorEl = createTargetCursor();
+      root.appendChild(targetCursorEl);
+    }
+    targetCursorEl.dataset.source = String(source || 'interaction');
+
+    placeTargetOverlay();
+    scheduleTargetExpiry();
+  }
+
+  function showTargetRect(rect, source = 'interaction') {
+    if (!rect) return;
+    const x = Number(rect.x);
+    const y = Number(rect.y);
+    const w = Math.max(1, Number(rect.w ?? rect.width ?? 1));
+    const h = Math.max(1, Number(rect.h ?? rect.height ?? 1));
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(w) || !Number.isFinite(h)) return;
+
+    injectStyles();
+    const root = document.body || document.documentElement;
+    if (!root) return;
+
+    const width = Math.max(w, 28);
+    const height = Math.max(h, 28);
+    targetElement = null;
+    targetRectOverride = {
+      left: clamp(x - Math.max(0, width - w) / 2 - 4, 4, Math.max(4, window.innerWidth - 12)),
+      top: clamp(y - Math.max(0, height - h) / 2 - 4, 4, Math.max(4, window.innerHeight - 12)),
+      width: Math.min(width + 8, Math.max(1, window.innerWidth - 8)),
+      height: Math.min(height + 8, Math.max(1, window.innerHeight - 8)),
+      rawWidth: width,
+      rawHeight: height,
+    };
+
     if (targetOutlineEl) {
       targetOutlineEl.style.display = '';
     } else {
@@ -432,7 +478,7 @@
 
   window.addEventListener('scroll', scheduleTargetUpdate, true);
   window.addEventListener('resize', scheduleTargetUpdate, true);
-  window.__webbrainAgentIndicator = { showTarget, hideTarget: hideTargetCursor };
+  window.__webbrainAgentIndicator = { showTarget, showTargetRect, hideTarget: hideTargetCursor };
 
   browser.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (!msg || typeof msg.type !== 'string') return;
@@ -451,6 +497,10 @@
         break;
       case 'WB_SHOW_AFTER_TOOL_USE':
         showAfterToolUse();
+        sendResponse({ ok: true });
+        break;
+      case 'WB_SHOW_AGENT_TARGET':
+        if (msg.rect) showTargetRect(msg.rect, msg.source || 'message');
         sendResponse({ ok: true });
         break;
       // Unknown messages are silently ignored — other content scripts in
