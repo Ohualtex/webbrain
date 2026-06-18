@@ -705,10 +705,7 @@ function renderProviders() {
   // universal enough.
   const providerConfigs = {
     webbrain_cloud: {
-      fields: [
-        { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'webbrain-cloud 1.0' },
-        { key: 'baseUrl', labelKey: 'st.provider.field.api_base_url', type: 'text', placeholder: 'https://api.webbrain.one/v1' },
-      ],
+      fields: [],
     },
     llamacpp: {
       fields: [
@@ -941,7 +938,11 @@ function renderProviders() {
       ? `<div style="margin-top:10px;padding:10px 12px;border-radius:6px;
                   background:rgba(74,144,217,0.08);border:1px solid rgba(74,144,217,0.22);
                   font-size:12px;color:var(--text2);line-height:1.5;">
-           Free daily WebBrain Cloud usage is included. For more usage, subscribe at
+           Free daily WebBrain Cloud usage is included. Requests go through api.webbrain.one; by default we log
+           metadata for quota and debugging, not prompt text, page content, screenshots, or model responses.
+           <a href="https://webbrain.one/privacy" target="_blank" rel="noopener noreferrer"
+              style="color:var(--accent,#4A90D9);text-decoration:none;">Privacy policy</a>.
+           For more usage, subscribe at
            <a href="https://webbrain.one/subscribe" target="_blank" rel="noopener noreferrer"
               style="color:var(--accent,#4A90D9);text-decoration:none;">webbrain.one/subscribe</a>.
          </div>`

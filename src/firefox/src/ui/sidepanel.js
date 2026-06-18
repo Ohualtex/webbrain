@@ -120,10 +120,10 @@ if (globalThis.browser?.storage?.onChanged) {
     cloudReady = true;
     localModelChoices = [];
     if (providerBody) {
-      providerBody.textContent = 'WebBrain Cloud is ready with a free daily allowance. You can switch to local models later from Settings.';
+      providerBody.textContent = 'WebBrain Cloud is ready with a free daily allowance. Requests go through api.webbrain.one; debug and quota logs store metadata only by default, not prompt text, screenshots, or responses.';
     }
     if (providerStatus) {
-      providerStatus.innerHTML = 'Using WebBrain Cloud. More usage: <a href="https://webbrain.one/subscribe" target="_blank" rel="noopener noreferrer">Subscribe</a>.';
+      providerStatus.innerHTML = 'Using WebBrain Cloud. <a href="https://webbrain.one/privacy" target="_blank" rel="noopener noreferrer">Privacy</a> | <a href="https://webbrain.one/subscribe" target="_blank" rel="noopener noreferrer">Subscribe</a>.';
     }
     providerList?.classList.add('hidden');
     localModels?.classList.add('hidden');
