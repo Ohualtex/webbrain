@@ -257,6 +257,9 @@
     <loc>https://webbrain.one/privacy</loc>
   </url>
   <url>
+    <loc>https://webbrain.one/subscribe/</loc>
+  </url>
+  <url>
     <loc>https://webbrain.one/blog/</loc>
   </url>
 </urlset>

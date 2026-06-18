@@ -79,6 +79,8 @@ const FAQ_KEYS = [
   'faq.contribute',
 ];
 
+const STRIPE_SUBSCRIBE_URL = 'https://buy.stripe.com/bJebJ13at2kc5XP7eY8g00a';
+
 function escHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
@@ -161,6 +163,82 @@ function buildSoftwareJsonLd(dict, locale) {
     screenshot: `${SITE_ORIGIN}/og-image.svg`,
   };
   return JSON.stringify(payload, null, 2);
+}
+
+function buildSubscribeHtml() {
+  return `<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WebBrain Cloud Subscribe</title>
+  <meta name="robots" content="noindex, follow">
+  <meta http-equiv="refresh" content="4; url=${STRIPE_SUBSCRIBE_URL}">
+  <link rel="canonical" href="${SITE_ORIGIN}/subscribe/">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background: #0b0e17;
+      color: #e4e4ec;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Inter, Roboto, sans-serif;
+      line-height: 1.6;
+    }
+    main { max-width: 520px; text-align: center; }
+    .brand {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 22px;
+      color: #a78bfa;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: clamp(28px, 5vw, 42px);
+      line-height: 1.1;
+    }
+    p {
+      margin: 0 auto 18px;
+      color: #a7adbd;
+      font-size: 16px;
+    }
+    a {
+      color: #a78bfa;
+      font-weight: 700;
+      text-decoration: none;
+    }
+    a:hover { text-decoration: underline; }
+    .spinner {
+      width: 30px;
+      height: 30px;
+      margin: 26px auto;
+      border: 3px solid rgba(167, 139, 250, 0.25);
+      border-top-color: #a78bfa;
+      border-radius: 50%;
+      animation: spin 0.85s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">WebBrain Cloud</div>
+    <h1>Stripe'a yonlendiriliyorsunuz</h1>
+    <p>Odeme sayfasi birkac saniye icinde acilacak.</p>
+    <p>Yonlendirme calismazsa <a href="${STRIPE_SUBSCRIBE_URL}">Stripe checkout'u ac</a>.</p>
+    <div class="spinner" aria-hidden="true"></div>
+  </main>
+  <script>
+    setTimeout(function () {
+      window.location.href = ${JSON.stringify(STRIPE_SUBSCRIBE_URL)};
+    }, 3500);
+  </script>
+</body>
+</html>
+`;
 }
 
 function applyTemplate(template, dict, locale) {
@@ -251,6 +329,7 @@ async function main() {
   const sitemapUrls = [
     ...LOCALES.map((l) => ({ loc: homeUrlFor(l), hreflang: l.code })),
     { loc: `${SITE_ORIGIN}/privacy` },
+    { loc: `${SITE_ORIGIN}/subscribe/` },
     { loc: `${SITE_ORIGIN}/blog/` },
   ];
   const sitemap = [
@@ -269,6 +348,11 @@ async function main() {
   ].join('\n');
   await writeFile(path.join(ROOT, 'sitemap.xml'), sitemap, 'utf8');
   console.log('✓ wrote sitemap.xml');
+
+  const subscribeDir = path.join(ROOT, 'subscribe');
+  await mkdir(subscribeDir, { recursive: true });
+  await writeFile(path.join(subscribeDir, 'index.html'), buildSubscribeHtml(), 'utf8');
+  console.log('✓ wrote subscribe/index.html');
 
   // robots.txt
   const robots = [
