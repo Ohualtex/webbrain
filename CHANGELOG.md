@@ -6,6 +6,17 @@ This changelog was generated from the repository Git history and release tags. V
 
 ## [Unreleased]
 
+## [14.0.0] - 2026-06-18
+
+### Changed
+- WebBrain Cloud is now the default provider for new WebBrain configurations.
+- Updated release metadata, Settings subtitle versions, architecture docs, and Chrome / Firefox manifests for 14.0.0.
+
+### Fixed
+- Context compaction now treats screenshots as a bounded vision-token cost and uses a short post-compaction cooldown, preventing screenshot-heavy Chrome and Firefox runs from compacting again on every step.
+- Text clicks now ignore hidden ARIA option / menu / tree items and no longer treat editable input values as click labels, preventing collapsed or virtualized options and filter boxes from being selected as false matches.
+- Firefox scroll-retry text clicks now reuse the same visibility and editable-value filtering as the primary matcher.
+
 ## [13.1.0] - 2026-06-17
 
 ### Changed
