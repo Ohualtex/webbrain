@@ -704,6 +704,15 @@ const PROMPT_TIER_FIELD = {
   ],
 };
 
+const CONTEXT_WINDOW_FIELD = {
+  key: 'contextWindow',
+  labelKey: 'st.provider.field.context_window',
+  type: 'number',
+  placeholder: '16384',
+  min: 4096,
+  step: 1024,
+};
+
 const COST_ESTIMATE_FIELDS = [
   { key: 'inputCostPerMillionUsd', labelKey: 'st.provider.field.input_cost_per_million', type: 'number', placeholder: '3.00' },
   { key: 'outputCostPerMillionUsd', labelKey: 'st.provider.field.output_cost_per_million', type: 'number', placeholder: '15.00' },
@@ -735,6 +744,7 @@ function renderProviders() {
       fields: [
         { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://localhost:8080' },
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'qwen/qwen3.5-9b' },
+        CONTEXT_WINDOW_FIELD,
         { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
         PROMPT_TIER_FIELD,
       ],
@@ -743,6 +753,7 @@ function renderProviders() {
       fields: [
         { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://localhost:11434/v1' },
         { key: 'model', labelKey: 'st.provider.field.model', type: 'text', placeholder: 'llama3.1' },
+        CONTEXT_WINDOW_FIELD,
         { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
         PROMPT_TIER_FIELD,
       ],
@@ -751,6 +762,7 @@ function renderProviders() {
       fields: [
         { key: 'baseUrl', labelKey: 'st.provider.field.server_url', type: 'text', placeholder: 'http://localhost:1234/v1' },
         { key: 'model', labelKey: 'st.provider.field.model_optional', type: 'text', placeholderKey: 'st.provider.field.model_loaded_hint' },
+        CONTEXT_WINDOW_FIELD,
         { key: 'supportsVision', labelKey: 'st.provider.field.supports_vision', type: 'checkbox' },
         PROMPT_TIER_FIELD,
       ],
@@ -954,11 +966,14 @@ function renderProviders() {
         const apiKeyLink = (field.key === 'apiKey' && config.apiKeyUrl)
           ? ` <a href="${escapeHtml(config.apiKeyUrl)}" target="_blank" rel="noopener noreferrer" style="font-size:11px;margin-left:6px;color:var(--accent,#4A90D9);text-decoration:none;">${escapeHtml(t('st.providers.get_api_key'))}</a>`
           : '';
+        const minAttr = field.min != null ? ` min="${escapeHtml(field.min)}"` : '';
+        const stepAttr = field.step != null ? ` step="${escapeHtml(field.step)}"` : '';
+        const value = config[field.key] ?? '';
         fieldsHTML += `
           <div class="field">
             <label>${escapeHtml(label)}${apiKeyLink}</label>
-            <input type="${field.type}" data-provider="${id}" data-key="${field.key}" ${listAttr}
-                   value="${escapeHtml(config[field.key] || '')}" placeholder="${escapeHtml(placeholder)}">
+            <input type="${field.type}" data-provider="${id}" data-key="${field.key}" data-type="${field.type}" ${listAttr}${minAttr}${stepAttr}
+                   value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}">
             ${datalistHTML}
             ${loadBtnHTML}
           </div>
@@ -1275,6 +1290,9 @@ async function saveProvider(id, { showFlash = true } = {}) {
   inputs.forEach(input => {
     if (input.dataset.type === 'checkbox' || input.type === 'checkbox') {
       config[input.dataset.key] = input.checked;
+    } else if (input.dataset.type === 'number' || input.type === 'number') {
+      const n = Number(input.value);
+      config[input.dataset.key] = Number.isFinite(n) && n > 0 ? n : '';
     } else {
       config[input.dataset.key] = input.value;
     }
@@ -1323,6 +1341,9 @@ function syncInputsIntoProvidersData() {
     if (!id || !key || !providersData[id]) return;
     if (input.dataset.type === 'checkbox' || input.type === 'checkbox') {
       providersData[id][key] = input.checked;
+    } else if (input.dataset.type === 'number' || input.type === 'number') {
+      const n = Number(input.value);
+      providersData[id][key] = Number.isFinite(n) && n > 0 ? n : '';
     } else {
       providersData[id][key] = input.value;
     }
