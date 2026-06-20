@@ -456,6 +456,18 @@
   "blogPost": [
     {
       "@type": "BlogPosting",
+      "headline": "Gemma 4 31B QAT quietly becomes the best local Gemma planner we have tested",
+      "url": "https://webbrain.one/blog/gemma-4-31b-qat-planner-benchmark",
+      "datePublished": "2026-06-20",
+      "description": "We tested google/gemma-4-31B-it-qat-w4a16-ct through vLLM against WebBrain's frozen first-tool-call browser-agent harness. It improves over the older Gemma 4 31B int4 run and narrowly edges Qwen 3.6 27B on strict first-action quality while running much faster.",
+      "author": {
+        "@type": "Person",
+        "name": "Emre Sokullu",
+        "url": "https://emresokullu.com"
+      }
+    },
+    {
+      "@type": "BlogPosting",
       "headline": "DiffusionGemma hits 0.35s median in the WebBrain local planner bench",
       "url": "https://webbrain.one/blog/local-planner-q4-june-2026",
       "datePublished": "2026-06-19",
@@ -631,7 +643,12 @@
     <p class="page-sub">Short write-ups on design decisions, failure modes, and benchmarks from building an open-source AI browser agent.</p>
 
     <div class="post-list">
-      <a href="/blog/local-planner-q4-june-2026" class="post-card">
+      <a href="/blog/gemma-4-31b-qat-planner-benchmark" class="post-card">
+        <div class="post-meta">June 20, 2026 &middot; 5 min read</div>
+        <div class="post-title">Gemma 4 31B QAT quietly becomes the best local Gemma planner we have tested</div>
+        <div class="post-excerpt">Gemma 4 31B QAT is not branded like a new generation, but in WebBrain&#39;s local planner bench it behaves like a meaningful upgrade: 95/100 parsed calls, 19% exact, 37% tool-name match, and 0.55s median latency.</div>
+      </a>
+<a href="/blog/local-planner-q4-june-2026" class="post-card">
         <div class="post-meta">June 19, 2026 &middot; 9 min read</div>
         <div class="post-title">DiffusionGemma hits 0.35s median in the WebBrain local planner bench</div>
         <div class="post-excerpt">Gemma 4 12B Coder, North Mini Code, and DiffusionGemma all completed the frozen legacy tool-call bench through different serving paths. DiffusionGemma was the speed surprise under vLLM and also handled the vision probe, but its diffusion-style generation still needs more WebBrain-specific reliability work. VibeThinker confirmed its own model-card warning: it is not a browser-agent tool-calling model.</div>
