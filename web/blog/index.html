@@ -456,6 +456,18 @@
   "blogPost": [
     {
       "@type": "BlogPosting",
+      "headline": "Gemma 4 12B QAT is fast enough for WebBrain, but Qwen 3.5 9B still routes a little better",
+      "url": "https://webbrain.one/blog/gemma-4-12b-qat-planner-benchmark",
+      "datePublished": "2026-06-20",
+      "description": "We tested google/gemma-4-12B-it-qat-w4a16-ct through vLLM against WebBrain's frozen first-tool-call browser-agent harness at concurrency 8, then ran the same vision probe used in earlier local-model posts.",
+      "author": {
+        "@type": "Person",
+        "name": "Emre Sokullu",
+        "url": "https://emresokullu.com"
+      }
+    },
+    {
+      "@type": "BlogPosting",
       "headline": "Gemma 4 31B QAT quietly becomes the best local Gemma planner we have tested",
       "url": "https://webbrain.one/blog/gemma-4-31b-qat-planner-benchmark",
       "datePublished": "2026-06-20",
@@ -643,7 +655,12 @@
     <p class="page-sub">Short write-ups on design decisions, failure modes, and benchmarks from building an open-source AI browser agent.</p>
 
     <div class="post-list">
-      <a href="/blog/gemma-4-31b-qat-planner-benchmark" class="post-card">
+      <a href="/blog/gemma-4-12b-qat-planner-benchmark" class="post-card">
+        <div class="post-meta">June 20, 2026 &middot; 6 min read</div>
+        <div class="post-title">Gemma 4 12B QAT is fast enough for WebBrain, but Qwen 3.5 9B still routes a little better</div>
+        <div class="post-excerpt">Gemma 4 12B QAT lands as a very fast local WebBrain planner: 92/100 parsed calls, 14% exact, 33% tool-name match, 0.43s median per request, and a working but imperfect vision probe.</div>
+      </a>
+<a href="/blog/gemma-4-31b-qat-planner-benchmark" class="post-card">
         <div class="post-meta">June 20, 2026 &middot; 7 min read</div>
         <div class="post-title">Gemma 4 31B QAT quietly becomes the best local Gemma planner we have tested</div>
         <div class="post-excerpt">Gemma 4 31B QAT is not branded like a new generation, but in WebBrain&#39;s local planner bench it behaves like a meaningful upgrade: 95/100 parsed calls, 19% exact, 37% tool-name match, and 0.55s median latency.</div>
