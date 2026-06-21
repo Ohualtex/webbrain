@@ -3693,6 +3693,44 @@ test('progress intent classifier accepts multilingual structured intent and fail
   }
 });
 
+test('progress session changes remove stale pinned ledger prompts', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+    const tabId = 807;
+    agent.conversationModes.set(tabId, 'act');
+    agent._persist = () => {};
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Follow every stargazer on this page.' },
+    ]);
+    allowProgress(agent, tabId, ['follow']);
+    agent._progressUpdate(tabId, {
+      items: [{ id: 'octocat', label: 'octocat', action: 'follow', status: 'pending' }],
+    });
+    assert.ok(agent._findProgressLedgerIndex(agent.conversations.get(tabId)) >= 0, `${AgentClass.name}: setup did not pin ledger`);
+
+    agent.conversations.get(tabId).push({ role: 'assistant', content: 'Paused with one row unresolved.' });
+    agent.conversations.get(tabId).push({ role: 'user', content: 'Summarize this repository.' });
+    agent._chatWithCostAllowance = async () => ({
+      content: JSON.stringify({
+        mode: 'read_only',
+        allowedActions: [],
+        forbiddenActions: [],
+        targets: [],
+        confidence: 0.98,
+        pageScopePolicy: 'none',
+      }),
+    });
+
+    const session = await agent._ensureProgressSessionForCurrentTask(tabId, {
+      provider: { chat: async () => ({ content: '{}' }) },
+    });
+    assert.equal(session.mode, 'read_only', `${AgentClass.name}: read-only task was not classified`);
+    assert.equal(agent._findProgressLedgerIndex(agent.conversations.get(tabId)), -1, `${AgentClass.name}: stale ledger prompt survived task change`);
+    assert.equal(agent._shouldBlockDoneForProgress(tabId), false, `${AgentClass.name}: stale row blocked unrelated task`);
+  }
+});
+
 test('progress ledger auto-detects item action clicks (chrome & firefox)', () => {
   const result = {
     success: true,

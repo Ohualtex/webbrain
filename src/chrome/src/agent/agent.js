@@ -3427,6 +3427,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     messages.splice(insertAt, 0, msg);
   }
 
+  _syncProgressSessionPrompt(tabId) {
+    this._syncProgressLedgerMessage(tabId);
+    if (typeof this._persist === 'function') this._persist(tabId);
+  }
+
   _progressUpdate(tabId, args = {}, opts = {}) {
     const items = Array.isArray(args.items)
       ? args.items
@@ -3615,7 +3620,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const existing = this._currentProgressSession(tabId, { pageScope });
     if (existing) return existing;
     if (this._currentTaskIsProgressContinuation(tabId)) {
-      return this._deriveProgressSessionFromRows(tabId);
+      const session = this._deriveProgressSessionFromRows(tabId);
+      this._syncProgressSessionPrompt(tabId);
+      return session;
     }
     const classified = await this._classifyProgressIntentWithProvider(tabId, {
       provider: opts.provider,
@@ -3624,9 +3631,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       pageScope,
     });
     if (!classified || (classified.mode === 'active' && !isProgressIntentActive(classified))) {
-      return this._inactiveProgressSession(tabId, taskText, pageScope, classified?.reason || 'progress intent unavailable');
+      const session = this._inactiveProgressSession(tabId, taskText, pageScope, classified?.reason || 'progress intent unavailable');
+      this._syncProgressSessionPrompt(tabId);
+      return session;
     }
-    return this._setProgressSession(tabId, classified, { taskText, pageScope, source: 'classifier' });
+    const session = this._setProgressSession(tabId, classified, { taskText, pageScope, source: 'classifier' });
+    this._syncProgressSessionPrompt(tabId);
+    return session;
   }
 
   _activeProgressLedgerRows(tabId) {
