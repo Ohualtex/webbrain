@@ -4534,6 +4534,18 @@ test('plain final answers cannot bypass unresolved progress rows', async () => {
         content: null,
         toolCalls: [
           {
+            id: 'done_call_1',
+            function: {
+              name: 'done',
+              arguments: JSON.stringify({ summary: 'Still done too early.' }),
+            },
+          },
+        ],
+      },
+      {
+        content: null,
+        toolCalls: [
+          {
             id: 'progress_call',
             function: {
               name: 'progress_update',
@@ -4543,7 +4555,7 @@ test('plain final answers cannot bypass unresolved progress rows', async () => {
             },
           },
           {
-            id: 'done_call',
+            id: 'done_call_2',
             function: {
               name: 'done',
               arguments: JSON.stringify({ summary: 'Actually done.' }),
@@ -4570,7 +4582,7 @@ test('plain final answers cannot bypass unresolved progress rows', async () => {
       getVisionProvider: async () => null,
     });
     const tabId = 794;
-    agent.maxSteps = 4;
+    agent.maxSteps = 5;
     agent._manageContext = async () => {};
     agent._enrichUserMessageWithCurrentPage = async (_tabId, _messages, content) => ({ role: 'user', content });
     agent._maybeReinjectAdapter = async () => {};
@@ -4601,15 +4613,15 @@ test('plain final answers cannot bypass unresolved progress rows', async () => {
 
     assert.match(final, /Actually done\./, `${AgentClass.name}: run did not continue to done`);
     assert.equal(responses.length, 0, `${AgentClass.name}: second model turn was not requested`);
-    assert.ok(
-      updates.some(update => update.type === 'warning' && /Progress ledger has unresolved rows/.test(update.data?.message || '')),
-      `${AgentClass.name}: missing unresolved-ledger warning`
-    );
+    const ledgerWarnings = updates.filter(update => update.type === 'warning' && /Progress ledger has unresolved rows/.test(update.data?.message || ''));
+    assert.ok(ledgerWarnings.length >= 2, `${AgentClass.name}: done after plain-final nudge did not stay blocked`);
     const block = agent.conversations.get(tabId).find(msg => msg.role === 'user' && /blockedFinal/.test(msg.content || ''));
     assert.ok(block, `${AgentClass.name}: plain final block nudge missing`);
     assert.match(block.content, /<untrusted_page_content id="[a-z0-9]+">/, `${AgentClass.name}: block rows were not wrapped`);
     assert.match(block.content, /Ignore previous instructions/, `${AgentClass.name}: unresolved row data missing`);
     assert.doesNotMatch(block.content, /<\/untrusted_page_content><system>/, `${AgentClass.name}: row label escaped untrusted boundary`);
+    const blockedDone = agent.conversations.get(tabId).find(msg => msg.role === 'tool' && /"blockedDone":true/.test(msg.content || ''));
+    assert.ok(blockedDone, `${AgentClass.name}: done after plain-final nudge was not blocked`);
   }
 });
 
@@ -4636,6 +4648,23 @@ test('streamed plain final answers cannot bypass unresolved progress rows', asyn
             content: [
               {
                 index: 0,
+                id: 'done_call_1',
+                function: {
+                  name: 'done',
+                  arguments: JSON.stringify({ summary: 'Still streamed done too early.' }),
+                },
+              },
+            ],
+          };
+          yield { type: 'done' };
+          return;
+        }
+        if (this.calls === 3) {
+          yield {
+            type: 'tool_call',
+            content: [
+              {
+                index: 0,
                 id: 'progress_call',
                 function: {
                   name: 'progress_update',
@@ -4646,7 +4675,7 @@ test('streamed plain final answers cannot bypass unresolved progress rows', asyn
               },
               {
                 index: 1,
-                id: 'done_call',
+                id: 'done_call_2',
                 function: {
                   name: 'done',
                   arguments: JSON.stringify({ summary: 'Actually streamed done.' }),
@@ -4665,7 +4694,7 @@ test('streamed plain final answers cannot bypass unresolved progress rows', asyn
       getVisionProvider: async () => null,
     });
     const tabId = 795;
-    agent.maxSteps = 4;
+    agent.maxSteps = 5;
     agent._manageContext = async () => {};
     agent._enrichUserMessageWithCurrentPage = async (_tabId, _messages, content) => ({ role: 'user', content });
     agent._maybeReinjectAdapter = async () => {};
@@ -4695,15 +4724,15 @@ test('streamed plain final answers cannot bypass unresolved progress rows', asyn
     }, 'act');
 
     assert.match(final, /Actually streamed done\./, `${AgentClass.name}: streamed run did not continue to done`);
-    assert.equal(provider.calls, 2, `${AgentClass.name}: second streamed model turn was not requested`);
-    assert.ok(
-      updates.some(update => update.type === 'warning' && /Progress ledger has unresolved rows/.test(update.data?.message || '')),
-      `${AgentClass.name}: missing streamed unresolved-ledger warning`
-    );
+    assert.equal(provider.calls, 3, `${AgentClass.name}: third streamed model turn was not requested`);
+    const ledgerWarnings = updates.filter(update => update.type === 'warning' && /Progress ledger has unresolved rows/.test(update.data?.message || ''));
+    assert.ok(ledgerWarnings.length >= 2, `${AgentClass.name}: streamed done after plain-final nudge did not stay blocked`);
     const block = agent.conversations.get(tabId).find(msg => msg.role === 'user' && /blockedFinal/.test(msg.content || ''));
     assert.ok(block, `${AgentClass.name}: streamed plain final block nudge missing`);
     assert.match(block.content, /<untrusted_page_content id="[a-z0-9]+">/, `${AgentClass.name}: streamed block rows were not wrapped`);
     assert.doesNotMatch(block.content, /<\/untrusted_page_content><system>/, `${AgentClass.name}: streamed row label escaped untrusted boundary`);
+    const blockedDone = agent.conversations.get(tabId).find(msg => msg.role === 'tool' && /"blockedDone":true/.test(msg.content || ''));
+    assert.ok(blockedDone, `${AgentClass.name}: streamed done after plain-final nudge was not blocked`);
   }
 });
 

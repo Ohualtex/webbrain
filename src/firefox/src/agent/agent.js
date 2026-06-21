@@ -2552,6 +2552,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       || c.startsWith('[Context was too large')
       || c.startsWith('[Agent scratchpad')
       || c.startsWith('[Agent progress ledger')
+      || c.startsWith('[PROGRESS LEDGER BLOCK')
       || c.startsWith('[NAVIGATION OCCURRED')
       || c.startsWith('[Auto-screenshot')
       || c.startsWith('[UNTRUSTED CAPTURE')
