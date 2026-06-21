@@ -2037,6 +2037,25 @@ test('scheduler validation rejects ambiguous, too-soon, and malformed schedules'
       resume_instruction: 'bad',
     }, now).error, /at least 3 seconds/, `${label}: too-soon resume time should fail`);
 
+    assert.equal(SchedulerMod.validateResumeArgs({
+      after_seconds: 604800,
+      reason: 'wait up to a week',
+      resume_instruction: 'try again',
+    }, now).ok, true, `${label}: seven-day resume should pass`);
+
+    assert.match(SchedulerMod.validateResumeArgs({
+      after_seconds: 604801,
+      reason: 'too late',
+      resume_instruction: 'bad',
+    }, now).error, /no more than 168 hours/, `${label}: over-seven-day resume should fail`);
+
+    assert.equal(SchedulerMod.validateTaskArgs({
+      title: 'Valid week task',
+      prompt: 'check',
+      schedule: { type: 'once', after_seconds: 604800 },
+      target: { type: 'current_tab' },
+    }, now).ok, true, `${label}: seven-day task should pass`);
+
     assert.match(SchedulerMod.validateTaskArgs({
       title: 'Bad',
       prompt: 'check',
