@@ -4246,8 +4246,6 @@ test('progress ledger done-blocking only applies to current task rows', () => {
     agent.conversations.set(tabId, [
       { role: 'system', content: 'sys' },
       { role: 'user', content: 'Follow every stargazer on this page.' },
-      { role: 'assistant', content: 'Paused with one row unresolved.' },
-      { role: 'user', content: 'Collect email addresses for every stargazer on this page.' },
     ]);
     agent._progressUpdate(tabId, {
       items: [
@@ -4255,6 +4253,12 @@ test('progress ledger done-blocking only applies to current task rows', () => {
         { id: 'acme', label: 'Acme Corp', status: 'pending' },
       ],
     });
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Follow every stargazer on this page.' },
+      { role: 'assistant', content: 'Paused with one row unresolved.' },
+      { role: 'user', content: 'Collect email addresses for every stargazer on this page.' },
+    ]);
 
     assert.equal(agent._hasProgressLedgerContext(tabId), true, `${AgentClass.name}: setup should still have generic progress context`);
     assert.equal(agent._shouldBlockDoneForProgress(tabId), false, `${AgentClass.name}: stale row blocked a collect-email task`);
@@ -4287,6 +4291,42 @@ test('progress ledger done-blocking only applies to current task rows', () => {
     });
     assert.equal(agent._shouldBlockDoneForProgress(matchingTabId), true, `${AgentClass.name}: matching actionless row did not block current task`);
     assert.deepEqual(agent._progressDoneBlock(matchingTabId).unresolved.map(row => row.id), ['acme']);
+  }
+});
+
+test('progress ledger excludes stale same-action rows from new repeated tasks', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+    const tabId = 802;
+    agent.conversationModes.set(tabId, 'act');
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Follow every stargazer on repo A.' },
+    ]);
+    agent._progressUpdate(tabId, {
+      items: [{ id: 'repo-a-user', label: 'repo-a-user', action: 'follow', status: 'pending' }],
+    });
+
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Follow every stargazer on repo A.' },
+      { role: 'assistant', content: 'Paused with one row unresolved.' },
+      { role: 'user', content: 'Follow every stargazer on repo B.' },
+    ]);
+    assert.equal(agent._shouldBlockDoneForProgress(tabId), false, `${AgentClass.name}: stale same-action row blocked before current rows existed`);
+
+    agent._progressUpdate(tabId, {
+      items: [{ id: 'repo-b-user', label: 'repo-b-user', action: 'follow', status: 'pending' }],
+    });
+    const block = agent._progressDoneBlock(tabId);
+    assert.deepEqual(block.unresolved.map(row => row.id), ['repo-b-user'], `${AgentClass.name}: done block included stale same-action rows`);
+
+    agent._progressUpdate(tabId, {
+      items: [{ id: 'repo-b-user', label: 'repo-b-user', action: 'follow', status: 'processed' }],
+    });
+    const final = agent._appendProgressLedgerToFinal(tabId, 'Done.');
+    assert.match(final, /repo-b-user/, `${AgentClass.name}: current same-action row missing from final appendix`);
+    assert.doesNotMatch(final, /repo-a-user/, `${AgentClass.name}: stale same-action row leaked into final appendix`);
   }
 });
 

@@ -2493,8 +2493,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         error: `progress_update: invalid status value(s): ${invalid.slice(0, 6).join(', ')}. Use exactly one of pending, acted, processed, skipped, or failed.`,
       };
     }
+    const taskKey = opts.taskKey || this._currentProgressTaskKey(tabId);
+    const scopedItems = taskKey
+      ? items.map(item => (item && typeof item === 'object' && !Array.isArray(item)
+        ? { ...item, taskKey }
+        : item))
+      : items;
     const current = this.progressLedgers.get(tabId) || [];
-    const result = upsertLedgerItems(current, items, { source: opts.source || args.source || 'model' });
+    const result = upsertLedgerItems(current, scopedItems, { source: opts.source || args.source || 'model', taskKey });
     if (!result.changed) {
       return { success: false, error: 'progress_update: no valid items were provided. Each item needs a stable id.' };
     }
@@ -2630,21 +2636,45 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       && this._currentTaskIsProgressContinuation(tabId);
   }
 
-  _progressRowMatchesTaskText(row, text) {
+  _progressTaskKeyForText(text) {
+    return String(text || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 240);
+  }
+
+  _currentProgressTaskKey(tabId) {
+    if (this._currentTaskIsProgressContinuation(tabId)) {
+      const keys = Array.from(new Set(
+        this._activeProgressLedgerRows(tabId)
+          .map(row => String(row?.taskKey || '').trim())
+          .filter(Boolean)
+      ));
+      if (keys.length === 1) return keys[0];
+    }
+    return this._progressTaskKeyForText(this._latestTaskText(tabId));
+  }
+
+  _progressRowMatchesTaskText(row, text, currentTaskKey = '') {
+    const rowTaskKey = String(row?.taskKey || '').trim();
+    if (rowTaskKey) return rowTaskKey === currentTaskKey;
     const taskWords = new Set(String(text || '').toLowerCase().match(/[a-z0-9]+/g) || []);
     if (!taskWords.size) return false;
+    const rowWords = String(`${row?.id || ''} ${row?.label || ''} ${row?.target || ''} ${row?.url || ''}`)
+      .toLowerCase()
+      .split(/[^a-z0-9]+/g)
+      .filter(Boolean);
+    const rowMatchesTask = rowWords.some(word => taskWords.has(word));
     const action = String(row?.action || '').toLowerCase();
     if (!action) {
-      return String(`${row?.id || ''} ${row?.label || ''}`)
-        .toLowerCase()
-        .split(/[^a-z0-9]+/g)
-        .filter(Boolean)
-        .some(word => taskWords.has(word));
+      return rowMatchesTask;
     }
     return action
       .split(/[^a-z0-9]+/g)
       .filter(Boolean)
-      .some(word => taskWords.has(word));
+      .some(word => taskWords.has(word))
+      && rowMatchesTask;
   }
 
   _currentTaskLedgerRows(tabId) {
@@ -2653,7 +2683,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (this._currentTaskIsProgressContinuation(tabId)) return rows;
     if (!this._currentTaskHasProgressIntent(tabId)) return [];
     const text = this._latestTaskText(tabId);
-    return rows.filter(row => this._progressRowMatchesTaskText(row, text));
+    const taskKey = this._currentProgressTaskKey(tabId);
+    return rows.filter(row => this._progressRowMatchesTaskText(row, text, taskKey));
   }
 
   _currentTaskProgressRows(tabId) {
