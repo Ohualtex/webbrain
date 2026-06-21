@@ -2,7 +2,7 @@ const VALID_STATUSES = new Set(['pending', 'acted', 'processed', 'skipped', 'fai
 const TERMINAL_STATUSES = new Set(['processed', 'skipped', 'failed']);
 const CLICK_ACTION_TOOLS = new Set(['click', 'click_ax', 'iframe_click']);
 const ACTION_RE = /^\s*(follow|unfollow|star|unstar|watch|unwatch|connect|subscribe|unsubscribe|save|unsave|like|unlike|block|unblock|report|send|submit|add|remove)\b(?:\s+(.+?))?\s*$/i;
-const GENERIC_TARGET_RE = /^(button|link|item|result|profile|user|member|person|this|that|it|here|there|more|submit|save|send|add|remove|follow|unfollow)$/i;
+const GENERIC_TARGET_RE = /^(button|link|item|result|profile|user|member|person|this|that|it|here|there|more|submit|save|send|add|remove|follow|unfollow|changes?|message|comment|reply|post|form|details|settings|preferences)$/i;
 
 function sanitizeText(value, max = 240) {
   if (value == null) return '';

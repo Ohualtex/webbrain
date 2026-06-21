@@ -2745,6 +2745,40 @@ test('progress ledger auto-detects item action clicks (chrome & firefox)', () =>
     assert.equal(item.status, 'acted');
   }
   assert.equal(detectProgressAction('click', { text: 'Submit' }, { success: true, text: 'Submit' }), null);
+  for (const detect of [detectProgressAction, detectProgressActionFx]) {
+    assert.equal(detect('click', { text: 'Save changes' }, { success: true, text: 'Save changes' }), null);
+    assert.equal(detect('click', { text: 'Send message' }, { success: true, text: 'Send message' }), null);
+    assert.equal(detect('click', { text: 'Add comment' }, { success: true, text: 'Add comment' }), null);
+  }
+});
+
+test('agent only auto-records progress clicks inside repeated-item work', () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+
+    agent.conversations.set(773, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Update the settings form and save it.' },
+    ]);
+    const ordinary = agent._autoRecordProgressAction(773, 'click', { text: 'Follow octocat' }, { success: true, text: 'Follow octocat', href: '/octocat' });
+    assert.equal(ordinary, null, `${AgentClass.name}: auto-recorded without ledger context`);
+    assert.equal(agent.progressLedgers.get(773), undefined);
+
+    agent.conversations.set(774, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Follow every stargazer on this page.' },
+    ]);
+    const repeated = agent._autoRecordProgressAction(774, 'click', { text: 'Follow octocat' }, { success: true, text: 'Follow octocat', href: '/octocat' });
+    assert.equal(repeated?.item.id, 'octocat', `${AgentClass.name}: repeated-item click was not recorded`);
+
+    agent.conversations.set(775, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Continue the existing ledger.' },
+    ]);
+    agent._progressUpdate(775, { items: [{ id: 'rafi', label: 'rafi', action: 'follow', status: 'pending' }] });
+    const existing = agent._autoRecordProgressAction(775, 'click', { text: 'Follow rafi' }, { success: true, text: 'Follow rafi', href: '/rafi' });
+    assert.equal(existing?.item.id, 'rafi', `${AgentClass.name}: existing ledger click was not recorded`);
+  }
 });
 
 test('progress ledger merges rows and does not downgrade terminal rows', () => {
@@ -2867,6 +2901,28 @@ test('agent records GitHub stargazer observations into the progress ledger', asy
     assert.equal(byId.get('ChJus').status, 'skipped');
     assert.equal(byId.get('myxvisual').status, 'skipped');
     assert.equal(byId.get('rafi').status, 'pending');
+  }
+});
+
+test('agent does not seed GitHub stargazer follow rows for read-only page reads', async () => {
+  const page = `
+    button "Follow ChJus" [ref_13]
+    button "Follow rafi" [ref_31]
+  `;
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+    const tabId = 776;
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Summarize who is on this stargazers page.' },
+    ]);
+    agent._currentUrl = async () => 'https://github.com/foo/bar/stargazers';
+
+    const result = { success: true, pageContent: page };
+    const note = await agent._recordProgressObservation(tabId, 'get_accessibility_tree', result);
+    assert.equal(note, null, `${AgentClass.name}: read-only stargazer read seeded rows`);
+    assert.equal(result.progressObserved, undefined);
+    assert.equal(agent.progressLedgers.get(tabId), undefined);
   }
 });
 

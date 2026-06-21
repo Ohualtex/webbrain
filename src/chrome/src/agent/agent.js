@@ -3249,6 +3249,25 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return idx >= 0 ? this._messageText(messages[idx]?.content) : '';
   }
 
+  _hasProgressLedgerContext(tabId) {
+    const rows = this.progressLedgers.get(tabId) || [];
+    if (rows.length > 0) return true;
+
+    const text = this._originalTaskText(tabId).toLowerCase();
+    if (!text) return false;
+    if (/\bprogress(?:\s+ledger)?\b|\btrack\s+(?:progress|each|which)\b|\bkeep\s+(?:track|a\s+list|a\s+ledger)\b|\bone[-\s]+by[-\s]+one\b|\bper[-\s]+(?:item|user|profile|row|result)\b/.test(text)) {
+      return true;
+    }
+
+    const itemAction = /\b(follow|unfollow|star|unstar|watch|unwatch|connect|subscribe|unsubscribe|save|unsave|like|unlike|block|unblock|report|send|submit|add|remove|process|collect|scrape|visit|open)\b/.test(text);
+    const repeatedAction = /\b(follow|unfollow|star|unstar|watch|unwatch|connect|subscribe|unsubscribe|process|collect|scrape|visit|open)\b/.test(text);
+    const repeatedTarget = /\b(rows|items|profiles|users|people|members|followers|following|stargazers|results|links|pages|contacts|accounts|repos|repositories|entries|records|comments|messages|emails|names|handles)\b/.test(text)
+      || /\b(?:list|queue)\s+of\b/.test(text)
+      || /\b(?:each|every)\s+(?:row|item|profile|user|person|member|follower|stargazer|result|link|page|contact|account|repo|repository|entry|record|comment|message|email|name|handle)\b/.test(text)
+      || (/\b(?:all|remaining|not-followed)\b/.test(text) && repeatedAction);
+    return itemAction && repeatedTarget;
+  }
+
   _excludedGithubUsernames(tabId) {
     const text = this._originalTaskText(tabId);
     const match = text.match(/\bexcept\b([\s\S]*?)(?:\band\s+while\b|\bwhile\b|[.;\n]|$)/i);
@@ -3286,6 +3305,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   async _recordProgressObservation(tabId, name, result) {
     if (name !== 'get_accessibility_tree') return null;
     if (!result || result.error || result.success === false) return null;
+    if (!this._hasProgressLedgerContext(tabId)) return null;
     const pageContent = result.pageContent || result.text || '';
     if (!pageContent || (!pageContent.includes('button "Follow ') && !pageContent.includes('button "Unfollow '))) return null;
     const url = result.url || result.pageUrl || await this._currentUrl(tabId);
@@ -3309,6 +3329,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   _autoRecordProgressAction(tabId, name, args, result) {
+    if (!this._hasProgressLedgerContext(tabId)) return null;
     const item = detectProgressAction(name, args, result);
     if (!item) return null;
     const update = this._progressUpdate(tabId, { items: [item] }, { source: 'auto' });
