@@ -1838,7 +1838,7 @@ console.log('\nscheduler');
 
 function makeSchedulerHarness(SchedulerMod, opts = {}) {
   const store = {
-    [SchedulerMod.SCHEDULED_JOBS_KEY]: [],
+    [SchedulerMod.SCHEDULED_JOBS_KEY]: opts.jobs ? structuredClone(opts.jobs) : [],
     [SchedulerMod.SCHEDULED_TASKS_ENABLED_KEY]: opts.enabled ?? true,
     [SchedulerMod.SCHEDULED_REQUIRE_CONFIRMATION_KEY]: opts.requireConfirmation ?? true,
   };
@@ -1982,6 +1982,117 @@ test('ScheduledJobManager requeues when the target tab is already running', asyn
     const job = h.jobs()[0];
     assert.equal(job.status, 'queued', `${label}: busy tab should queue`);
     assert.match(job.lastError, /active WebBrain run/, `${label}: queue reason should be recorded`);
+    assert.equal(h.alarms.get(h.alarmName(created.jobId)).when, now + SchedulerMod.QUEUE_RETRY_MS);
+  }
+});
+
+test('ScheduledJobManager restoreAlarms requeues stranded transient jobs', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    const h = makeSchedulerHarness(SchedulerMod, {
+      now,
+      jobs: [
+        {
+          id: 'task_running',
+          kind: 'task',
+          status: 'running',
+          tabId: 77,
+          title: 'Running task',
+          target: { type: 'current_tab', tabId: 77 },
+          schedule: { type: 'once' },
+          scheduledAt: new Date(now).toISOString(),
+          nextRunAt: new Date(now).toISOString(),
+          queueDeferrals: 0,
+        },
+        {
+          id: 'resume_waiting',
+          kind: 'resume',
+          status: 'needs_user_input',
+          tabId: 77,
+          reason: 'wait',
+          resumeInstruction: 'retry',
+          pendingClarify: { clarifyId: 'clr-1', question: 'Continue?' },
+          scheduledAt: new Date(now).toISOString(),
+          nextRunAt: new Date(now).toISOString(),
+          queueDeferrals: 0,
+        },
+      ],
+    });
+
+    await h.manager.restoreAlarms();
+    const jobs = h.jobs();
+    const retryAt = now + SchedulerMod.QUEUE_RETRY_MS;
+    for (const job of jobs) {
+      assert.equal(job.status, 'queued', `${label}: ${job.id} should be queued after restore`);
+      assert.equal(job.pendingClarify, null, `${label}: ${job.id} should not keep stale clarify state`);
+      assert.match(job.lastError, /background restart/, `${label}: ${job.id} should explain recovery`);
+      assert.equal(Date.parse(job.nextRunAt), retryAt, `${label}: ${job.id} should retry soon`);
+      assert.equal(h.alarms.get(h.alarmName(job.id)).when, retryAt, `${label}: ${job.id} should have a restored alarm`);
+    }
+  }
+});
+
+test('ScheduledJobManager requeues same-tab scheduled alarm races', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    let finishFirst;
+    let runCount = 0;
+    const h = makeSchedulerHarness(SchedulerMod, {
+      now,
+      processMessage: async () => {
+        runCount += 1;
+        if (runCount === 1) {
+          await new Promise((resolve) => { finishFirst = resolve; });
+        }
+        return 'done';
+      },
+    });
+    const first = await h.manager.createResumeJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      args: { after_seconds: 60, reason: 'first', resume_instruction: 'retry first' },
+    });
+    const second = await h.manager.createResumeJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      args: { after_seconds: 60, reason: 'second', resume_instruction: 'retry second' },
+    });
+
+    const firstRun = h.manager.handleAlarm(h.alarmName(first.jobId));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await h.manager.handleAlarm(h.alarmName(second.jobId));
+
+    const secondJob = h.jobs().find((job) => job.id === second.jobId);
+    assert.equal(secondJob.status, 'queued', `${label}: second same-tab alarm should queue`);
+    assert.match(secondJob.lastError, /active WebBrain run/, `${label}: queue reason should mention active run`);
+    assert.equal(runCount, 1, `${label}: second job should not enter processMessage while first is active`);
+
+    finishFirst();
+    await firstRun;
+    const firstJob = h.jobs().find((job) => job.id === first.jobId);
+    assert.equal(firstJob.status, 'completed', `${label}: first job should complete normally`);
+  }
+});
+
+test('ScheduledJobManager requeues agent active-run errors', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    const h = makeSchedulerHarness(SchedulerMod, {
+      now,
+      processMessage: async () => {
+        throw new Error('An agent run is already in progress for this tab.');
+      },
+    });
+    const created = await h.manager.createResumeJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      args: { after_seconds: 60, reason: 'race', resume_instruction: 'retry' },
+    });
+
+    await h.manager.handleAlarm(h.alarmName(created.jobId));
+    const job = h.jobs()[0];
+    assert.equal(job.status, 'queued', `${label}: active-run exception should queue, not fail`);
+    assert.match(job.lastError, /active WebBrain run/, `${label}: queue reason should mention active run`);
     assert.equal(h.alarms.get(h.alarmName(created.jobId)).when, now + SchedulerMod.QUEUE_RETRY_MS);
   }
 });
@@ -2190,6 +2301,48 @@ test('ScheduledJobManager revalidates URL-target tabs before recurring reuse', a
     assert.equal(runUrls[1], targetUrl, `${label}: stale URL-target tab should be navigated back before reuse`);
     assert.equal(h.tabs.get(tabId).url, targetUrl, `${label}: stored tab should point at the scheduled URL again`);
     assert.equal(job.target.tabId, tabId, `${label}: tab id should be preserved when navigation succeeds`);
+  }
+});
+
+test('ScheduledJobManager preserves URL-target schedules when helper tabs close', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    const targetUrl = 'https://example.com/inbox';
+    let runCount = 0;
+    const h = makeSchedulerHarness(SchedulerMod, {
+      now,
+      processMessage: async () => {
+        runCount += 1;
+        return 'checked';
+      },
+    });
+    const created = await h.manager.createTaskJob({
+      args: {
+        title: 'Check inbox',
+        prompt: 'Look for new priority mail.',
+        schedule: { type: 'recurring', after_seconds: 60, interval_minutes: 5 },
+        target: { type: 'url', url: targetUrl },
+      },
+      source: 'user',
+    });
+
+    await h.manager.handleAlarm(h.alarmName(created.jobId));
+    let job = h.jobs()[0];
+    const helperTabId = job.target.tabId;
+    assert.equal(runCount, 1, `${label}: first run should complete`);
+
+    h.tabs.delete(helperTabId);
+    await h.manager.cancelForTab(helperTabId, 'tab closed');
+    job = h.jobs()[0];
+    assert.equal(job.status, 'pending', `${label}: URL schedule should stay pending after helper tab close`);
+    assert.equal(job.tabId, null, `${label}: stale top-level tab id should be dropped`);
+    assert.equal(job.target.tabId, null, `${label}: stale target tab id should be dropped`);
+
+    await h.manager.handleAlarm(h.alarmName(created.jobId));
+    job = h.jobs()[0];
+    assert.equal(runCount, 2, `${label}: schedule should run again in a fresh helper tab`);
+    assert.notEqual(job.target.tabId, helperTabId, `${label}: fresh helper tab should be recorded`);
+    assert.equal(h.tabs.get(job.target.tabId).url, targetUrl, `${label}: fresh helper tab should use target URL`);
   }
 });
 

@@ -70,6 +70,10 @@ function normalizePendingClarify(data, now = Date.now()) {
   return pending;
 }
 
+function isActiveRunError(error) {
+  return /agent run is already in progress|active WebBrain run/i.test(String(error?.message || error || ''));
+}
+
 export function makeScheduledJobId(kind = 'job', now = Date.now()) {
   return `${kind}_${now.toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
@@ -226,6 +230,7 @@ export class ScheduledJobManager {
     this.now = now;
     this._started = false;
     this._waitingForInput = new Set();
+    this._runningTabs = new Set();
   }
 
   start() {
@@ -276,8 +281,25 @@ export class ScheduledJobManager {
 
   async restoreAlarms() {
     const jobs = await this._getJobs();
+    const retryAt = iso(this.now() + QUEUE_RETRY_MS);
+    let changed = false;
+    const normalized = jobs.map((job) => {
+      if (!['running', 'needs_user_input'].includes(job.status)) return job;
+      changed = true;
+      this._waitingForInput.delete(job.id);
+      return {
+        ...job,
+        status: 'queued',
+        nextRunAt: retryAt,
+        queueDeferrals: Number(job.queueDeferrals || 0) + 1,
+        lastError: 'Scheduled run was interrupted by a background restart; queued to retry.',
+        pendingClarify: null,
+        updatedAt: iso(this.now()),
+      };
+    });
+    if (changed) await this._setJobs(normalized);
     const live = new Set(['pending', 'queued']);
-    await Promise.all(jobs.filter((job) => live.has(job.status)).map((job) => this._setAlarm(job)));
+    await Promise.all(normalized.filter((job) => live.has(job.status)).map((job) => this._setAlarm(job)));
   }
 
   async listJobs({ tabId = null } = {}) {
@@ -467,8 +489,35 @@ export class ScheduledJobManager {
   async cancelForTab(tabId, reason = 'tab closed') {
     const jobs = await this._getJobs();
     const next = [];
+    const alarmsToSet = [];
     for (const job of jobs) {
       const matches = job.tabId === tabId || job.target?.tabId === tabId;
+      const isUrlTarget = job.kind === 'task' && job.target?.type === 'url';
+      if (matches && isUrlTarget && ['pending', 'queued', 'paused'].includes(job.status)) {
+        next.push({
+          ...job,
+          tabId: null,
+          target: { ...job.target, tabId: null },
+          updatedAt: iso(this.now()),
+        });
+        continue;
+      }
+      if (matches && isUrlTarget && job.status === 'needs_user_input') {
+        this._waitingForInput.delete(job.id);
+        const queued = {
+          ...job,
+          status: 'queued',
+          tabId: null,
+          target: { ...job.target, tabId: null },
+          nextRunAt: iso(this.now() + QUEUE_RETRY_MS),
+          lastError: 'Scheduled URL task tab closed while waiting for input; queued to retry.',
+          pendingClarify: null,
+          updatedAt: iso(this.now()),
+        };
+        next.push(queued);
+        alarmsToSet.push(queued);
+        continue;
+      }
       if (matches && ['pending', 'queued', 'paused', 'needs_user_input'].includes(job.status)) {
         await this._clearAlarm(job.id);
         this._waitingForInput.delete(job.id);
@@ -478,6 +527,7 @@ export class ScheduledJobManager {
       }
     }
     await this._setJobs(next);
+    await Promise.all(alarmsToSet.map((job) => this._setAlarm(job)));
   }
 
   async cancelForConversation(tabId, conversationId, reason = 'conversation cleared') {
@@ -521,12 +571,13 @@ export class ScheduledJobManager {
       return;
     }
     const queued = await this._updateJobIf(job.id, (prev) => (
-      ['pending', 'queued'].includes(prev.status)
+      ['pending', 'queued', 'running', 'needs_user_input'].includes(prev.status)
     ), () => ({
       status: 'queued',
       nextRunAt: iso(this.now() + QUEUE_RETRY_MS),
       queueDeferrals: deferrals,
       lastError: reason,
+      pendingClarify: null,
     }));
     if (queued) {
       await this._setAlarm(queued);
@@ -650,10 +701,11 @@ export class ScheduledJobManager {
       return;
     }
 
-    if (this.agent.isRunning(tabId)) {
+    if (this._runningTabs.has(tabId) || this.agent.isRunning(tabId)) {
       await this._requeue(job, 'The target tab already has an active WebBrain run.');
       return;
     }
+    this._runningTabs.add(tabId);
 
     const running = await this._updateJobIf(job.id, (prev) => (
       ['pending', 'queued'].includes(prev.status)
@@ -665,7 +717,10 @@ export class ScheduledJobManager {
       lastError: null,
       pendingClarify: null,
     }));
-    if (!running) return;
+    if (!running) {
+      this._runningTabs.delete(tabId);
+      return;
+    }
     this._emit(running, 'running');
 
     const onUpdate = (type, data) => {
@@ -696,8 +751,13 @@ export class ScheduledJobManager {
       await this._complete(running, result);
     } catch (e) {
       this._waitingForInput.delete(job.id);
-      await this._markFailed(running, e.message);
+      if (isActiveRunError(e)) {
+        await this._requeue(running, 'The target tab already has an active WebBrain run.');
+      } else {
+        await this._markFailed(running, e.message);
+      }
     } finally {
+      this._runningTabs.delete(tabId);
       this.agent.clearScheduledRunPolicy(tabId);
       this.hideIndicator(tabId);
     }
