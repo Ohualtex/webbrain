@@ -3197,6 +3197,34 @@ test('agent does not seed GitHub follow rows for non-follow stargazer list work'
   }
 });
 
+test('agent requires current follow intent before reusing stale follow rows for stargazer observation', async () => {
+  const page = `
+    button "Follow ChJus" [ref_13]
+    button "Follow rafi" [ref_31]
+  `;
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+    const tabId = 788;
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Follow every stargazer on this page.' },
+      { role: 'assistant', content: 'Paused with follow work left.' },
+      { role: 'user', content: 'Collect email addresses for every stargazer on this page.' },
+    ]);
+    agent._progressUpdate(tabId, {
+      items: [{ id: 'octocat', label: 'octocat', action: 'follow', status: 'pending' }],
+    });
+    agent._currentUrl = async () => 'https://github.com/foo/bar/stargazers';
+
+    const result = { success: true, pageContent: page };
+    const note = await agent._recordProgressObservation(tabId, 'get_accessibility_tree', result);
+    assert.equal(note, null, `${AgentClass.name}: stale follow rows enabled non-follow observation`);
+    assert.deepEqual(agent.progressLedgers.get(tabId).map(row => [row.id, row.action, row.status]), [
+      ['octocat', 'follow', 'pending'],
+    ]);
+  }
+});
+
 test('agent preserves active progress ledger for bare continuation turns', async () => {
   const page = `
     button "Follow rafi" [ref_31]

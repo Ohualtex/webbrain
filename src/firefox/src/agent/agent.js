@@ -2598,9 +2598,12 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   _hasGithubStargazerFollowContext(tabId) {
     const rows = this._activeProgressLedgerRows(tabId);
     const hasFollowRows = rows.some(row => String(row?.action || '').toLowerCase() === 'follow');
-    if (hasFollowRows && this._hasProgressLedgerContext(tabId)) return true;
     const text = this._latestTaskText(tabId).toLowerCase();
-    return /\bfollow\b/.test(text) && this._hasProgressLedgerContext(tabId);
+    const hasFollowIntent = /\b(?:follow|unfollow)\b/.test(text);
+    if (hasFollowIntent && this._hasProgressLedgerContext(tabId)) return true;
+    return hasFollowRows
+      && this._currentTaskIsProgressContinuation(tabId)
+      && this._hasProgressLedgerContext(tabId);
   }
 
   _excludedGithubUsernames(tabId) {
