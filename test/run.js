@@ -3942,6 +3942,18 @@ test('agent does not treat follow-status questions as stargazer follow work', as
       { role: 'user', content: 'Can you follow every stargazer on this page?' },
     ]);
     assert.equal(agent._currentTaskHasProgressIntent(tabId), true, `${AgentClass.name}: direct action question lost progress intent`);
+
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Can you collect email addresses for every stargazer on this page?' },
+    ]);
+    assert.equal(agent._currentTaskHasProgressIntent(tabId), true, `${AgentClass.name}: question-form collect task lost progress intent`);
+
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Can you tell me which stargazers I do not follow?' },
+    ]);
+    assert.equal(agent._currentTaskHasProgressIntent(tabId), false, `${AgentClass.name}: indirect follow-status question looked like progress intent`);
   }
 });
 
