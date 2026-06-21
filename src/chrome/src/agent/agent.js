@@ -1203,16 +1203,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           ? this._progressDoneBlock(tabId)
           : null;
         if (progressBlock) {
+          const blockedResult = {
+            success: false,
+            blockedDone: true,
+            error: progressBlock.error,
+            counts: progressBlock.counts,
+            unresolved: progressBlock.unresolved,
+          };
           messages.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: JSON.stringify({
-              success: false,
-              blockedDone: true,
-              error: progressBlock.error,
-              counts: progressBlock.counts,
-              unresolved: progressBlock.unresolved,
-            }),
+            content: this._wrapUntrusted(fnName, this._limitToolResult(blockedResult)),
           });
           onUpdate('warning', { message: 'Progress ledger has unresolved rows; continuing.' });
           this._persist(tabId);
@@ -3363,13 +3364,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       .some(word => taskWords.has(word));
   }
 
-  _currentTaskProgressRows(tabId) {
-    const rows = this._activeProgressLedgerRows(tabId);
+  _currentTaskLedgerRows(tabId) {
+    const rows = this.progressLedgers.get(tabId) || [];
     if (!rows.length) return [];
     if (this._currentTaskIsProgressContinuation(tabId)) return rows;
     if (!this._currentTaskHasProgressIntent(tabId)) return [];
     const text = this._latestTaskText(tabId);
     return rows.filter(row => this._progressRowMatchesTaskText(row, text));
+  }
+
+  _currentTaskProgressRows(tabId) {
+    return unresolvedLedgerRows(this._currentTaskLedgerRows(tabId));
   }
 
   _currentTaskIsProgressContinuation(tabId) {
@@ -3497,9 +3502,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   _appendProgressLedgerToFinal(tabId, summary) {
-    const rows = this.progressLedgers.get(tabId) || [];
+    const rows = this._currentTaskLedgerRows(tabId);
     if (!rows.length) return summary;
-    if (!this._hasProgressLedgerContext(tabId)) return summary;
     const counts = progressCounts(rows);
     const visible = selectLedgerRows(rows, { limit: 20 });
     const lines = visible.map(r => {
