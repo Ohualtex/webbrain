@@ -306,6 +306,8 @@ const SLASH_COMMANDS = [
   { value: '/export', descriptionKey: 'sp.slash.export' },
   { value: '/profile', descriptionKey: 'sp.slash.profile' },
   { value: '/vision', descriptionKey: 'sp.slash.vision' },
+  { value: '/ask', descriptionKey: 'sp.slash.ask' },
+  { value: '/plan', descriptionKey: 'sp.slash.ask' },
 ];
 const SLASH_COMMAND_OPTION_ID_PREFIX = 'slash-command-option-';
 
@@ -1442,6 +1444,13 @@ async function parseSlashCommands(text) {
       ? t('sp.profile.on')
       : t('sp.profile.off'));
     return '';
+  }
+
+  // /ask or /plan — switch to Ask mode, then send remaining text
+  const mAsk = text.match(/^\/(?:ask|plan)\b\s*/i);
+  if (mAsk) {
+    setMode('ask');
+    return text.slice(mAsk[0].length).trim();
   }
 
   // /vision — toggle vision support on active provider
