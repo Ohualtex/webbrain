@@ -2195,6 +2195,44 @@ test('ScheduledJobManager keeps live scheduled clarifications resumable', async 
   }
 });
 
+test('ScheduledJobManager aborts live clarification waits when pausing jobs', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    let finishRun;
+    let abortCalled = false;
+    const h = makeSchedulerHarness(SchedulerMod, {
+      now,
+      abort: () => { abortCalled = true; },
+      processMessage: async (_tabId, _message, onUpdate) => {
+        onUpdate('clarify', { clarifyId: 'clr-pause', question: 'Continue paused job?' });
+        await new Promise((resolve) => { finishRun = resolve; });
+        return 'late result';
+      },
+    });
+    const created = await h.manager.createResumeJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      args: { after_seconds: 60, reason: 'pause wait', resume_instruction: 'retry' },
+    });
+
+    const runPromise = h.manager.handleAlarm(h.alarmName(created.jobId));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(h.jobs()[0].status, 'needs_user_input', `${label}: job should be waiting before pause`);
+
+    const paused = await h.manager.pauseJob(created.jobId);
+    assert.equal(paused.ok, true, `${label}: pause should succeed`);
+    assert.equal(abortCalled, true, `${label}: pause should abort the live clarification run`);
+    assert.equal(h.jobs()[0].status, 'paused', `${label}: paused job should be stored`);
+    assert.equal(h.jobs()[0].pendingClarify, null, `${label}: paused job should not keep stale clarify state`);
+
+    finishRun();
+    await runPromise;
+    const job = h.jobs()[0];
+    assert.equal(job.status, 'paused', `${label}: late run result must not overwrite pause`);
+    assert.equal(job.runCount || 0, 0, `${label}: paused job should not count as completed`);
+  }
+});
+
 test('ScheduledJobManager preserves user cancellation of in-flight scheduled runs', async () => {
   const now = Date.UTC(2026, 0, 1, 12, 0, 0);
   for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {

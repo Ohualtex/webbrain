@@ -476,7 +476,29 @@ export class ScheduledJobManager {
 
   async pauseJob(jobId) {
     await this._clearAlarm(jobId);
-    const job = await this._updateJob(jobId, () => ({ status: 'paused' }));
+    let liveTabId = null;
+    const job = await this._withJobMutation(async () => {
+      const jobs = await this._getJobs();
+      const idx = jobs.findIndex((it) => it.id === jobId);
+      if (idx < 0) return null;
+      const existing = jobs[idx];
+      if (['running', 'needs_user_input'].includes(existing.status)) {
+        liveTabId = existing.tabId || existing.target?.tabId || null;
+        this._waitingForInput.delete(jobId);
+      }
+      const updated = {
+        ...existing,
+        status: 'paused',
+        pendingClarify: null,
+        updatedAt: iso(this.now()),
+      };
+      jobs[idx] = updated;
+      await this._setJobs(jobs);
+      return updated;
+    });
+    if (liveTabId != null) {
+      try { this.agent.abort(liveTabId); } catch {}
+    }
     if (job) this._emit(job, 'paused');
     return { ok: !!job, job: summarizeScheduledJob(job) };
   }
