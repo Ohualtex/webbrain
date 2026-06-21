@@ -3438,6 +3438,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return scope ? `${base} ::page:${scope}`.slice(0, 240) : base;
   }
 
+  _progressTaskKeyBase(taskKey) {
+    return String(taskKey || '').split(/\s+::page:/)[0].trim();
+  }
+
+  _isProgressCollectionPageScope(pageScope) {
+    return this._isGithubStargazersUrl(pageScope);
+  }
+
   _progressPageScopeForUrl(url) {
     const raw = String(url || '').trim();
     if (!raw) return '';
@@ -3485,8 +3493,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       ));
       if (keys.length === 1) return keys[0];
     }
+    const hasExplicitPageScope = Object.prototype.hasOwnProperty.call(opts, 'pageScope');
     const pageScope = String(opts.pageScope || this._currentProgressPageScope(tabId) || '').trim();
-    return this._progressTaskKeyForText(this._latestTaskText(tabId), pageScope);
+    const text = this._latestTaskText(tabId);
+    const baseTaskKey = this._progressTaskKeyForText(text);
+    if (!hasExplicitPageScope && (!pageScope || !this._isProgressCollectionPageScope(pageScope))) {
+      const matchingKeys = Array.from(new Set(
+        this._activeProgressLedgerRows(tabId)
+          .map(row => String(row?.taskKey || '').trim())
+          .filter(key => key && this._progressTaskKeyBase(key) === baseTaskKey)
+      ));
+      if (matchingKeys.length === 1) return matchingKeys[0];
+    }
+    return this._progressTaskKeyForText(text, pageScope);
   }
 
   _progressRowMatchesTaskText(row, text, currentTaskKey = '') {
