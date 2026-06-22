@@ -6,6 +6,11 @@ This changelog was generated from the repository Git history and release tags. V
 
 ## [Unreleased]
 
+## [15.1.1] - 2026-06-22
+
+### Changed
+- Updated release metadata, Settings subtitle versions, architecture docs, Chrome / Firefox manifests, and package versions for 15.1.1.
+
 ## [15.1.0] - 2026-06-22
 
 ### Changed

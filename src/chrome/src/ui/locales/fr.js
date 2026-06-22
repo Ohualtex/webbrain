@@ -290,6 +290,7 @@ export default {
   "sp.record.stop": "Arrêter",
   "sp.record.banner_label": "Enregistrement",
   "sp.record.error": "Erreur d'enregistrement : {error}",
+  "sp.record.mic_unavailable": "Microphone indisponible : {error}. L'enregistrement a démarré avec seulement l'audio et la vidéo de l'onglet.",
   "sp.record.saved": "{filename} enregistré dans Téléchargements.",
   "sp.record.transcribing": "Transcription de l'audio avec Whisper…",
   "sp.record.transcribed": "Transcription enregistrée : {filename}",

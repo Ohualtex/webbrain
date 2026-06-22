@@ -290,6 +290,7 @@ export default {
   "sp.record.stop": "إيقاف",
   "sp.record.banner_label": "جارٍ التسجيل",
   "sp.record.error": "خطأ في التسجيل: {error}",
+  "sp.record.mic_unavailable": "الميكروفون غير متاح: {error}. بدأ التسجيل بصوت وفيديو علامة التبويب فقط.",
   "sp.record.saved": "تم حفظ {filename} في مجلد التنزيلات.",
   "sp.record.transcribing": "جارٍ تفريغ الصوت باستخدام Whisper…",
   "sp.record.transcribed": "تم حفظ النص: {filename}",
