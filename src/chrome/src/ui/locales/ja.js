@@ -290,6 +290,7 @@ export default {
   "sp.record.stop": "停止",
   "sp.record.banner_label": "録画中",
   "sp.record.error": "録画エラー: {error}",
+  "sp.record.mic_unavailable": "マイクを使用できません: {error}。タブの音声と映像のみで録画を開始しました。",
   "sp.record.saved": "{filename} を Downloads に保存しました。",
   "sp.record.transcribing": "Whisper で音声を文字起こししています…",
   "sp.record.transcribed": "文字起こしを保存しました: {filename}",

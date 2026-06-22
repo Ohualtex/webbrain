@@ -12,6 +12,7 @@ export default {
   'sp.record.stop': 'Stop',
   'sp.record.banner_label': 'Recording',
   'sp.record.error': 'Recording error: {error}',
+  'sp.record.mic_unavailable': 'Microphone unavailable: {error}. Recording started with tab audio and video only.',
   'sp.record.saved': 'Saved {filename} to Downloads.',
   'sp.record.transcribing': 'Transcribing audio with Whisper…',
   'sp.record.transcribed': 'Transcript saved: {filename}',

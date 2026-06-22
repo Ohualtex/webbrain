@@ -290,6 +290,7 @@ export default {
   "sp.record.stop": "Durdur",
   "sp.record.banner_label": "Kaydediliyor",
   "sp.record.error": "Kayıt hatası: {error}",
+  "sp.record.mic_unavailable": "Mikrofon kullanılamıyor: {error}. Kayıt yalnızca sekme sesi ve videosuyla başlatıldı.",
   "sp.record.saved": "{filename} İndirilenler klasörüne kaydedildi.",
   "sp.record.transcribing": "Ses Whisper ile yazıya dökülüyor…",
   "sp.record.transcribed": "Yazıya döküm kaydedildi: {filename}",

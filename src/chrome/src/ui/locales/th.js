@@ -290,6 +290,7 @@ export default {
   "sp.record.stop": "หยุด",
   "sp.record.banner_label": "กำลังบันทึก",
   "sp.record.error": "บันทึกผิดพลาด: {error}",
+  "sp.record.mic_unavailable": "ไมโครโฟนไม่พร้อมใช้งาน: {error} เริ่มบันทึกเฉพาะเสียงและวิดีโอของแท็บแล้ว",
   "sp.record.saved": "บันทึก {filename} ไปยังโฟลเดอร์ Downloads แล้ว",
   "sp.record.transcribing": "กำลังถอดเสียงด้วย Whisper…",
   "sp.record.transcribed": "บันทึกบทถอดเสียงแล้ว: {filename}",

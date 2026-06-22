@@ -290,6 +290,7 @@ export default {
   "sp.record.stop": "Стоп",
   "sp.record.banner_label": "Запись",
   "sp.record.error": "Ошибка записи: {error}",
+  "sp.record.mic_unavailable": "Микрофон недоступен: {error}. Запись началась только с аудио и видео вкладки.",
   "sp.record.saved": "Файл {filename} сохранён в папку «Загрузки».",
   "sp.record.transcribing": "Расшифровка аудио через Whisper…",
   "sp.record.transcribed": "Расшифровка сохранена: {filename}",

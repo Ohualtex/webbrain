@@ -290,6 +290,7 @@ export default {
   "sp.record.stop": "Hentikan",
   "sp.record.banner_label": "Merekam",
   "sp.record.error": "Galat perekaman: {error}",
+  "sp.record.mic_unavailable": "Mikrofon tidak tersedia: {error}. Perekaman dimulai hanya dengan audio dan video tab.",
   "sp.record.saved": "{filename} disimpan ke Downloads.",
   "sp.record.transcribing": "Mentranskripsi audio dengan Whisper…",
   "sp.record.transcribed": "Transkrip tersimpan: {filename}",

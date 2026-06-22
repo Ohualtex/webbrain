@@ -1908,6 +1908,15 @@ test('sidepanel exposes show-scratchpad slash command in both builds', () => {
   }
 });
 
+test('chrome /record reports mic denial as a warning, not recording failure', () => {
+  const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
+  const locale = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/locales/en.js'), 'utf8');
+  assert.match(panel, /start_tab_recording/, 'chrome: /record should start tab recording through background');
+  assert.match(panel, /sp\.record\.mic_unavailable/, 'chrome: /record mic denial should use warning copy');
+  assert.match(locale, /sp\.record\.mic_unavailable/, 'chrome: missing mic unavailable locale key');
+  assert.match(locale, /Recording started with tab audio and video only/, 'chrome: mic warning should say recording started');
+});
+
 test('sidepanel reports missing background responses without res.content crash', () => {
   for (const [label, panelRel] of [
     ['chrome', 'src/chrome/src/ui/sidepanel.js'],
