@@ -1869,6 +1869,7 @@ test('sidepanel exposes schedule slash commands in both builds', () => {
     assert.match(panel, /\/schedule\b/, `${label}: /schedule parser missing`);
     assert.match(panel, /\/list-schedules\b/, `${label}: /list-schedules parser missing`);
     assert.match(panel, /create_scheduled_job/, `${label}: composer should create scheduled jobs through background`);
+    assert.match(panel, /afterInput\.max = '10080'/, `${label}: schedule composer should allow seven-day relative delays`);
     assert.match(panel, /scheduledJobId/, `${label}: scheduled clarify prompts should retain their job id`);
     assert.match(panel, /scheduledTabId/, `${label}: scheduled clarify answers should route to the run tab`);
     assert.match(panel, /isUrlTargetScheduledJob/, `${label}: URL-target scheduled prompts should be visible across panels`);
