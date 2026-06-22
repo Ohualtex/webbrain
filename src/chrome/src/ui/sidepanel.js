@@ -1577,12 +1577,16 @@ async function parseSlashCommands(text) {
 
   // /record — start recording the current tab without LLM involvement
   if (/^\/record(?:\s|$)/i.test(text)) {
-    const res = await sendToBackground('start_tab_recording', {
-      tabId: currentTabId,
-      options: { video: true, mic: true },
-    });
-    if (!res?.ok) {
-      addMessage('system', t('sp.record.error', { error: res?.error || 'unknown' }));
+    try {
+      const res = await sendToBackground('start_tab_recording', {
+        tabId: currentTabId,
+        options: { video: true, mic: true },
+      });
+      if (!res?.ok) {
+        addMessage('system', t('sp.record.error', { error: res?.error || 'unknown' }));
+      }
+    } catch (e) {
+      addMessage('system', t('sp.record.error', { error: e.message }));
     }
     return '';
   }
