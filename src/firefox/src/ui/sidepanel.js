@@ -1822,8 +1822,13 @@ async function parseSlashCommands(text) {
     const a = document.createElement('a');
     a.href = url;
     a.download = `webbrain-chat-${Date.now()}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
+    document.body.appendChild(a);
+    try {
+      a.click();
+    } finally {
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 7000);
+    }
     addMessage('system', t('sp.export.done'));
     return '';
   }

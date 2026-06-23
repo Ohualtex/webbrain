@@ -2132,6 +2132,28 @@ test('trace viewer revokes screenshot object URLs when replacing rendered timeli
   }
 });
 
+test('sidepanel export keeps blob URLs alive until the download is committed', () => {
+  for (const [label, panelRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    const exportStart = panel.indexOf('// /export');
+    assert.notEqual(exportStart, -1, `${label}: /export handler missing`);
+    const exportBody = panel.slice(exportStart, panel.indexOf('// /profile', exportStart));
+    assert.match(
+      exportBody,
+      /const url = URL\.createObjectURL\(blob\);[\s\S]*?const a = document\.createElement\('a'\);[\s\S]*?document\.body\.appendChild\(a\);[\s\S]*?try \{[\s\S]*?a\.click\(\);[\s\S]*?\} finally \{[\s\S]*?a\.remove\(\);[\s\S]*?setTimeout\(\(\) => URL\.revokeObjectURL\(url\), 7000\);[\s\S]*?\}/,
+      `${label}: export downloads should click a connected anchor and revoke the blob URL asynchronously`,
+    );
+    assert.doesNotMatch(
+      exportBody,
+      /a\.click\(\);\s*URL\.revokeObjectURL\(url\);/,
+      `${label}: export should not revoke the blob URL synchronously after click`,
+    );
+  }
+});
+
 test('chrome sidepanel Escape abort honors slash autocomplete dismissal', () => {
   const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
   assert.match(panel, /if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*hideSlashCommandAutocomplete\(\);\s*return true;\s*\}/, 'chrome: slash autocomplete Escape should consume the key event');
