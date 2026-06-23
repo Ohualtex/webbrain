@@ -2209,6 +2209,28 @@ test('sidepanel escapes dynamic system-message interpolation before raw HTML ins
   }
 });
 
+test('sidepanel verbose tool-call headers treat tool names as text', () => {
+  for (const [label, panelRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    const start = panel.indexOf('function appendVerboseToolCall(name, args) {');
+    assert.notEqual(start, -1, `${label}: appendVerboseToolCall missing`);
+    const body = panel.slice(start, panel.indexOf('\n}\n\nfunction appendVerboseToolResult', start) + 2);
+    assert.doesNotMatch(
+      body,
+      /header\.innerHTML\s*=/,
+      `${label}: verbose tool-call header must not interpolate tool names through innerHTML`,
+    );
+    assert.match(
+      body,
+      /const icon = document\.createElement\('span'\);[\s\S]*?icon\.textContent = '\\u26A1';[\s\S]*?header\.append\(icon, document\.createTextNode\(` \$\{name \|\| ''\}`\)\);/,
+      `${label}: verbose tool-call header should append the icon element and tool name text node`,
+    );
+  }
+});
+
 test('chrome sidepanel Escape abort honors slash autocomplete dismissal', () => {
   const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
   assert.match(panel, /if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*hideSlashCommandAutocomplete\(\);\s*return true;\s*\}/, 'chrome: slash autocomplete Escape should consume the key event');

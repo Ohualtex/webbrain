@@ -2796,7 +2796,10 @@ function appendVerboseToolCall(name, args) {
 
   const header = document.createElement('div');
   header.className = 'tool-call-header';
-  header.innerHTML = `<span class="icon">\u26A1</span> ${name}`;
+  const icon = document.createElement('span');
+  icon.className = 'icon';
+  icon.textContent = '\u26A1';
+  header.append(icon, document.createTextNode(` ${name || ''}`));
 
   const body = document.createElement('div');
   body.className = 'tool-call-body';
