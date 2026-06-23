@@ -255,7 +255,7 @@ See [CHANGELOG.md](./CHANGELOG.md) for the full version history. Recent highligh
 
 ## Roadmap
 
-- [ ] **Conversation export/import** — Save and load chat histories
+- [X] **Conversation export/~~import~~** — Save ~~and load~~ chat histories (only export added, import not planned)
 - [ ] **Custom tool definitions** — User-defined tools via settings
 - [X] **Keyboard shortcuts** — Hotkeys for opening panel, sending messages, switching modes
 - [X] **Context menu integration** — Right-click → "Ask WebBrain about this"
