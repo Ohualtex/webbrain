@@ -11,6 +11,7 @@ import { strict as assert } from 'node:assert';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import vm from 'node:vm';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -2228,6 +2229,81 @@ test('sidepanel verbose tool-call headers treat tool names as text', () => {
       /const icon = document\.createElement\('span'\);[\s\S]*?icon\.textContent = '\\u26A1';[\s\S]*?header\.append\(icon, document\.createTextNode\(` \$\{name \|\| ''\}`\)\);/,
       `${label}: verbose tool-call header should append the icon element and tool name text node`,
     );
+  }
+});
+
+function runSettingsTabsScript(script, { saved = null, hash = '' } = {}) {
+  function makeClassList() {
+    return {
+      active: false,
+      toggle(name, on) {
+        if (name === 'active') this.active = !!on;
+      },
+    };
+  }
+  const buttons = ['display', 'providers', 'multimodal', 'profile'].map((name) => ({
+    dataset: { tab: name },
+    classList: makeClassList(),
+    addEventListener(type, handler) {
+      if (type === 'click') this.clickHandler = handler;
+    },
+  }));
+  const panels = ['display', 'providers', 'multimodal', 'profile'].map((name) => ({
+    dataset: { panel: name },
+    classList: makeClassList(),
+  }));
+  const selectorCalls = [];
+  const context = {
+    document: {
+      querySelectorAll(selector) {
+        selectorCalls.push(selector);
+        if (selector === '.tab-btn') return buttons;
+        if (selector === '.tab-panel') return panels;
+        return [];
+      },
+      querySelector(selector) {
+        selectorCalls.push(selector);
+        if (selector.includes('[data-tab="')) {
+          throw new Error(`unsafe tab selector: ${selector}`);
+        }
+        return null;
+      },
+    },
+    localStorage: {
+      value: saved,
+      getItem() {
+        return this.value;
+      },
+      setItem(_key, value) {
+        this.value = value;
+      },
+    },
+    location: { hash },
+  };
+  vm.runInNewContext(script, context, { timeout: 1000 });
+  return {
+    activeButton: buttons.find((button) => button.classList.active)?.dataset.tab,
+    activePanel: panels.find((panel) => panel.classList.active)?.dataset.panel,
+    stored: context.localStorage.value,
+    selectorCalls,
+  };
+}
+
+test('settings tabs validate saved and hash tab names without selector interpolation', () => {
+  for (const [label, tabsRel] of [
+    ['chrome', 'src/chrome/src/ui/settings-tabs.js'],
+    ['firefox', 'src/firefox/src/ui/settings-tabs.js'],
+  ]) {
+    const script = fs.readFileSync(path.join(ROOT, tabsRel), 'utf8');
+    const malformed = runSettingsTabsScript(script, { saved: 'display"] .boom', hash: '#bad"]' });
+    assert.equal(malformed.activeButton, 'providers', `${label}: malformed tab values should fall back to providers`);
+    assert.equal(malformed.activePanel, 'providers', `${label}: malformed tab values should activate provider panel`);
+    assert.deepEqual(malformed.selectorCalls, ['.tab-btn', '.tab-panel'], `${label}: dynamic tab values must not be interpolated into selectors`);
+
+    const valid = runSettingsTabsScript(script, { saved: 'display', hash: '#multimodal' });
+    assert.equal(valid.activeButton, 'multimodal', `${label}: valid hash should override saved tab`);
+    assert.equal(valid.activePanel, 'multimodal', `${label}: valid hash should activate its panel`);
+    assert.equal(valid.stored, 'multimodal', `${label}: activated hash tab should persist`);
   }
 });
 
