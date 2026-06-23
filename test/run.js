@@ -2297,7 +2297,7 @@ test('ScheduledJobManager dedupes near-matching task jobs', async () => {
         target: { type: 'current_tab' },
         mode: 'act',
       },
-      source: 'agent',
+      source: 'user',
       currentUrl: 'https://example.com/',
       currentTitle: 'Example',
     });
@@ -3123,6 +3123,91 @@ test('ScheduledJobManager fails current-tab tasks after the hash route changes',
     assert.equal(processCalled, false, `${label}: hash-route-changed task must not call agent`);
     assert.equal(job.status, 'failed', `${label}: hash-route-changed task should fail`);
     assert.match(job.lastError, /Target tab changed/, `${label}: failure should explain target staleness`);
+  }
+});
+
+test('ScheduledJobManager stores agent current-tab tasks on HTTP pages as URL targets', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    const originalUrl = 'https://example.com/following?source=feed#people';
+    const runUrls = [];
+    let h;
+    h = makeSchedulerHarness(SchedulerMod, {
+      now,
+      processMessage: async (tabId) => {
+        runUrls.push(h.tabs.get(tabId)?.url);
+        return 'followed';
+      },
+    });
+    const created = await h.manager.createTaskJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      args: {
+        title: 'Follow accounts',
+        prompt: 'Follow 25 accounts from this page.',
+        schedule: { type: 'once', after_seconds: 60 },
+        target: { type: 'current_tab' },
+      },
+      source: 'agent',
+      currentUrl: originalUrl,
+      currentTitle: 'People',
+    });
+
+    assert.equal(created.success, true, `${label}: agent-created task should schedule`);
+    let job = h.jobs()[0];
+    assert.equal(job.target.type, 'url', `${label}: agent current-tab task should be stored as URL-targeted`);
+    assert.equal(job.target.url, originalUrl, `${label}: URL target should preserve the original page URL`);
+
+    h.tabs.set(77, { id: 77, url: 'https://example.com/elsewhere', title: 'Elsewhere' });
+    await h.manager.handleAlarm(h.alarmName(created.jobId));
+
+    job = h.jobs()[0];
+    assert.equal(runUrls[0], originalUrl, `${label}: URL-targeted agent task should navigate back before running`);
+    assert.equal(job.status, 'completed', `${label}: navigated agent task should complete`);
+  }
+});
+
+test('ScheduledJobManager migrates legacy agent current-tab tasks to URL targets on restore', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    const scheduledAt = new Date(now + 60 * 1000).toISOString();
+    const originalUrl = 'https://example.com/following';
+    const h = makeSchedulerHarness(SchedulerMod, {
+      now,
+      jobs: [{
+        id: `task_legacy_${label}`,
+        kind: 'task',
+        status: 'pending',
+        tabId: 77,
+        conversationId: 'conv-1',
+        mode: 'act',
+        title: 'Follow accounts',
+        prompt: 'Follow 25 accounts from this page.',
+        schedule: { type: 'once', run_at: scheduledAt, interval_minutes: null },
+        target: {
+          type: 'current_tab',
+          tabId: 77,
+          conversationId: 'conv-1',
+          originalUrl,
+          originalTitle: 'People',
+        },
+        source: 'agent',
+        scheduledAt,
+        nextRunAt: scheduledAt,
+        createdAt: new Date(now).toISOString(),
+        updatedAt: new Date(now).toISOString(),
+        queueDeferrals: 0,
+        runCount: 0,
+      }],
+    });
+
+    await h.manager.restoreAlarms();
+
+    const job = h.jobs()[0];
+    assert.equal(job.target.type, 'url', `${label}: legacy agent task should be migrated to URL target`);
+    assert.equal(job.target.url, originalUrl, `${label}: migrated target should use the original URL`);
+    assert.equal(job.conversationId, null, `${label}: migrated URL task should not stay conversation-bound`);
+    assert.equal(h.alarms.get(h.alarmName(job.id)).when, Date.parse(scheduledAt), `${label}: restored migrated job should keep its alarm`);
   }
 });
 
