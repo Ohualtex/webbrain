@@ -4937,6 +4937,40 @@ test('agent tab cleanup drops active run trace state in both builds', () => {
   }
 });
 
+test('agent refuses tool calls outside the advertised tool set in both builds', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getVisionProvider: async () => null });
+    let executed = false;
+    agent.executeTool = async () => {
+      executed = true;
+      return { success: true };
+    };
+    agent._ensureGateSetting = async () => {};
+    const updates = [];
+    const messages = [];
+
+    await agent._executeToolBatch(
+      4894,
+      [{
+        id: 'tool_1',
+        function: { name: 'list_downloads', arguments: '{}' },
+      }],
+      messages,
+      (type, data) => updates.push({ type, data }),
+      { supportsVision: false },
+      '',
+      new Set(['done']),
+      1,
+    );
+
+    assert.equal(executed, false, `${AgentClass.name}: dispatched a tool that was not advertised`);
+    assert.ok(updates.some(update => update.type === 'warning' && /not available/.test(update.data?.message || '')), `${AgentClass.name}: missing unadvertised-tool warning`);
+    assert.equal(messages.length, 1, `${AgentClass.name}: missing denied tool result`);
+    const denied = JSON.parse(messages[0].content);
+    assert.equal(denied.denied, true, `${AgentClass.name}: unadvertised tool result was not marked denied`);
+  }
+});
+
 test('capabilityFor: screenshot is read-only, but save:true is a download', () => {
   assert.equal(capabilityFor('screenshot', {}), null);
   assert.equal(capabilityFor('full_page_screenshot', {}), null);
@@ -6183,9 +6217,7 @@ test('blocked done progress result stays wrapped as untrusted content', async ()
     agent.providerManager = { ...(agent.providerManager || {}), getVisionProvider: async () => null };
 
     const toolCalls = [{ id: 'done_call', function: { name: 'done', arguments: JSON.stringify({ summary: 'Done.' }) } }];
-    const result = AgentClass === AgentFx
-      ? await agent._executeToolBatch(tabId, toolCalls, messages, () => {}, { supportsVision: false }, null, new Set(['done']), 1)
-      : await agent._executeToolBatch(tabId, toolCalls, messages, () => {}, { supportsVision: false }, null, 1);
+    const result = await agent._executeToolBatch(tabId, toolCalls, messages, () => {}, { supportsVision: false }, null, new Set(['done']), 1);
     assert.equal(result.action, 'continue', `${AgentClass.name}: blocked done should continue the tool loop`);
 
     const toolMessage = messages.find(msg => msg.role === 'tool' && msg.tool_call_id === 'done_call');
