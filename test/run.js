@@ -2401,6 +2401,85 @@ test('ScheduledJobManager does not dedupe against paused jobs', async () => {
   }
 });
 
+test('ScheduledJobManager only resumes paused jobs', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    const h = makeSchedulerHarness(SchedulerMod, { now });
+    const created = await h.manager.createResumeJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      mode: 'act',
+      args: { after_seconds: 60, reason: 'wait', resume_instruction: 'continue' },
+    });
+
+    const pendingResume = await h.manager.resumeJob(created.jobId);
+    assert.equal(pendingResume.ok, false, `${label}: pending jobs should not be resumed`);
+    assert.equal(h.jobs().find((job) => job.id === created.jobId)?.status, 'pending', `${label}: pending resume attempt should not change status`);
+
+    const paused = await h.manager.pauseJob(created.jobId);
+    const resumed = await h.manager.resumeJob(created.jobId);
+    assert.equal(paused.ok, true, `${label}: pause should succeed`);
+    assert.equal(resumed.ok, true, `${label}: paused job should resume`);
+    assert.equal(h.jobs().find((job) => job.id === created.jobId)?.status, 'pending', `${label}: resumed job should become pending`);
+    assert.equal(h.alarms.has(h.alarmName(created.jobId)), true, `${label}: resumed job should get an alarm`);
+  }
+});
+
+test('ScheduledJobManager does not resurrect terminal jobs through stale actions', async () => {
+  const now = Date.UTC(2026, 0, 1, 12, 0, 0);
+  for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
+    const h = makeSchedulerHarness(SchedulerMod, { now });
+    const completed = await h.manager.createTaskJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      args: {
+        title: 'Complete me',
+        prompt: 'finish',
+        schedule: { type: 'once', after_seconds: 60 },
+        target: { type: 'current_tab' },
+        mode: 'act',
+      },
+      source: 'user',
+      currentUrl: 'https://example.com/',
+      currentTitle: 'Example',
+    });
+    await h.manager.handleAlarm(h.alarmName(completed.jobId));
+    assert.equal(h.jobs().find((job) => job.id === completed.jobId)?.status, 'completed', `${label}: setup should complete the job`);
+
+    for (const [actionName, action] of [
+      ['runNow', () => h.manager.runNow(completed.jobId)],
+      ['pauseJob', () => h.manager.pauseJob(completed.jobId)],
+      ['resumeJob', () => h.manager.resumeJob(completed.jobId)],
+      ['cancelJob', () => h.manager.cancelJob(completed.jobId, 'stale cancel')],
+    ]) {
+      const res = await action();
+      assert.equal(res.ok, false, `${label}: ${actionName} should reject completed jobs`);
+      assert.equal(h.jobs().find((job) => job.id === completed.jobId)?.status, 'completed', `${label}: ${actionName} should not mutate completed jobs`);
+    }
+
+    const cancellable = await h.manager.createResumeJob({
+      tabId: 77,
+      conversationId: 'conv-1',
+      mode: 'act',
+      args: { after_seconds: 120, reason: 'cancel setup', resume_instruction: 'continue' },
+    });
+    const cancelled = await h.manager.cancelJob(cancellable.jobId, 'cancelled by user');
+    assert.equal(cancelled.ok, true, `${label}: setup cancel should succeed`);
+    assert.equal(h.jobs().find((job) => job.id === cancellable.jobId)?.status, 'cancelled', `${label}: setup should cancel the job`);
+
+    for (const [actionName, action] of [
+      ['runNow', () => h.manager.runNow(cancellable.jobId)],
+      ['pauseJob', () => h.manager.pauseJob(cancellable.jobId)],
+      ['resumeJob', () => h.manager.resumeJob(cancellable.jobId)],
+      ['cancelJob', () => h.manager.cancelJob(cancellable.jobId, 'second cancel')],
+    ]) {
+      const res = await action();
+      assert.equal(res.ok, false, `${label}: ${actionName} should reject cancelled jobs`);
+      assert.equal(h.jobs().find((job) => job.id === cancellable.jobId)?.status, 'cancelled', `${label}: ${actionName} should not mutate cancelled jobs`);
+    }
+  }
+});
+
 test('ScheduledJobManager dedupes near-matching task jobs', async () => {
   const now = Date.UTC(2026, 0, 1, 12, 0, 0);
   for (const [label, SchedulerMod] of [['chrome', SchedulerCh], ['firefox', SchedulerFx]]) {
