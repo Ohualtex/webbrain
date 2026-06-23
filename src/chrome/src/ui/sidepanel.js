@@ -7,6 +7,7 @@ import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations } from './i18n
 import { sanitizeMarkdownLinks } from './markdown-link.js';
 import { applyMode, loadMode, watch } from './theme.js';
 import { buildRecommendedActions } from './recommended-actions.js';
+import { createContextMenuPromptHandler } from './context-menu-prompts.js';
 
 // Hydrate the theme from chrome.storage.local (the inline <head> bootstrap
 // only sees localStorage; if the user changes the theme on another device
@@ -355,6 +356,7 @@ const recordingTimerEl = document.getElementById('recording-timer');
 const recordingStopBtn = document.getElementById('btn-recording-stop');
 
 let currentTabId = null;
+let pendingTabSwitch = null; // tab the user switched to while isProcessing was true
 let isProcessing = false;
 let currentAssistantEl = null;
 let verboseMode = false;
@@ -364,6 +366,21 @@ let recommendationsRequestId = 0;
 let recommendedActionsCollapsed = false;
 let slashCommandMatches = [];
 let slashCommandSelectedIndex = 0;
+const {
+  acceptContextMenuPrompt,
+  drainQueuedContextMenuPrompts,
+  consumePendingContextMenuPrompt,
+  clearQueuedForTab,
+} = createContextMenuPromptHandler({
+  getCurrentTabId: () => currentTabId,
+  getIsProcessing: () => isProcessing,
+  getAgentMode: () => agentMode,
+  setMode,
+  getInputEl: () => inputEl,
+  autoResizeInput,
+  sendMessage,
+  sendToBackground,
+});
 // Notification sound on task completion. Default on; togglable via Settings.
 let notifySoundEnabled = true;
 let notifyAudio = null;
@@ -754,6 +771,7 @@ function settleScheduledRun(event, job) {
     hideActivity();
     if (currentAssistantEl === assistantEl) currentAssistantEl = null;
     abortRequested = false;
+    drainQueuedContextMenuPrompts();
   }
   if (event === 'completed') playCompletionSound();
 }
@@ -801,6 +819,7 @@ function handleScheduledJobEvent(data, tabId) {
       isProcessing = false;
       sendBtn.disabled = false;
       addMessage('system', t('sp.scheduled.needs_user_input', { title: safeTitle }));
+      drainQueuedContextMenuPrompts();
     }
   }
 }
@@ -1075,6 +1094,8 @@ async function init() {
   await testConnection({ skipWebBrainCloud: true });
   refreshScheduledJobs();
   refreshRecommendedActions();
+  await consumePendingContextMenuPrompt();
+  drainQueuedContextMenuPrompts();
 
   chrome.tabs.onActivated.addListener(async (info) => {
     switchToTab(info.tabId);
@@ -1156,8 +1177,12 @@ if (verboseBtn) {
 }
 
 async function switchToTab(newTabId) {
-  if (newTabId === currentTabId) return;
-  if (isProcessing) return; // don't switch while agent is running
+  if (newTabId === currentTabId) { pendingTabSwitch = null; return; }
+  if (isProcessing) {
+    pendingTabSwitch = newTabId; // apply after the run ends
+    return;
+  }
+  pendingTabSwitch = null;
 
   // Save current tab's chat (in-memory + storage).
   if (currentTabId != null) {
@@ -1179,6 +1204,7 @@ async function switchToTab(newTabId) {
   scrollToBottom();
   refreshScheduledJobs();
   refreshRecommendedActions();
+  consumePendingContextMenuPrompt().then(() => drainQueuedContextMenuPrompts()).catch(() => {});
 }
 
 function hideRecommendedActions() {
@@ -1774,7 +1800,7 @@ function updateApiBadge() {
   }
 }
 
-async function sendMessage() {
+async function sendMessage(extraChatParams) {
   let text = inputEl.value.trim();
   if (!text || isProcessing) return;
   hideSlashCommandAutocomplete();
@@ -1808,13 +1834,16 @@ async function sendMessage() {
 
   currentAssistantEl = addMessage('assistant', '');
 
+  let accepted = false;
   try {
     const res = await sendToBackground('chat', {
       tabId: currentTabId,
       text,
       mode: agentMode,
       apiMutationsAllowed,
+      ...extraChatParams,
     });
+    accepted = true;
 
     if (abortRequested) {
       // Agent was stopped — show what we got so far
@@ -1849,7 +1878,14 @@ async function sendMessage() {
     scrollToBottom();
     if (!wasAborted) playCompletionSound();
     refreshRecommendedActions();
+    if (pendingTabSwitch != null) {
+      const pending = pendingTabSwitch;
+      pendingTabSwitch = null;
+      await switchToTab(pending);
+    }
+    drainQueuedContextMenuPrompts();
   }
+  return accepted;
 }
 
 // ─── Tab Recorder (v7.4) ────────────────────────────────────────────
@@ -1953,6 +1989,16 @@ hydrateRecordingFromBackground();
 // transcript) so Phase 3's "Summarize" CTA can read it.
 let lastRecordingResult = null;
 let lastTranscript = null;
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.target !== 'sidepanel' || msg.action !== 'context_menu_prompt') return;
+  acceptContextMenuPrompt(msg.prompt || msg);
+});
+
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg?.target !== 'sidepanel' || msg.action !== 'context_menu_tab_navigated') return;
+  clearQueuedForTab(msg.tabId);
+});
 
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg?.target !== 'sidepanel' || msg.action !== 'recording_update') return;
@@ -2350,6 +2396,7 @@ function submitClarify(card, tabId, clarifyId, answer, source) {
         isProcessing = false;
         sendBtn.disabled = false;
         hideActivity();
+        drainQueuedContextMenuPrompts();
       }
       /* background may be torn down — clarify state already lives there */
     });
@@ -2635,6 +2682,7 @@ async function continueAgent() {
     hideActivity();
     currentAssistantEl = null;
     scrollToBottom();
+    drainQueuedContextMenuPrompts();
   }
 }
 

@@ -6,6 +6,7 @@
   "permissions": [
     "sidePanel",
     "activeTab",
+    "contextMenus",
     "tabs",
     "tabGroups",
     "scripting",

@@ -7,6 +7,7 @@ import { t, getLocale, setLocale, LANGUAGES, applyDOMTranslations } from './i18n
 import { sanitizeMarkdownLinks } from './markdown-link.js';
 import { applyMode, loadMode, watch } from './theme.js';
 import { buildRecommendedActions } from './recommended-actions.js';
+import { createContextMenuPromptHandler } from './context-menu-prompts.js';
 
 // Hydrate the theme from browser.storage.local (the inline <head> bootstrap
 // only sees localStorage; if the user changes the theme on another device
@@ -335,6 +336,7 @@ const SLASH_COMMANDS = [
 const SLASH_COMMAND_OPTION_ID_PREFIX = 'slash-command-option-';
 
 let currentTabId = null;
+let pendingTabSwitch = null; // tab the user switched to while isProcessing was true
 let isProcessing = false;
 let currentAssistantEl = null;
 let verboseMode = false;
@@ -344,6 +346,21 @@ let recommendationsRequestId = 0;
 let recommendedActionsCollapsed = false;
 let slashCommandMatches = [];
 let slashCommandSelectedIndex = 0;
+const {
+  acceptContextMenuPrompt,
+  drainQueuedContextMenuPrompts,
+  consumePendingContextMenuPrompt,
+  clearQueuedForTab,
+} = createContextMenuPromptHandler({
+  getCurrentTabId: () => currentTabId,
+  getIsProcessing: () => isProcessing,
+  getAgentMode: () => agentMode,
+  setMode,
+  getInputEl: () => inputEl,
+  autoResizeInput,
+  sendMessage,
+  sendToBackground,
+});
 
 // Act-mode risk banner is only meaningful when the permission gate is OFF.
 // With "Ask before consequential actions" ON (the default) the user is
@@ -664,6 +681,7 @@ function settleScheduledRun(event, job) {
     hideActivity();
     if (currentAssistantEl === assistantEl) currentAssistantEl = null;
     abortRequested = false;
+    drainQueuedContextMenuPrompts();
   }
 }
 
@@ -710,6 +728,7 @@ function handleScheduledJobEvent(data, tabId) {
       isProcessing = false;
       sendBtn.disabled = false;
       addMessage('system', t('sp.scheduled.needs_user_input', { title: safeTitle }));
+      drainQueuedContextMenuPrompts();
     }
   }
 }
@@ -970,6 +989,8 @@ async function init() {
   await testConnection({ skipWebBrainCloud: true });
   refreshScheduledJobs();
   refreshRecommendedActions();
+  await consumePendingContextMenuPrompt();
+  drainQueuedContextMenuPrompts();
 
   browser.tabs.onActivated.addListener(async (info) => {
     switchToTab(info.tabId);
@@ -1039,8 +1060,12 @@ if (verboseBtn) {
 }
 
 function switchToTab(newTabId) {
-  if (newTabId === currentTabId) return;
-  if (isProcessing) return; // don't switch while agent is running
+  if (newTabId === currentTabId) { pendingTabSwitch = null; return; }
+  if (isProcessing) {
+    pendingTabSwitch = newTabId; // apply after the run ends
+    return;
+  }
+  pendingTabSwitch = null;
 
   // Save current tab's chat
   if (currentTabId != null) {
@@ -1059,6 +1084,7 @@ function switchToTab(newTabId) {
   scrollToBottom();
   refreshScheduledJobs();
   refreshRecommendedActions();
+  consumePendingContextMenuPrompt().then(() => drainQueuedContextMenuPrompts()).catch(() => {});
 }
 
 function hideRecommendedActions() {
@@ -1594,7 +1620,7 @@ function updateApiBadge() {
   }
 }
 
-async function sendMessage() {
+async function sendMessage(extraChatParams) {
   let text = inputEl.value.trim();
   if (!text || isProcessing) return;
   hideSlashCommandAutocomplete();
@@ -1623,13 +1649,16 @@ async function sendMessage() {
 
   currentAssistantEl = addMessage('assistant', '');
 
+  let accepted = false;
   try {
     const res = await sendToBackground('chat', {
       tabId: currentTabId,
       text,
       mode: agentMode,
       apiMutationsAllowed,
+      ...extraChatParams,
     });
+    accepted = true;
 
     if (abortRequested) {
       // Agent was stopped — show what we got so far
@@ -1658,10 +1687,27 @@ async function sendMessage() {
     currentAssistantEl = null;
     scrollToBottom();
     refreshRecommendedActions();
+    if (pendingTabSwitch != null) {
+      const pending = pendingTabSwitch;
+      pendingTabSwitch = null;
+      switchToTab(pending);
+    }
+    drainQueuedContextMenuPrompts();
   }
+  return accepted;
 }
 
 // --- Listen for Agent Updates ---
+
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg?.target !== 'sidepanel' || msg.action !== 'context_menu_prompt') return;
+  acceptContextMenuPrompt(msg.prompt || msg);
+});
+
+browser.runtime.onMessage.addListener((msg) => {
+  if (msg?.target !== 'sidepanel' || msg.action !== 'context_menu_tab_navigated') return;
+  clearQueuedForTab(msg.tabId);
+});
 
 browser.runtime.onMessage.addListener((msg) => {
   if (msg.target !== 'sidepanel' || msg.action !== 'agent_update') return;
@@ -1963,6 +2009,7 @@ function submitClarify(card, tabId, clarifyId, answer, source) {
         isProcessing = false;
         sendBtn.disabled = false;
         hideActivity();
+        drainQueuedContextMenuPrompts();
       }
       /* background may be torn down — clarify state already lives there */
     });
@@ -2246,6 +2293,7 @@ async function continueAgent() {
     hideActivity();
     currentAssistantEl = null;
     scrollToBottom();
+    drainQueuedContextMenuPrompts();
   }
 }
 

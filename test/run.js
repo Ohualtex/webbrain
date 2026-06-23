@@ -1976,6 +1976,23 @@ test('sidepanel reports missing background responses without res.content crash',
   }
 });
 
+test('sidepanel drains queued context-menu prompts after Continue finishes', () => {
+  for (const [label, panelRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    const match = panel.match(/async function continueAgent\(\) \{[\s\S]*?finally \{([\s\S]*?)\n  \}\n\}/);
+    assert.ok(match, `${label}: continueAgent finally block missing`);
+    const finallyBody = match[1];
+    const idleIdx = finallyBody.indexOf('isProcessing = false;');
+    const drainIdx = finallyBody.indexOf('drainQueuedContextMenuPrompts();');
+    assert.notEqual(idleIdx, -1, `${label}: continueAgent should clear processing state`);
+    assert.notEqual(drainIdx, -1, `${label}: Continue completion should drain queued context-menu prompts`);
+    assert.equal(idleIdx < drainIdx, true, `${label}: context-menu queue must drain after processing is cleared`);
+  }
+});
+
 test('max agent steps treats the slider maximum as unlimited', () => {
   for (const [label, bgRel, settingsRel, panelRel] of [
     ['chrome', 'src/chrome/src/background.js', 'src/chrome/src/ui/settings.js', 'src/chrome/src/ui/sidepanel.js'],

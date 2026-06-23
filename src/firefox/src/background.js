@@ -8,6 +8,7 @@ import {
   getClaudeOAuthStatus,
 } from './providers/oauth-claude.js';
 import { getBalance as capsolverGetBalance } from './agent/captcha-solver.js';
+import { buildContextMenuPrompt, createContextMenuStorage } from './context-menu-storage.js';
 
 /**
  * WebBrain Background Script (Firefox)
@@ -39,6 +40,49 @@ scheduler.start();
 
 const MAX_AGENT_STEPS_DEFAULT = 130;
 const MAX_AGENT_STEPS_UNLIMITED_SENTINEL = 200;
+const CONTEXT_MENU_ASK_SELECTION_ID = 'webbrain-ask-selection';
+
+function getContextMenuApi() {
+  return browser.contextMenus || browser.menus || null;
+}
+
+function getContextMenuPromptStore() {
+  return browser.storage?.session || browser.storage?.local || null;
+}
+
+const contextMenuStorage = createContextMenuStorage(getContextMenuPromptStore);
+
+function createContextMenus() {
+  const api = getContextMenuApi();
+  if (!api?.create) return;
+
+  const create = () => {
+    try {
+      const result = api.create({
+        id: CONTEXT_MENU_ASK_SELECTION_ID,
+        title: 'Ask WebBrain about this',
+        contexts: ['selection'],
+      });
+      Promise.resolve(result).catch((e) => {
+        if (!/duplicate/i.test(String(e?.message || e))) {
+          console.warn('[WebBrain] Failed to create context menu:', e?.message || e);
+        }
+      });
+    } catch (e) {
+      if (!/duplicate/i.test(String(e?.message || e))) {
+        console.warn('[WebBrain] Failed to create context menu:', e?.message || e);
+      }
+    }
+  };
+
+  try {
+    Promise.resolve(api.remove(CONTEXT_MENU_ASK_SELECTION_ID))
+      .catch(() => {})
+      .then(create);
+  } catch {
+    create();
+  }
+}
 
 function normalizeMaxAgentSteps(value) {
   const n = Number(value);
@@ -94,10 +138,15 @@ loadCaptchaSolver();
 
 // Initialize on install
 browser.runtime.onInstalled.addListener(async () => {
+  createContextMenus();
   await providerManager.load();
   await loadMaxSteps();
   await loadAutoScreenshot();
   console.log('[WebBrain] Extension installed, providers loaded.');
+});
+
+browser.runtime.onStartup?.addListener?.(() => {
+  createContextMenus();
 });
 
 // Listen for setting changes
@@ -222,6 +271,57 @@ async function ensureWebBrainGroup(tab) {
   }
 }
 
+// Tracks the pending 250 ms retry timer per tab so it can be cancelled if the
+// tab navigates before the timer fires.
+const pendingContextMenuNotifications = new Map();
+
+function notifySidePanelOfContextMenuPrompt(payload) {
+  const tabId = payload.tabId;
+  const msg = {
+    target: 'sidepanel',
+    action: 'context_menu_prompt',
+    tabId,
+    prompt: payload,
+  };
+  clearTimeout(pendingContextMenuNotifications.get(tabId));
+  browser.runtime.sendMessage(msg).catch(() => {});
+  const timerId = setTimeout(() => {
+    pendingContextMenuNotifications.delete(tabId);
+    browser.runtime.sendMessage(msg).catch(() => {});
+  }, 250);
+  pendingContextMenuNotifications.set(tabId, timerId);
+}
+
+function openSidebarForContextMenu(tab) {
+  if (browser.sidebarAction?.open) {
+    browser.sidebarAction.open().catch(() => {});
+  } else {
+    browser.sidebarAction?.toggle?.().catch(() => {});
+  }
+  if (tab?.id) ensureWebBrainGroup(tab).catch(() => {});
+}
+
+function handleContextMenuAsk(info, tab) {
+  if (info?.menuItemId !== CONTEXT_MENU_ASK_SELECTION_ID || !tab?.id) return;
+  const text = buildContextMenuPrompt(info.selectionText);
+  if (!text) return;
+
+  const payload = {
+    id: `ctx-${tab.id}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    tabId: tab.id,
+    text,
+    createdAt: Date.now(),
+  };
+
+  contextMenuStorage.save(tab.id, payload).catch(() => {});
+  openSidebarForContextMenu(tab);
+  notifySidePanelOfContextMenuPrompt(payload);
+}
+
+getContextMenuApi()?.onClicked?.addListener?.((info, tab) => {
+  handleContextMenuAsk(info, tab);
+});
+
 // Forget the per-window mapping when the user manually ungroups.
 browser.tabGroups?.onRemoved?.addListener?.((group) => {
   for (const [windowId, gid] of webBrainGroupByWindow) {
@@ -243,8 +343,35 @@ browser.windows?.onRemoved?.addListener?.((windowId) => {
 
 // Clean up per-tab agent state when a tab is closed.
 browser.tabs.onRemoved.addListener((tabId) => {
+  clearTimeout(pendingContextMenuNotifications.get(tabId));
+  pendingContextMenuNotifications.delete(tabId);
+  contextMenuStorage.cleanup(tabId);
   scheduler.cancelForTab(tabId).catch(() => {});
   try { agent._cleanupTab(tabId); } catch { /* ignore */ }
+});
+
+// Invalidate pending context-menu prompts on any navigation (full page load or
+// SPA history/fragment change) so a prompt recorded on page A is never
+// submitted in the context of page B.
+function invalidateContextMenuForTab(tabId) {
+  clearTimeout(pendingContextMenuNotifications.get(tabId));
+  pendingContextMenuNotifications.delete(tabId);
+  contextMenuStorage.cleanup(tabId);
+  browser.runtime.sendMessage({
+    target: 'sidepanel',
+    action: 'context_menu_tab_navigated',
+    tabId,
+  }).catch(() => {});
+}
+
+browser.webNavigation?.onCommitted?.addListener?.((details) => {
+  if (details.frameId === 0) invalidateContextMenuForTab(details.tabId);
+});
+browser.webNavigation?.onHistoryStateUpdated?.addListener?.((details) => {
+  if (details.frameId === 0) invalidateContextMenuForTab(details.tabId);
+});
+browser.webNavigation?.onReferenceFragmentUpdated?.addListener?.((details) => {
+  if (details.frameId === 0) invalidateContextMenuForTab(details.tabId);
 });
 
 // Action click: toggle sidebar (existing UX) AND ensure source tab is
@@ -313,6 +440,14 @@ async function handleMessage(msg, sender) {
       if (msg.apiMutationsAllowed) agent.setApiMutationsAllowed(tabId, true);
 
       sendIndicatorMessage(tabId, 'WB_SHOW_AGENT_INDICATORS');
+
+      // Clear any linked context-menu prompt from storage here — after the
+      // background has received the message (so a pre-acceptance crash leaves
+      // the prompt recoverable) but before the agent run starts (so a
+      // mid-run panel close does not replay the prompt on reopen).
+      if (msg.contextMenuClear?.tabId != null) {
+        contextMenuStorage.clear(msg.contextMenuClear.tabId, msg.contextMenuClear.promptId).catch(() => {});
+      }
 
       const updates = [];
       try {
@@ -407,6 +542,16 @@ async function handleMessage(msg, sender) {
       const tabId = msg.tabId || sender.tab?.id;
       if (!tabId) return { ok: false, error: 'No tab ID' };
       return { ok: true, ...(await agent.getScratchpad(tabId)) };
+    }
+
+    case 'consume_context_menu_prompt': {
+      const tabId = msg.tabId || sender.tab?.id;
+      return await contextMenuStorage.consume(tabId);
+    }
+
+    case 'clear_context_menu_prompt': {
+      const tabId = msg.tabId || sender.tab?.id;
+      return await contextMenuStorage.clear(tabId, msg.promptId);
     }
 
     case 'list_scheduled_jobs': {
