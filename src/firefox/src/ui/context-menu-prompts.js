@@ -13,7 +13,8 @@ export function createContextMenuPromptHandler({
   sendMessage,
   sendToBackground,
 }) {
-  const handledContextMenuPromptIds = new Set();
+  const acceptedContextMenuPromptIds = new Set();
+  const trackedContextMenuPromptIds = new Set();
   const deferredContextMenuPrompts = [];
   const queuedContextMenuPrompts = [];
 
@@ -34,15 +35,11 @@ export function createContextMenuPromptHandler({
     return payload?.tabId == null || currentTabId == null || Number(payload.tabId) === Number(currentTabId);
   }
 
-  function acceptContextMenuPrompt(rawPayload) {
-    const payload = normalizeContextMenuPromptPayload(rawPayload);
-    if (!payload) return;
+  function routeTrackedContextMenuPrompt(payload) {
     if (getCurrentTabId() == null) {
       deferredContextMenuPrompts.push(payload);
       return;
     }
-    if (handledContextMenuPromptIds.has(payload.id)) return;
-    handledContextMenuPromptIds.add(payload.id);
 
     // Queue prompts that belong to a different tab or arrive while busy.
     // drainQueuedContextMenuPrompts picks them up on tab switch or run completion.
@@ -53,10 +50,18 @@ export function createContextMenuPromptHandler({
     runContextMenuPrompt(payload);
   }
 
+  function acceptContextMenuPrompt(rawPayload) {
+    const payload = normalizeContextMenuPromptPayload(rawPayload);
+    if (!payload) return;
+    if (acceptedContextMenuPromptIds.has(payload.id) || trackedContextMenuPromptIds.has(payload.id)) return;
+    trackedContextMenuPromptIds.add(payload.id);
+    routeTrackedContextMenuPrompt(payload);
+  }
+
   function flushDeferredContextMenuPrompts() {
     if (getCurrentTabId() == null || deferredContextMenuPrompts.length === 0) return;
     const deferred = deferredContextMenuPrompts.splice(0);
-    for (const payload of deferred) acceptContextMenuPrompt(payload);
+    for (const payload of deferred) routeTrackedContextMenuPrompt(payload);
   }
 
   function drainQueuedContextMenuPrompts() {
@@ -97,7 +102,12 @@ export function createContextMenuPromptHandler({
     // cleared storage, so re-queuing would duplicate the submission on the next
     // drain.  On a pre-receipt SW crash, storage is still intact and
     // consumePendingContextMenuPrompt() recovers the prompt on the next panel load.
-    await sendMessage({ contextMenuClear: clearPayload });
+    let accepted = false;
+    try {
+      accepted = await sendMessage({ contextMenuClear: clearPayload });
+    } catch { /* storage recovery can retry the prompt later */ }
+    trackedContextMenuPromptIds.delete(payload.id);
+    if (accepted) acceptedContextMenuPromptIds.add(payload.id);
   }
 
   async function consumePendingContextMenuPrompt() {
@@ -116,6 +126,12 @@ export function createContextMenuPromptHandler({
     const numericTabId = Number(tabId);
     if (!Number.isFinite(numericTabId)) return;
     const keep = (p) => Number(p.tabId) !== numericTabId;
+    for (const p of queuedContextMenuPrompts) {
+      if (!keep(p)) trackedContextMenuPromptIds.delete(p.id);
+    }
+    for (const p of deferredContextMenuPrompts) {
+      if (!keep(p)) trackedContextMenuPromptIds.delete(p.id);
+    }
     queuedContextMenuPrompts.splice(0, queuedContextMenuPrompts.length,
       ...queuedContextMenuPrompts.filter(keep));
     deferredContextMenuPrompts.splice(0, deferredContextMenuPrompts.length,

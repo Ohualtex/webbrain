@@ -49,6 +49,12 @@ const { createContextMenuStorage: createContextMenuStorageCh } = await import(
 const { createContextMenuStorage: createContextMenuStorageFx } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/context-menu-storage.js').replace(/\\/g, '/')
 );
+const { createContextMenuPromptHandler: createContextMenuPromptHandlerCh } = await import(
+  'file://' + path.join(ROOT, 'src/chrome/src/ui/context-menu-prompts.js').replace(/\\/g, '/')
+);
+const { createContextMenuPromptHandler: createContextMenuPromptHandlerFx } = await import(
+  'file://' + path.join(ROOT, 'src/firefox/src/ui/context-menu-prompts.js').replace(/\\/g, '/')
+);
 
 // permission-gate.js is pure JS (deterministic capability × origin gate).
 const { Capability, capabilityFor, capabilitiesFor, normalizeHost, hostForCapability, requiredHosts, frameHostMatches, isNetworkMutation, PermissionManager, UNTRUSTED_CONTENT_TOOLS } = await import(
@@ -2980,6 +2986,94 @@ function createDeferredRemoveStore() {
 async function waitMicrotasks(count = 2) {
   for (let i = 0; i < count; i += 1) await Promise.resolve();
 }
+
+function createContextMenuPromptHarness(createHandler, prompt, sendMessage) {
+  let currentTabId = prompt.tabId;
+  let isProcessing = false;
+  let mode = 'act';
+  const sends = [];
+  const input = {
+    value: '',
+    events: [],
+    dispatchEvent(ev) {
+      this.events.push(ev?.type || '');
+    },
+  };
+  const handler = createHandler({
+    getCurrentTabId: () => currentTabId,
+    getIsProcessing: () => isProcessing,
+    getAgentMode: () => mode,
+    setMode: (nextMode) => { mode = nextMode; },
+    getInputEl: () => input,
+    autoResizeInput: () => {},
+    sendMessage: async (extra) => {
+      sends.push({ extra, text: input.value, mode });
+      return sendMessage(extra, sends.length);
+    },
+    sendToBackground: async (action, params) => {
+      assert.equal(action, 'consume_context_menu_prompt');
+      assert.deepEqual(params, { tabId: currentTabId });
+      return { prompt };
+    },
+  });
+  return {
+    handler,
+    input,
+    sends,
+    setProcessing(value) { isProcessing = value; },
+    setTabId(value) { currentTabId = value; },
+  };
+}
+
+test('context-menu prompt recovery retries after an unaccepted send', async () => {
+  for (const [label, createHandler] of [
+    ['chrome', createContextMenuPromptHandlerCh],
+    ['firefox', createContextMenuPromptHandlerFx],
+  ]) {
+    const prompt = { id: `${label}-retry`, tabId: 7, text: 'Ask about this selected text' };
+    const h = createContextMenuPromptHarness(createHandler, prompt, async (_extra, attempt) => attempt > 1);
+
+    h.handler.acceptContextMenuPrompt(prompt);
+    await waitMicrotasks(3);
+    assert.equal(h.sends.length, 1, `${label}: direct prompt should attempt one send`);
+    assert.equal(h.sends[0].text, prompt.text, `${label}: prompt text should be submitted`);
+
+    await h.handler.consumePendingContextMenuPrompt();
+    await waitMicrotasks(3);
+    assert.equal(h.sends.length, 2, `${label}: stored prompt should retry after the first send was not accepted`);
+    assert.deepEqual(
+      h.sends[1].extra,
+      { contextMenuClear: { tabId: prompt.tabId, promptId: prompt.id } },
+      `${label}: retry should still clear the stored prompt when accepted`,
+    );
+  }
+});
+
+test('context-menu prompt recovery does not duplicate an in-flight send', async () => {
+  for (const [label, createHandler] of [
+    ['chrome', createContextMenuPromptHandlerCh],
+    ['firefox', createContextMenuPromptHandlerFx],
+  ]) {
+    const prompt = { id: `${label}-inflight`, tabId: 9, text: 'Summarize this selection' };
+    const gate = deferred();
+    const h = createContextMenuPromptHarness(createHandler, prompt, async () => {
+      await gate.promise;
+      return true;
+    });
+
+    h.handler.acceptContextMenuPrompt(prompt);
+    await waitMicrotasks(3);
+    await h.handler.consumePendingContextMenuPrompt();
+    await waitMicrotasks(3);
+    assert.equal(h.sends.length, 1, `${label}: duplicate stored prompt should be ignored while direct send is in flight`);
+
+    gate.resolve();
+    await waitMicrotasks(3);
+    await h.handler.consumePendingContextMenuPrompt();
+    await waitMicrotasks(3);
+    assert.equal(h.sends.length, 1, `${label}: accepted prompts should not be replayed from storage`);
+  }
+});
 
 test('context-menu cleanup blocks stale consume until storage removal finishes', async () => {
   for (const [label, createStorage] of [
