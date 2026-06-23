@@ -92,10 +92,12 @@ export function createContextMenuPromptHandler({
     // immediately when it starts the run — after receiving the request (so a
     // pre-acceptance crash preserves the prompt) but before the agent loop
     // (so a mid-run panel close does not replay it on reopen).
-    const accepted = await sendMessage({ contextMenuClear: clearPayload });
-    if (!accepted) {
-      queuedContextMenuPrompts.push(payload);
-    }
+    // Don't re-queue on failure: by the time sendMessage() resolves or rejects,
+    // the user message is already shown in the UI and the background has already
+    // cleared storage, so re-queuing would duplicate the submission on the next
+    // drain.  On a pre-receipt SW crash, storage is still intact and
+    // consumePendingContextMenuPrompt() recovers the prompt on the next panel load.
+    await sendMessage({ contextMenuClear: clearPayload });
   }
 
   async function consumePendingContextMenuPrompt() {

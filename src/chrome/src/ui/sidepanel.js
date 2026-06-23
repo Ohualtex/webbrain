@@ -1177,7 +1177,7 @@ if (verboseBtn) {
 }
 
 async function switchToTab(newTabId) {
-  if (newTabId === currentTabId) return;
+  if (newTabId === currentTabId) { pendingTabSwitch = null; return; }
   if (isProcessing) {
     pendingTabSwitch = newTabId; // apply after the run ends
     return;
