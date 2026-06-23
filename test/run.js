@@ -2766,10 +2766,38 @@ test('settings page drops stale provider activation completions', () => {
     const activateStart = settings.indexOf('async function activateProvider(id) {');
     assert.notEqual(activateStart, -1, `${label}: activateProvider missing`);
     const activateBody = settings.slice(activateStart, settings.indexOf('\n}\n\n', activateStart) + 2);
-    assert.match(
-      activateBody,
-      /requestedActiveProviderId = id;[\s\S]*?const requestId = \+\+providerActivationRequestId;[\s\S]*?sendToBackground\('set_active_provider', \{ providerId: id \}\);[\s\S]*?if \(requestId !== providerActivationRequestId \|\| requestedActiveProviderId !== id\) \{[\s\S]*?const latestProviderId = requestedActiveProviderId;[\s\S]*?sendToBackground\('set_active_provider', \{ providerId: latestProviderId \}\)\.catch\(\(\) => \{\}\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?activeProviderId = id;[\s\S]*?renderProviders\(\);/,
-      `${label}: stale settings provider activations should repair the latest provider and skip stale rendering`,
+    const requestedIdx = activateBody.indexOf('requestedActiveProviderId = id;');
+    const requestIdx = activateBody.indexOf('const requestId = ++providerActivationRequestId;');
+    const activateIdx = activateBody.indexOf("await sendToBackground('set_active_provider', { providerId: id });");
+    const catchIdx = activateBody.indexOf('} catch (e) {');
+    const failureGuardIdx = activateBody.indexOf('if (requestId === providerActivationRequestId && requestedActiveProviderId === id) {');
+    const failureStatusIdx = activateBody.indexOf("setProviderTestResult(id, 'fail', t('st.providers.failed', { error: e.message }));");
+    const staleGuardIdx = activateBody.indexOf('if (requestId !== providerActivationRequestId || requestedActiveProviderId !== id) {');
+    const repairIdx = activateBody.indexOf("sendToBackground('set_active_provider', { providerId: latestProviderId }).catch(() => {});");
+    const activeIdx = activateBody.indexOf('activeProviderId = id;');
+    const renderIdx = activateBody.indexOf('renderProviders();');
+    assert.notEqual(requestedIdx, -1, `${label}: settings activation should track the latest requested provider`);
+    assert.notEqual(requestIdx, -1, `${label}: settings activation should increment a request sequence`);
+    assert.notEqual(activateIdx, -1, `${label}: settings activation request missing`);
+    assert.notEqual(catchIdx, -1, `${label}: settings activation failures should be caught`);
+    assert.notEqual(failureGuardIdx, -1, `${label}: stale settings activation failures should be dropped`);
+    assert.notEqual(failureStatusIdx, -1, `${label}: current settings activation failures should update the provider status`);
+    assert.notEqual(staleGuardIdx, -1, `${label}: stale settings activation completions should be dropped`);
+    assert.notEqual(repairIdx, -1, `${label}: stale settings activation completions should repair the latest provider`);
+    assert.notEqual(activeIdx, -1, `${label}: successful settings activation should update active provider`);
+    assert.notEqual(renderIdx, -1, `${label}: successful settings activation should rerender providers`);
+    assert.equal(
+      requestedIdx < requestIdx
+        && requestIdx < activateIdx
+        && activateIdx < catchIdx
+        && catchIdx < failureGuardIdx
+        && failureGuardIdx < failureStatusIdx
+        && failureStatusIdx < staleGuardIdx
+        && staleGuardIdx < repairIdx
+        && repairIdx < activeIdx
+        && activeIdx < renderIdx,
+      true,
+      `${label}: settings activation should handle failures and stale completions before rendering success`,
     );
   }
 });

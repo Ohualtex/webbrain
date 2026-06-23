@@ -1414,7 +1414,14 @@ async function activateProvider(id) {
   syncInputsIntoProvidersData();
   requestedActiveProviderId = id;
   const requestId = ++providerActivationRequestId;
-  await sendToBackground('set_active_provider', { providerId: id });
+  try {
+    await sendToBackground('set_active_provider', { providerId: id });
+  } catch (e) {
+    if (requestId === providerActivationRequestId && requestedActiveProviderId === id) {
+      setProviderTestResult(id, 'fail', t('st.providers.failed', { error: e.message }));
+    }
+    return;
+  }
   if (requestId !== providerActivationRequestId || requestedActiveProviderId !== id) {
     const latestProviderId = requestedActiveProviderId;
     if (latestProviderId) {
