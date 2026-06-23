@@ -908,6 +908,151 @@ function addScheduleField(form, labelText, control) {
   return label;
 }
 
+function getScheduleComposerControls(form) {
+  return {
+    titleInput: form?.querySelector('.schedule-title'),
+    promptInput: form?.querySelector('.schedule-prompt'),
+    scheduleType: form?.querySelector('.schedule-type'),
+    timeMode: form?.querySelector('.schedule-time-mode'),
+    afterInput: form?.querySelector('.schedule-after'),
+    runAtInput: form?.querySelector('.schedule-run-at'),
+    intervalInput: form?.querySelector('.schedule-interval'),
+    targetType: form?.querySelector('.schedule-target-type'),
+    urlInput: form?.querySelector('.schedule-url'),
+    modeInput: form?.querySelector('.schedule-mode'),
+    errorEl: form?.querySelector('.schedule-error'),
+    submit: form?.querySelector('.schedule-submit'),
+    cancel: form?.querySelector('.schedule-cancel'),
+  };
+}
+
+function getScheduleComposerTabId(form) {
+  const rawTabId = form?.dataset?.tabId;
+  const parsed = rawTabId != null && rawTabId !== '' ? Number(rawTabId) : currentTabId;
+  return Number.isFinite(parsed) ? parsed : currentTabId;
+}
+
+function updateScheduleComposerVisibility(form) {
+  const { scheduleType, timeMode, afterInput, runAtInput, intervalInput, targetType, urlInput } = getScheduleComposerControls(form);
+  afterInput?.closest('.schedule-field')?.classList.toggle('hidden', timeMode?.value !== 'after');
+  runAtInput?.closest('.schedule-field')?.classList.toggle('hidden', timeMode?.value !== 'at');
+  intervalInput?.closest('.schedule-field')?.classList.toggle('hidden', scheduleType?.value !== 'recurring');
+  urlInput?.closest('.schedule-field')?.classList.toggle('hidden', targetType?.value !== 'url');
+}
+
+async function submitScheduleComposer(e, form) {
+  e.preventDefault();
+  const {
+    titleInput,
+    promptInput,
+    scheduleType,
+    timeMode,
+    afterInput,
+    runAtInput,
+    intervalInput,
+    targetType,
+    urlInput,
+    modeInput,
+    errorEl,
+    submit,
+  } = getScheduleComposerControls(form);
+  const tabId = getScheduleComposerTabId(form);
+  if (tabId == null || !promptInput || !scheduleType || !timeMode || !afterInput || !runAtInput || !intervalInput || !targetType || !urlInput || !modeInput || !errorEl || !submit) {
+    return;
+  }
+
+  errorEl.textContent = '';
+  const prompt = promptInput.value.trim();
+  if (!prompt) {
+    errorEl.textContent = t('sp.schedule_form.error_prompt');
+    return;
+  }
+
+  const schedule = { type: scheduleType.value };
+  if (timeMode.value === 'after') {
+    const minutes = Number(afterInput.value);
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      errorEl.textContent = t('sp.schedule_form.error_time');
+      return;
+    }
+    schedule.after_seconds = Math.round(minutes * 60);
+  } else {
+    const runAtMs = Date.parse(runAtInput.value);
+    if (!Number.isFinite(runAtMs)) {
+      errorEl.textContent = t('sp.schedule_form.error_time');
+      return;
+    }
+    schedule.run_at = new Date(runAtMs).toISOString();
+  }
+  if (schedule.type === 'recurring') {
+    const interval = Number(intervalInput.value);
+    if (!Number.isFinite(interval) || interval < 1) {
+      errorEl.textContent = t('sp.schedule_form.error_interval');
+      return;
+    }
+    schedule.interval_minutes = Math.floor(interval);
+  }
+
+  const target = { type: targetType.value };
+  if (target.type === 'url') {
+    const url = urlInput.value.trim();
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('bad protocol');
+      target.url = parsed.href;
+    } catch {
+      errorEl.textContent = t('sp.schedule_form.error_url');
+      return;
+    }
+  }
+
+  submit.disabled = true;
+  try {
+    const title = titleInput?.value?.trim() || prompt.slice(0, 80) || t('sp.scheduled.task_title');
+    const res = await sendToBackground('create_scheduled_job', {
+      tabId,
+      job: { title, prompt, schedule, target, mode: modeInput.value },
+    });
+    if (res?.success === false || res?.ok === false || !res?.scheduledAt) {
+      throw new Error(res?.error || 'Could not create scheduled job.');
+    }
+    const createdHtml = t('sp.schedule_form.created', {
+      title: escapeHtml(title),
+      time: formatScheduledTime(res.scheduledAt),
+    });
+    if (currentTabId !== tabId) {
+      replaceCachedScheduleComposer(tabId, form.dataset.composerId, createdHtml);
+      return;
+    }
+    const msgEl = form.closest('.message');
+    form.remove();
+    const textEl = msgEl?.querySelector('.message-text');
+    if (textEl) {
+      textEl.innerHTML = createdHtml;
+    }
+    await refreshScheduledJobs();
+  } catch (err) {
+    if (currentTabId !== tabId) {
+      updateCachedScheduleComposerError(tabId, form.dataset.composerId, err.message);
+      return;
+    }
+    submit.disabled = false;
+    errorEl.textContent = err.message;
+  }
+}
+
+function bindScheduleComposer(form) {
+  if (!form || form.dataset.bound) return;
+  const { scheduleType, timeMode, targetType, cancel } = getScheduleComposerControls(form);
+  form.dataset.bound = 'true';
+  scheduleType?.addEventListener('change', () => updateScheduleComposerVisibility(form));
+  timeMode?.addEventListener('change', () => updateScheduleComposerVisibility(form));
+  targetType?.addEventListener('change', () => updateScheduleComposerVisibility(form));
+  updateScheduleComposerVisibility(form);
+  cancel?.addEventListener('click', () => form.closest('.message')?.remove());
+  form.addEventListener('submit', (e) => submitScheduleComposer(e, form));
+}
+
 function replaceCachedScheduleComposer(tabId, composerId, html) {
   const cached = tabChats.get(tabId);
   if (typeof cached !== 'string' || !composerId) return;
@@ -949,11 +1094,13 @@ async function renderScheduleComposer(prefillPrompt = '', tabId = currentTabId) 
 
   const titleInput = document.createElement('input');
   titleInput.type = 'text';
+  titleInput.className = 'schedule-title';
   titleInput.maxLength = 200;
   titleInput.placeholder = t('sp.schedule_form.title_placeholder');
   addScheduleField(form, t('sp.schedule_form.title'), titleInput);
 
   const promptInput = document.createElement('textarea');
+  promptInput.className = 'schedule-prompt';
   promptInput.rows = 4;
   promptInput.required = true;
   promptInput.maxLength = 8000;
@@ -965,10 +1112,12 @@ async function renderScheduleComposer(prefillPrompt = '', tabId = currentTabId) 
   row.className = 'schedule-row';
 
   const scheduleType = document.createElement('select');
+  scheduleType.className = 'schedule-type';
   scheduleType.innerHTML = `<option value="once">${escapeHtml(t('sp.schedule_form.once'))}</option><option value="recurring">${escapeHtml(t('sp.schedule_form.recurring'))}</option>`;
   addScheduleField(row, t('sp.schedule_form.type'), scheduleType);
 
   const timeMode = document.createElement('select');
+  timeMode.className = 'schedule-time-mode';
   timeMode.innerHTML = `<option value="after">${escapeHtml(t('sp.schedule_form.in_minutes'))}</option><option value="at">${escapeHtml(t('sp.schedule_form.at_time'))}</option>`;
   addScheduleField(row, t('sp.schedule_form.when'), timeMode);
   form.appendChild(row);
@@ -979,34 +1128,40 @@ async function renderScheduleComposer(prefillPrompt = '', tabId = currentTabId) 
   afterInput.max = '10080';
   afterInput.step = '1';
   afterInput.value = '10';
-  const afterField = addScheduleField(form, t('sp.schedule_form.after_minutes'), afterInput);
+  afterInput.className = 'schedule-after';
+  addScheduleField(form, t('sp.schedule_form.after_minutes'), afterInput);
 
   const runAtInput = document.createElement('input');
   runAtInput.type = 'datetime-local';
   runAtInput.value = datetimeLocalValue(Date.now() + 10 * 60 * 1000);
-  const runAtField = addScheduleField(form, t('sp.schedule_form.run_at'), runAtInput);
+  runAtInput.className = 'schedule-run-at';
+  addScheduleField(form, t('sp.schedule_form.run_at'), runAtInput);
 
   const intervalInput = document.createElement('input');
   intervalInput.type = 'number';
   intervalInput.min = '1';
   intervalInput.step = '1';
   intervalInput.value = '60';
-  const intervalField = addScheduleField(form, t('sp.schedule_form.interval_minutes'), intervalInput);
+  intervalInput.className = 'schedule-interval';
+  addScheduleField(form, t('sp.schedule_form.interval_minutes'), intervalInput);
 
   const targetType = document.createElement('select');
+  targetType.className = 'schedule-target-type';
   targetType.innerHTML = `<option value="current_tab">${escapeHtml(t('sp.schedule_form.current_tab'))}</option><option value="url">${escapeHtml(t('sp.schedule_form.url'))}</option>`;
   addScheduleField(form, t('sp.schedule_form.target'), targetType);
 
   const urlInput = document.createElement('input');
   urlInput.type = 'url';
+  urlInput.className = 'schedule-url';
   urlInput.placeholder = 'https://example.com/';
-  const urlField = addScheduleField(form, t('sp.schedule_form.target_url'), urlInput);
+  addScheduleField(form, t('sp.schedule_form.target_url'), urlInput);
   if (isHttpScheduleUrl(initialScheduleUrl)) {
     urlInput.value = initialScheduleUrl;
     targetType.value = 'url';
   }
 
   const modeInput = document.createElement('select');
+  modeInput.className = 'schedule-mode';
   modeInput.innerHTML = `<option value="act">${escapeHtml(t('sp.mode.act'))}</option><option value="ask">${escapeHtml(t('sp.mode.ask'))}</option>`;
   modeInput.value = agentMode === 'ask' ? 'ask' : 'act';
   addScheduleField(form, t('sp.schedule_form.mode'), modeInput);
@@ -1029,100 +1184,7 @@ async function renderScheduleComposer(prefillPrompt = '', tabId = currentTabId) 
   actions.appendChild(cancel);
   form.appendChild(actions);
 
-  function updateVisibility() {
-    afterField.classList.toggle('hidden', timeMode.value !== 'after');
-    runAtField.classList.toggle('hidden', timeMode.value !== 'at');
-    intervalField.classList.toggle('hidden', scheduleType.value !== 'recurring');
-    urlField.classList.toggle('hidden', targetType.value !== 'url');
-  }
-  scheduleType.addEventListener('change', updateVisibility);
-  timeMode.addEventListener('change', updateVisibility);
-  targetType.addEventListener('change', updateVisibility);
-  updateVisibility();
-
-  cancel.addEventListener('click', () => msgEl.remove());
-
-  form.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    errorEl.textContent = '';
-    const prompt = promptInput.value.trim();
-    if (!prompt) {
-      errorEl.textContent = t('sp.schedule_form.error_prompt');
-      return;
-    }
-
-    const schedule = { type: scheduleType.value };
-    if (timeMode.value === 'after') {
-      const minutes = Number(afterInput.value);
-      if (!Number.isFinite(minutes) || minutes < 0) {
-        errorEl.textContent = t('sp.schedule_form.error_time');
-        return;
-      }
-      schedule.after_seconds = Math.round(minutes * 60);
-    } else {
-      const runAtMs = Date.parse(runAtInput.value);
-      if (!Number.isFinite(runAtMs)) {
-        errorEl.textContent = t('sp.schedule_form.error_time');
-        return;
-      }
-      schedule.run_at = new Date(runAtMs).toISOString();
-    }
-    if (schedule.type === 'recurring') {
-      const interval = Number(intervalInput.value);
-      if (!Number.isFinite(interval) || interval < 1) {
-        errorEl.textContent = t('sp.schedule_form.error_interval');
-        return;
-      }
-      schedule.interval_minutes = Math.floor(interval);
-    }
-
-    const target = { type: targetType.value };
-    if (target.type === 'url') {
-      const url = urlInput.value.trim();
-      try {
-        const parsed = new URL(url);
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') throw new Error('bad protocol');
-        target.url = parsed.href;
-      } catch {
-        errorEl.textContent = t('sp.schedule_form.error_url');
-        return;
-      }
-    }
-
-    submit.disabled = true;
-    try {
-      const title = titleInput.value.trim() || prompt.slice(0, 80) || t('sp.scheduled.task_title');
-      const res = await sendToBackground('create_scheduled_job', {
-        tabId,
-        job: { title, prompt, schedule, target, mode: modeInput.value },
-      });
-      if (res?.success === false || res?.ok === false || !res?.scheduledAt) {
-        throw new Error(res?.error || 'Could not create scheduled job.');
-      }
-      const createdHtml = t('sp.schedule_form.created', {
-        title: escapeHtml(title),
-        time: formatScheduledTime(res.scheduledAt),
-      });
-      if (currentTabId !== tabId) {
-        replaceCachedScheduleComposer(tabId, form.dataset.composerId, createdHtml);
-        return;
-      }
-      form.remove();
-      const textEl = msgEl.querySelector('.message-text');
-      if (textEl) {
-        textEl.innerHTML = createdHtml;
-      }
-      await refreshScheduledJobs();
-    } catch (err) {
-      if (currentTabId !== tabId) {
-        updateCachedScheduleComposerError(tabId, form.dataset.composerId, err.message);
-        return;
-      }
-      submit.disabled = false;
-      errorEl.textContent = err.message;
-    }
-  });
-
+  bindScheduleComposer(form);
   content.appendChild(form);
   promptInput.focus();
   scrollToBottom();
@@ -1464,10 +1526,17 @@ function rebindClarifyCards() {
   });
 }
 
+function rebindScheduleComposers() {
+  document.querySelectorAll('form.schedule-composer').forEach(form => {
+    bindScheduleComposer(form);
+  });
+}
+
 function rebindRestoredMessageControls() {
   rebindCopyButtons();
   rebindContinueButtons();
   rebindClarifyCards();
+  rebindScheduleComposers();
 }
 
 async function loadProviders() {
