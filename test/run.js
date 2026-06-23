@@ -2039,6 +2039,31 @@ test('sidepanel drops stale recommended-action refreshes after tab changes or ru
   }
 });
 
+test('sidepanel drops stale recommended-action clicks after async act confirmation', () => {
+  for (const [label, panelRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    const match = panel.match(/async function runRecommendedAction\(action\) \{([\s\S]*?)\n\}/);
+    assert.ok(match, `${label}: runRecommendedAction missing`);
+    const body = match[1];
+    const captureIdx = body.indexOf('const tabId = currentTabId;');
+    const initialGuard = '!prompt || tabId == null || isProcessing';
+    const initialGuardIdx = body.indexOf(initialGuard);
+    const ensureIdx = body.indexOf('await ensureActMode();');
+    const staleGuard = '!ok || currentTabId !== tabId || isProcessing';
+    const staleGuardIdx = body.indexOf(staleGuard);
+    const inputIdx = body.indexOf('inputEl.value = prompt;');
+    assert.notEqual(captureIdx, -1, `${label}: recommended-action click should capture the initiating tab`);
+    assert.notEqual(initialGuardIdx, -1, `${label}: recommended-action click should reject missing tabs before sending`);
+    assert.notEqual(ensureIdx, -1, `${label}: act recommended-action click should await act confirmation`);
+    assert.notEqual(staleGuardIdx, -1, `${label}: stale recommended-action clicks should be dropped after act confirmation`);
+    assert.notEqual(inputIdx, -1, `${label}: recommended-action click composer write missing`);
+    assert.equal(captureIdx < initialGuardIdx && initialGuardIdx < ensureIdx && ensureIdx < staleGuardIdx && staleGuardIdx < inputIdx, true, `${label}: stale click guard must run after async act confirmation and before mutating the composer`);
+  }
+});
+
 test('sidepanel scopes async tab commands to the original tab', () => {
   for (const [label, panelRel] of [
     ['chrome', 'src/chrome/src/ui/sidepanel.js'],

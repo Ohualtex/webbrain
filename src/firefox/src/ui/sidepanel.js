@@ -1218,10 +1218,11 @@ async function refreshRecommendedActions() {
 
 async function runRecommendedAction(action) {
   const prompt = typeof action === 'string' ? action : action?.prompt;
-  if (!prompt || isProcessing) return;
+  const tabId = currentTabId;
+  if (!prompt || tabId == null || isProcessing) return;
   if (action?.mode === 'act') {
     const ok = await ensureActMode();
-    if (!ok) return;
+    if (!ok || currentTabId !== tabId || isProcessing) return;
   }
   inputEl.value = prompt;
   autoResizeInput();
