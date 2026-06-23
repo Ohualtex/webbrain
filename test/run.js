@@ -2994,6 +2994,42 @@ test('settings async test controls surface rejected background results', () => {
   }
 });
 
+test('settings waits for immediate preference writes and theme persistence', () => {
+  for (const [label, settingsRel] of [
+    ['chrome', 'src/chrome/src/ui/settings.js'],
+    ['firefox', 'src/firefox/src/ui/settings.js'],
+  ]) {
+    const settings = fs.readFileSync(path.join(ROOT, settingsRel), 'utf8');
+    assert.match(
+      settings,
+      /themeSelect\.addEventListener\('change', async \(\) => \{[\s\S]*?await applyMode\(mode\);[\s\S]*?\}\);/,
+      `${label}: theme selection should await persistence`,
+    );
+    assert.match(
+      settings,
+      /profileEnabledToggle\.addEventListener\('change', async \(\) => \{[\s\S]*?await (chrome|browser)\.storage\.local\.set\(\{ profileEnabled: profileEnabledToggle\.checked \}\)\.catch\(\(\) => \{\}\);[\s\S]*?\}\);/,
+      `${label}: profile toggle should await persistence`,
+    );
+    assert.match(
+      settings,
+      /captchaEnabledToggle\.addEventListener\('change', async \(\) => \{[\s\S]*?await (chrome|browser)\.storage\.local\.set\(\{ captchaSolverEnabled: captchaEnabledToggle\.checked \}\)\.catch\(\(\) => \{\}\);[\s\S]*?\}\);/,
+      `${label}: captcha toggle should await persistence`,
+    );
+    assert.match(
+      settings,
+      /try \{[\s\S]*?void (chrome|browser)\.storage\.local\.set\(\{ providerFilter: f\.key \}\)\.catch\(\(\) => \{\}\);[\s\S]*?renderProviders\(\);/,
+      `${label}: provider filter changes should still persist even if the render rebuilds immediately`,
+    );
+
+    const theme = fs.readFileSync(path.join(ROOT, label === 'chrome' ? 'src/chrome/src/ui/theme.js' : 'src/firefox/src/ui/theme.js'), 'utf8');
+    assert.match(
+      theme,
+      /export async function applyMode\(mode, opts = \{\}\) \{[\s\S]*?await (chrome|browser)\.storage\.local\.set\(\{ themeMode: mode \}\)\.catch\(\(\) => \{\}\);[\s\S]*?\}/,
+      `${label}: shared theme helper should await storage persistence`,
+    );
+  }
+});
+
 test('settings page awaits immediate preference writes before moving on', () => {
   for (const [label, settingsRel] of [
     ['chrome', 'src/chrome/src/ui/settings.js'],
@@ -3115,6 +3151,20 @@ test('sidepanel awaits immediate verbose preference writes', () => {
       panel,
       /if \(\s*\/\^\\\/verbose\\b\\s\*\/i\.test\(text\)\s*\) \{[\s\S]*?await (chrome|browser)\.storage\.local\.set\(\{ verboseMode \}\)\.catch\(\(\) => \{\}\);/,
       `${label}: /verbose should await persistence before echoing the mode change`,
+    );
+  }
+});
+
+test('sidepanel awaits recommended-actions collapse persistence', () => {
+  for (const [label, panelRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    assert.match(
+      panel,
+      /recommendedActionsToggleEl\.addEventListener\('click', async \(\) => \{[\s\S]*?await (chrome|browser)\.storage\.local\.set\(\{ \[RECOMMENDED_ACTIONS_COLLAPSED_KEY\]: !recommendedActionsCollapsed \}\)\.catch\(\(\) => \{\}\);[\s\S]*?setRecommendedActionsCollapsed\(!recommendedActionsCollapsed, \{ persist: false \}\);[\s\S]*?\}\);/,
+      `${label}: recommended-actions collapse should await persistence`,
     );
   }
 });

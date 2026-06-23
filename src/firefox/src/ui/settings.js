@@ -73,10 +73,10 @@ if (themeSelect) {
     themeSelect.value = mode;
     applyMode(mode, { syncStorage: false }); // already loaded, just paint
   });
-  themeSelect.addEventListener('change', () => {
+  themeSelect.addEventListener('change', async () => {
     const mode = THEME_MODES.includes(themeSelect.value) ? themeSelect.value : 'system';
     currentThemeMode = mode;
-    applyMode(mode);
+    await applyMode(mode);
   });
   watch(() => currentThemeMode);
   // If another Settings tab or the side panel flips the theme, watch()
@@ -639,8 +639,8 @@ function flashProfileResult(className, text) {
 }
 
 if (profileEnabledToggle) {
-  profileEnabledToggle.addEventListener('change', () => {
-    browser.storage.local.set({ profileEnabled: profileEnabledToggle.checked });
+  profileEnabledToggle.addEventListener('change', async () => {
+    await browser.storage.local.set({ profileEnabled: profileEnabledToggle.checked }).catch(() => {});
   });
 }
 
@@ -677,8 +677,8 @@ function flashCaptchaResult(className, text) {
 }
 
 if (captchaEnabledToggle) {
-  captchaEnabledToggle.addEventListener('change', () => {
-    browser.storage.local.set({ captchaSolverEnabled: captchaEnabledToggle.checked });
+  captchaEnabledToggle.addEventListener('change', async () => {
+    await browser.storage.local.set({ captchaSolverEnabled: captchaEnabledToggle.checked }).catch(() => {});
   });
 }
 
@@ -1149,15 +1149,15 @@ function renderProviderFilterBar() {
     btn.textContent = t(f.labelKey);
     btn.addEventListener('click', () => {
       if (providerFilter === f.key) return;
-      // Snapshot whatever the user has typed but not yet saved BEFORE we
-      // rebuild the DOM — otherwise input values for the currently-rendered
-      // cards are lost (e.g. typed an API key, then clicked a filter pill
-      // to compare two providers).
-      syncInputsIntoProvidersData();
-      providerFilter = f.key;
-      try { browser.storage.local.set({ providerFilter: f.key }); } catch {}
-      renderProviders();
-    });
+    // Snapshot whatever the user has typed but not yet saved BEFORE we
+    // rebuild the DOM — otherwise input values for the currently-rendered
+    // cards are lost (e.g. typed an API key, then clicked a filter pill
+    // to compare two providers).
+    syncInputsIntoProvidersData();
+    providerFilter = f.key;
+    void browser.storage.local.set({ providerFilter: f.key }).catch(() => {});
+    renderProviders();
+  });
     bar.appendChild(btn);
   }
   return bar;

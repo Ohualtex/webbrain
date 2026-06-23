@@ -1267,8 +1267,9 @@ function setRecommendedActionsCollapsed(collapsed, { persist = true } = {}) {
 }
 
 if (recommendedActionsToggleEl) {
-  recommendedActionsToggleEl.addEventListener('click', () => {
-    setRecommendedActionsCollapsed(!recommendedActionsCollapsed);
+  recommendedActionsToggleEl.addEventListener('click', async () => {
+    await browser.storage.local.set({ [RECOMMENDED_ACTIONS_COLLAPSED_KEY]: !recommendedActionsCollapsed }).catch(() => {});
+    setRecommendedActionsCollapsed(!recommendedActionsCollapsed, { persist: false });
   });
 }
 
