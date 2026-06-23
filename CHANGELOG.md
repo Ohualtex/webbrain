@@ -8,12 +8,14 @@ This changelog was generated from the repository Git history and release tags. V
 
 ### Changed
 - Max Agent Steps settings copy now explains that the `∞` slider position means unlimited steps in every supported Chrome and Firefox locale.
+- `/schedule` now accepts `0` minutes for standalone scheduled tasks, treating it as "start now" while keeping nonzero future delays at the existing one-minute minimum.
 
 ### Fixed
 - Max Agent Steps now treats the Settings slider maximum (`200`) as the unlimited sentinel instead of a finite cap, migrates stale stored `200+` values to `maxAgentSteps: 0`, and keeps the continue bar from displaying unlimited (`0`) as the default step count.
 
 ### Tests
 - Added regression coverage to ensure `0`, `200`, and values above `200` remain unlimited in both browser builds, and that all max-step locale descriptions mention the `∞` setting.
+- Added scheduler coverage for zero-delay tasks and the `/schedule` composer accepting an immediate relative delay.
 
 ## [15.2.0] - 2026-06-22
 
