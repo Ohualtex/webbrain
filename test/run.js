@@ -1932,6 +1932,19 @@ test('chrome /record reports mic denial as a warning, not recording failure', ()
   assert.match(locale, /Recording started with tab audio and video only/, 'chrome: mic warning should say recording started');
 });
 
+test('chrome sidepanel Escape abort honors slash autocomplete dismissal', () => {
+  const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
+  assert.match(panel, /if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*hideSlashCommandAutocomplete\(\);\s*return true;\s*\}/, 'chrome: slash autocomplete Escape should consume the key event');
+
+  const globalHandlerStart = panel.indexOf('function handleGlobalKeydown(e)');
+  const defaultPreventedGuard = panel.indexOf('if (e.defaultPrevented) return;', globalHandlerStart);
+  const abortCall = panel.indexOf('abortRun();', globalHandlerStart);
+  assert.notEqual(globalHandlerStart, -1, 'chrome: global keydown handler missing');
+  assert.notEqual(defaultPreventedGuard, -1, 'chrome: global keydown handler should honor consumed key events');
+  assert.notEqual(abortCall, -1, 'chrome: Escape abort shortcut missing');
+  assert.equal(defaultPreventedGuard < abortCall, true, 'chrome: consumed slash-menu Escape should not reach abortRun');
+});
+
 test('sidepanel reports missing background responses without res.content crash', () => {
   for (const [label, panelRel] of [
     ['chrome', 'src/chrome/src/ui/sidepanel.js'],

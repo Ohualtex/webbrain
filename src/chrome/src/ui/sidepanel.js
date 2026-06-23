@@ -2870,6 +2870,44 @@ function sendToBackground(action, data = {}) {
   });
 }
 
+// --- Keyboard shortcuts ---
+
+function handleGlobalKeydown(e) {
+  if (e.defaultPrevented) return;
+
+  // Don't steal shortcuts from other input elements (e.g. schedule form fields)
+  const tag = e.target?.tagName;
+  if (e.target !== inputEl && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')) return;
+
+  const mod = e.ctrlKey || e.metaKey;
+
+  // Ctrl+/ (Cmd+/ on Mac): focus input
+  if (mod && e.key === '/') {
+    e.preventDefault();
+    inputEl.focus();
+    inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+    return;
+  }
+  // Ctrl+Shift+A: switch to Ask mode (blocked while agent is running)
+  if (mod && e.shiftKey && e.key === 'A' && !isProcessing) {
+    e.preventDefault();
+    setMode('ask');
+    return;
+  }
+  // Ctrl+Shift+X: switch to Act mode (blocked while agent is running)
+  if (mod && e.shiftKey && e.key === 'X' && !isProcessing) {
+    e.preventDefault();
+    ensureActMode();
+    return;
+  }
+  // Escape: abort running agent (only when slash menu is not open)
+  if (e.key === 'Escape' && isProcessing &&
+      slashCommandMenuEl?.classList.contains('hidden')) {
+    e.preventDefault();
+    abortRun();
+  }
+}
+
 // --- Mode Toggle ---
 
 function setMode(mode) {
@@ -2918,7 +2956,7 @@ modeActBtn.addEventListener('click', () => {
 
 // --- Stop / Abort ---
 
-stopBtn.addEventListener('click', async () => {
+async function abortRun() {
   if (!isProcessing) return;
   abortRequested = true;
   showActivity(t('sp.activity.stopping'));
@@ -2946,18 +2984,23 @@ stopBtn.addEventListener('click', async () => {
       abortRequested = false;
     }
   }, 3000); // safety timeout if background takes too long
-});
+}
+
+stopBtn.addEventListener('click', abortRun);
 
 
 // --- Event Listeners ---
 
 sendBtn.addEventListener('click', sendMessage);
 
+document.addEventListener('keydown', handleGlobalKeydown);
+
 inputEl.addEventListener('keydown', (e) => {
   if (handleSlashCommandKeydown(e)) return;
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
+    return;
   }
 });
 
