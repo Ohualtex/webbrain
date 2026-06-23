@@ -2113,7 +2113,12 @@ test('trace viewer revokes screenshot object URLs when replacing rendered timeli
     );
     assert.match(
       traces,
-      /function replaceTimelineObjectUrls\(nextUrls\) \{[\s\S]*?const oldUrls = timelineObjectUrls;[\s\S]*?for \(const url of oldUrls\) URL\.revokeObjectURL\(url\);[\s\S]*?imgModal\.classList\.remove\('show'\);[\s\S]*?imgModalImg\.removeAttribute\('src'\);[\s\S]*?timelineObjectUrls = nextUrls;[\s\S]*?\}/,
+      /function revokeObjectUrls\(urls\) \{[\s\S]*?for \(const url of urls\) URL\.revokeObjectURL\(url\);[\s\S]*?\}/,
+      `${label}: trace viewer should have a reusable object URL revocation helper`,
+    );
+    assert.match(
+      traces,
+      /function replaceTimelineObjectUrls\(nextUrls\) \{[\s\S]*?const oldUrls = timelineObjectUrls;[\s\S]*?revokeObjectUrls\(oldUrls\);[\s\S]*?imgModal\.classList\.remove\('show'\);[\s\S]*?imgModalImg\.removeAttribute\('src'\);[\s\S]*?timelineObjectUrls = nextUrls;[\s\S]*?\}/,
       `${label}: replacing a rendered timeline should revoke old URLs and clear stale modal images`,
     );
 
@@ -2122,7 +2127,7 @@ test('trace viewer revokes screenshot object URLs when replacing rendered timeli
     const renderRunBody = traces.slice(renderRunStart, traces.indexOf('\n}\n\nasync function renderCompare', renderRunStart) + 2);
     assert.match(
       renderRunBody,
-      /if \(!run\) \{[\s\S]*?replaceTimelineObjectUrls\(new Set\(\)\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?const objectUrls = new Set\(\);[\s\S]*?const html = await buildRunView\(run, events, false, objectUrls\);[\s\S]*?replaceTimelineObjectUrls\(objectUrls\);[\s\S]*?mainPane\.innerHTML = html;/,
+      /if \(!run\) \{[\s\S]*?replaceTimelineObjectUrls\(new Set\(\)\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?const objectUrls = new Set\(\);[\s\S]*?const html = await buildRunView\(run, events, false, objectUrls\);[\s\S]*?revokeObjectUrls\(objectUrls\);[\s\S]*?mainPane\.classList\.remove\('compare-mode'\);[\s\S]*?replaceTimelineObjectUrls\(objectUrls\);[\s\S]*?mainPane\.innerHTML = html;/,
       `${label}: single-run rendering should swap object URL ownership before replacing HTML`,
     );
     assert.equal(
@@ -2130,6 +2135,70 @@ test('trace viewer revokes screenshot object URLs when replacing rendered timeli
       true,
       `${label}: empty-state transitions should clear timeline object URLs`,
     );
+  }
+});
+
+test('trace viewer drops stale async render completions', () => {
+  for (const [label, tracesRel] of [
+    ['chrome', 'src/chrome/src/ui/traces.js'],
+    ['firefox', 'src/firefox/src/ui/traces.js'],
+  ]) {
+    const traces = fs.readFileSync(path.join(ROOT, tracesRel), 'utf8');
+    assert.match(traces, /let traceRenderRequestId = 0;/, `${label}: trace renders should be sequenced`);
+    assert.match(
+      traces,
+      /function isCurrentRunRender\(requestId, runId\) \{[\s\S]*?requestId === traceRenderRequestId && !compareMode && selectedRunId === runId;[\s\S]*?\}/,
+      `${label}: single-run renders should verify the active selection before committing`,
+    );
+    assert.match(
+      traces,
+      /function isCurrentCompareRender\(requestId, aId, bId\) \{[\s\S]*?requestId === traceRenderRequestId[\s\S]*?compareMode[\s\S]*?compareIds\.length === 2[\s\S]*?compareIds\[0\] === aId[\s\S]*?compareIds\[1\] === bId;[\s\S]*?\}/,
+      `${label}: compare renders should verify the active compare pair before committing`,
+    );
+
+    const renderRunStart = traces.indexOf('async function renderRun(runId) {');
+    assert.notEqual(renderRunStart, -1, `${label}: renderRun missing`);
+    const renderRunBody = traces.slice(renderRunStart, traces.indexOf('\n}\n\nasync function renderCompare', renderRunStart) + 2);
+    const runRequestIdx = renderRunBody.indexOf('const requestId = ++traceRenderRequestId;');
+    const getRunIdx = renderRunBody.indexOf('const run = await getRun(runId);');
+    const firstRunGuardIdx = renderRunBody.indexOf('if (!isCurrentRunRender(requestId, runId)) return;', getRunIdx);
+    const getEventsIdx = renderRunBody.indexOf('const events = await getRunEvents(runId);');
+    const secondRunGuardIdx = renderRunBody.indexOf('if (!isCurrentRunRender(requestId, runId)) return;', getEventsIdx);
+    const buildRunIdx = renderRunBody.indexOf('const html = await buildRunView(run, events, false, objectUrls);');
+    const thirdRunGuardIdx = renderRunBody.indexOf('if (!isCurrentRunRender(requestId, runId)) {', buildRunIdx);
+    const runRevokeIdx = renderRunBody.indexOf('revokeObjectUrls(objectUrls);', thirdRunGuardIdx);
+    const runReplaceIdx = renderRunBody.indexOf('replaceTimelineObjectUrls(objectUrls);', thirdRunGuardIdx);
+    assert.notEqual(runRequestIdx, -1, `${label}: renderRun should create a render request id`);
+    assert.notEqual(getRunIdx, -1, `${label}: renderRun should load the run`);
+    assert.notEqual(firstRunGuardIdx, -1, `${label}: renderRun should drop stale completions after getRun`);
+    assert.notEqual(getEventsIdx, -1, `${label}: renderRun should load events`);
+    assert.notEqual(secondRunGuardIdx, -1, `${label}: renderRun should drop stale completions after getRunEvents`);
+    assert.notEqual(buildRunIdx, -1, `${label}: renderRun should build the view`);
+    assert.notEqual(thirdRunGuardIdx, -1, `${label}: renderRun should re-check before replacing the pane`);
+    assert.notEqual(runRevokeIdx, -1, `${label}: stale renderRun views should revoke newly-created object URLs`);
+    assert.notEqual(runReplaceIdx, -1, `${label}: current renderRun views should transfer object URL ownership`);
+    assert.equal(runRequestIdx < getRunIdx && getRunIdx < firstRunGuardIdx && firstRunGuardIdx < getEventsIdx && getEventsIdx < secondRunGuardIdx && secondRunGuardIdx < buildRunIdx && buildRunIdx < thirdRunGuardIdx && thirdRunGuardIdx < runRevokeIdx && runRevokeIdx < runReplaceIdx, true, `${label}: renderRun stale guards should run before pane replacement`);
+
+    const renderCompareStart = traces.indexOf('async function renderCompare(aId, bId) {');
+    assert.notEqual(renderCompareStart, -1, `${label}: renderCompare missing`);
+    const renderCompareBody = traces.slice(renderCompareStart, traces.indexOf('\n}\n\n/**', renderCompareStart) + 2);
+    const compareRequestIdx = renderCompareBody.indexOf('const requestId = ++traceRenderRequestId;');
+    const compareLoadIdx = renderCompareBody.indexOf('const [a, b, aEv, bEv] = await Promise.all');
+    const firstCompareGuardIdx = renderCompareBody.indexOf('if (!isCurrentCompareRender(requestId, aId, bId)) return;', compareLoadIdx);
+    const buildAIdx = renderCompareBody.indexOf('const aHtml = await buildRunView(a, aEv, true, objectUrls);');
+    const buildBIdx = renderCompareBody.indexOf('const bHtml = await buildRunView(b, bEv, true, objectUrls);');
+    const secondCompareGuardIdx = renderCompareBody.indexOf('if (!isCurrentCompareRender(requestId, aId, bId)) {', buildBIdx);
+    const compareRevokeIdx = renderCompareBody.indexOf('revokeObjectUrls(objectUrls);', secondCompareGuardIdx);
+    const compareReplaceIdx = renderCompareBody.indexOf('replaceTimelineObjectUrls(objectUrls);', secondCompareGuardIdx);
+    assert.notEqual(compareRequestIdx, -1, `${label}: renderCompare should create a render request id`);
+    assert.notEqual(compareLoadIdx, -1, `${label}: renderCompare should load both runs and event lists`);
+    assert.notEqual(firstCompareGuardIdx, -1, `${label}: renderCompare should drop stale completions after loading`);
+    assert.notEqual(buildAIdx, -1, `${label}: renderCompare should build the first pane`);
+    assert.notEqual(buildBIdx, -1, `${label}: renderCompare should build the second pane`);
+    assert.notEqual(secondCompareGuardIdx, -1, `${label}: renderCompare should re-check before replacing the pane`);
+    assert.notEqual(compareRevokeIdx, -1, `${label}: stale renderCompare views should revoke newly-created object URLs`);
+    assert.notEqual(compareReplaceIdx, -1, `${label}: current renderCompare views should transfer object URL ownership`);
+    assert.equal(compareRequestIdx < compareLoadIdx && compareLoadIdx < firstCompareGuardIdx && firstCompareGuardIdx < buildAIdx && buildAIdx < buildBIdx && buildBIdx < secondCompareGuardIdx && secondCompareGuardIdx < compareRevokeIdx && compareRevokeIdx < compareReplaceIdx, true, `${label}: renderCompare stale guards should run before pane replacement`);
   }
 });
 

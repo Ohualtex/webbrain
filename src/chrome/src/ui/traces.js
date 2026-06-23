@@ -23,6 +23,7 @@ let selectedRunId = null;
 let compareMode = false;
 let compareIds = []; // length 0..2
 let timelineObjectUrls = new Set();
+let traceRenderRequestId = 0;
 
 // conversationId → [runs, oldest first]. Rebuilt from allRuns on every refresh.
 let conversationMap = new Map();
@@ -150,33 +151,58 @@ function handleRunClick(runId) {
 
 // ----- Single run view ------------------------------------------------------
 
+function isCurrentRunRender(requestId, runId) {
+  return requestId === traceRenderRequestId && !compareMode && selectedRunId === runId;
+}
+
+function isCurrentCompareRender(requestId, aId, bId) {
+  return requestId === traceRenderRequestId &&
+    compareMode &&
+    compareIds.length === 2 &&
+    compareIds[0] === aId &&
+    compareIds[1] === bId;
+}
+
 async function renderRun(runId) {
+  const requestId = ++traceRenderRequestId;
   const run = await getRun(runId);
+  if (!isCurrentRunRender(requestId, runId)) return;
   if (!run) {
     replaceTimelineObjectUrls(new Set());
     return;
   }
   const events = await getRunEvents(runId);
-  mainPane.classList.remove('compare-mode');
+  if (!isCurrentRunRender(requestId, runId)) return;
   const objectUrls = new Set();
   const html = await buildRunView(run, events, false, objectUrls);
+  if (!isCurrentRunRender(requestId, runId)) {
+    revokeObjectUrls(objectUrls);
+    return;
+  }
+  mainPane.classList.remove('compare-mode');
   replaceTimelineObjectUrls(objectUrls);
   mainPane.innerHTML = html;
   wireTimelineImages(mainPane);
 }
 
 async function renderCompare(aId, bId) {
+  const requestId = ++traceRenderRequestId;
   const [a, b, aEv, bEv] = await Promise.all([
     getRun(aId), getRun(bId), getRunEvents(aId), getRunEvents(bId),
   ]);
+  if (!isCurrentCompareRender(requestId, aId, bId)) return;
   if (!a || !b) {
     replaceTimelineObjectUrls(new Set());
     return;
   }
-  mainPane.classList.add('compare-mode');
   const objectUrls = new Set();
   const aHtml = await buildRunView(a, aEv, true, objectUrls);
   const bHtml = await buildRunView(b, bEv, true, objectUrls);
+  if (!isCurrentCompareRender(requestId, aId, bId)) {
+    revokeObjectUrls(objectUrls);
+    return;
+  }
+  mainPane.classList.add('compare-mode');
   replaceTimelineObjectUrls(objectUrls);
   mainPane.innerHTML = `<div class="pane">${aHtml}</div><div class="pane">${bHtml}</div>`;
   wireTimelineImages(mainPane);
@@ -347,12 +373,16 @@ function createTrackedObjectUrl(blob, objectUrls) {
   return url;
 }
 
+function revokeObjectUrls(urls) {
+  for (const url of urls) URL.revokeObjectURL(url);
+}
+
 function replaceTimelineObjectUrls(nextUrls) {
   const oldUrls = timelineObjectUrls;
   if (oldUrls.size > 0) {
     const modalSrc = imgModalImg?.src || '';
     const modalUsesOldUrl = oldUrls.has(modalSrc);
-    for (const url of oldUrls) URL.revokeObjectURL(url);
+    revokeObjectUrls(oldUrls);
     if (modalUsesOldUrl) {
       imgModal.classList.remove('show');
       imgModalImg.removeAttribute('src');
