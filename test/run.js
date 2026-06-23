@@ -2006,6 +2006,24 @@ test('sidepanel drains queued context-menu prompts after Continue finishes', () 
   }
 });
 
+test('sidepanel drains scheduled-run context-menu prompts after pending tab switches', () => {
+  for (const [label, panelRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    assert.match(panel, /function drainQueuedContextMenuPromptsAfterPendingTabSwitch\(\) \{[\s\S]*?if \(pendingTabSwitch == null\) \{[\s\S]*?drainQueuedContextMenuPrompts\(\);[\s\S]*?const pending = pendingTabSwitch;[\s\S]*?pendingTabSwitch = null;[\s\S]*?switchToTab\(pending\)[\s\S]*?drainQueuedContextMenuPrompts\(\)/, `${label}: scheduled completions need to apply pending tab switches before draining context-menu prompts`);
+
+    const scheduledStart = panel.indexOf('function settleScheduledRun(event, job)');
+    const scheduledEnd = panel.indexOf('if (scheduledJobsEl)', scheduledStart);
+    assert.notEqual(scheduledStart, -1, `${label}: scheduled run settlement helper missing`);
+    assert.notEqual(scheduledEnd, -1, `${label}: scheduled job event block missing`);
+    const scheduledBlock = panel.slice(scheduledStart, scheduledEnd);
+    const helperCalls = scheduledBlock.match(/drainQueuedContextMenuPromptsAfterPendingTabSwitch\(\);/g) || [];
+    assert.equal(helperCalls.length >= 2, true, `${label}: scheduled terminal and waiting-idle paths should drain after pending tab switches`);
+  }
+});
+
 test('background awaits context-menu prompt clear before agent chat starts', () => {
   for (const [label, bgRel] of [
     ['chrome', 'src/chrome/src/background.js'],

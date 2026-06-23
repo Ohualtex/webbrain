@@ -753,6 +753,18 @@ async function scheduledJobAction(action, jobId) {
   }
 }
 
+function drainQueuedContextMenuPromptsAfterPendingTabSwitch() {
+  if (pendingTabSwitch == null) {
+    drainQueuedContextMenuPrompts();
+    return;
+  }
+  const pending = pendingTabSwitch;
+  pendingTabSwitch = null;
+  Promise.resolve(switchToTab(pending))
+    .then(() => drainQueuedContextMenuPrompts())
+    .catch(() => drainQueuedContextMenuPrompts());
+}
+
 function settleScheduledRun(event, job) {
   if (job?.id) crossPanelScheduledJobIds.delete(String(job.id));
   const assistantEl = job?.id ? findScheduledAssistantMessageForJob(job.id) : currentAssistantEl;
@@ -771,7 +783,7 @@ function settleScheduledRun(event, job) {
     hideActivity();
     if (currentAssistantEl === assistantEl) currentAssistantEl = null;
     abortRequested = false;
-    drainQueuedContextMenuPrompts();
+    drainQueuedContextMenuPromptsAfterPendingTabSwitch();
   }
   if (event === 'completed') playCompletionSound();
 }
@@ -819,7 +831,7 @@ function handleScheduledJobEvent(data, tabId) {
       isProcessing = false;
       sendBtn.disabled = false;
       addMessage('system', t('sp.scheduled.needs_user_input', { title: safeTitle }));
-      drainQueuedContextMenuPrompts();
+      drainQueuedContextMenuPromptsAfterPendingTabSwitch();
     }
   }
 }
