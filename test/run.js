@@ -1994,6 +1994,41 @@ test('chrome /record reports mic denial as a warning, not recording failure', ()
   assert.match(locale, /Recording started with tab audio and video only/, 'chrome: mic warning should say recording started');
 });
 
+test('chrome offscreen helper recreates an evicted document after ready cache is stale', async () => {
+  const previousChrome = globalThis.chrome;
+  let documentExists = false;
+  const createCalls = [];
+  globalThis.chrome = {
+    offscreen: {
+      async hasDocument() {
+        return documentExists;
+      },
+      async createDocument(args) {
+        createCalls.push(args);
+        documentExists = true;
+      },
+    },
+  };
+  try {
+    const ensureUrl = 'file://' + path.join(ROOT, 'src/chrome/src/offscreen/ensure.js').replace(/\\/g, '/') + `?test=${Date.now()}`;
+    const { ensureOffscreen } = await import(ensureUrl);
+
+    await ensureOffscreen();
+    assert.equal(createCalls.length, 1, 'chrome: first ensure should create the offscreen document');
+
+    documentExists = false;
+    await ensureOffscreen();
+    assert.equal(createCalls.length, 2, 'chrome: stale ready cache should not skip recreation after eviction');
+    assert.equal(createCalls[1].url, 'src/offscreen/offscreen.html', 'chrome: recreated document should use the shared offscreen URL');
+  } finally {
+    if (previousChrome === undefined) {
+      delete globalThis.chrome;
+    } else {
+      globalThis.chrome = previousChrome;
+    }
+  }
+});
+
 test('chrome sidepanel Escape abort honors slash autocomplete dismissal', () => {
   const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
   assert.match(panel, /if \(e\.key === 'Escape'\) \{\s*e\.preventDefault\(\);\s*hideSlashCommandAutocomplete\(\);\s*return true;\s*\}/, 'chrome: slash autocomplete Escape should consume the key event');
