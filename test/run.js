@@ -1894,6 +1894,20 @@ test('sidepanel exposes schedule slash commands in both builds', () => {
   }
 });
 
+test('schedule form time errors mention immediate start in every locale', () => {
+  for (const [label, localeDir] of [
+    ['chrome', 'src/chrome/src/ui/locales'],
+    ['firefox', 'src/firefox/src/ui/locales'],
+  ]) {
+    for (const filename of fs.readdirSync(path.join(ROOT, localeDir)).filter((name) => name.endsWith('.js'))) {
+      const locale = fs.readFileSync(path.join(ROOT, localeDir, filename), 'utf8');
+      const match = locale.match(/'sp\.schedule_form\.error_time':\s*'([^']+)'/);
+      assert.ok(match, `${label}/${filename}: schedule time error locale key missing`);
+      assert.match(match[1], /0/, `${label}/${filename}: schedule time error should mention 0-minute immediate start`);
+    }
+  }
+});
+
 test('sidepanel exposes show-scratchpad slash command in both builds', () => {
   for (const [label, panelRel, bgRel, localeRel] of [
     ['chrome', 'src/chrome/src/ui/sidepanel.js', 'src/chrome/src/background.js', 'src/chrome/src/ui/locales/en.js'],
