@@ -1772,6 +1772,7 @@ async function parseSlashCommands(text, tabId = currentTabId) {
     verboseMode = !verboseMode;
     if (verboseBtn) verboseBtn.classList.toggle('active', verboseMode);
     await browser.storage.local.set({ verboseMode }).catch(() => {});
+    if (currentTabId !== tabId) return '';
     addMessage('system', verboseMode
       ? t('sp.compact.verbose_on')
       : t('sp.compact.verbose_off'));

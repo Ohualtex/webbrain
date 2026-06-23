@@ -3174,8 +3174,8 @@ test('sidepanel awaits immediate verbose preference writes', () => {
     );
     assert.match(
       panel,
-      /if \(\s*\/\^\\\/verbose\\b\\s\*\/i\.test\(text\)\s*\) \{[\s\S]*?await (chrome|browser)\.storage\.local\.set\(\{ verboseMode \}\)\.catch\(\(\) => \{\}\);/,
-      `${label}: /verbose should await persistence before echoing the mode change`,
+      /if \(\s*\/\^\\\/verbose\\b\\s\*\/i\.test\(text\)\s*\) \{[\s\S]*?await (chrome|browser)\.storage\.local\.set\(\{ verboseMode \}\)\.catch\(\(\) => \{\}\);[\s\S]*?if \(currentTabId !== tabId\) return '';[\s\S]*?addMessage\('system', verboseMode/,
+      `${label}: /verbose should guard against stale tabs after persisting the mode change`,
     );
   }
 });
