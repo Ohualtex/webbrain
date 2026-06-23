@@ -14,6 +14,7 @@ const WEBBRAIN_DEVICE_GUID_KEY = 'webbrainDeviceGuid';
 const OPENROUTER_DEFAULT_MODEL = 'minimax/minimax-m3';
 const OPENROUTER_LEGACY_DEFAULT_MODEL = 'stepfun/step-3.7-flash';
 const SUPPORTED_PROVIDER_TYPES = new Set(['llamacpp', 'openai', 'anthropic', 'anthropic_oauth']);
+const SAFE_PROVIDER_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Manages LLM provider instances and persists configuration.
@@ -51,7 +52,7 @@ export class ProviderManager {
     }
     // Carry over any stored-only entries (e.g. legacy provider ids).
     for (const [id, config] of Object.entries(stored)) {
-      if (!configs[id] && this._isSupportedProviderConfig(config)) configs[id] = config;
+      if (!configs[id] && this._isSupportedProviderConfig(id, config)) configs[id] = config;
     }
     delete configs.webbrain;
     delete configs.openai_subscription;
@@ -371,8 +372,11 @@ export class ProviderManager {
     return override;
   }
 
-  _isSupportedProviderConfig(config) {
-    return !!config && typeof config === 'object' && SUPPORTED_PROVIDER_TYPES.has(config.type);
+  _isSupportedProviderConfig(id, config) {
+    return SAFE_PROVIDER_ID_RE.test(String(id || '')) &&
+      !!config &&
+      typeof config === 'object' &&
+      SUPPORTED_PROVIDER_TYPES.has(config.type);
   }
 
   /**

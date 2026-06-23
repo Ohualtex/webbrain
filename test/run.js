@@ -4716,6 +4716,16 @@ test('ProviderManager load ignores unsupported stored provider configs', async (
             apiKey: 'custom-key',
             enabled: true,
           },
+          'unsafe"]provider': {
+            type: 'openai',
+            category: 'router',
+            label: 'Unsafe custom proxy',
+            providerName: 'unsafe-proxy',
+            baseUrl: 'https://unsafe.example.test/v1',
+            model: 'unsafe-model',
+            apiKey: 'unsafe-key',
+            enabled: true,
+          },
           bad_legacy: {
             type: 'removed-provider',
             label: 'Removed provider',
@@ -4735,6 +4745,7 @@ test('ProviderManager load ignores unsupported stored provider configs', async (
       assert.equal(mgr.activeProviderId, 'webbrain_cloud', `${label}: invalid active provider should fall back`);
       assert.equal(mgr.providers.has('bad_legacy'), false, `${label}: unsupported stored-only provider should be dropped`);
       assert.equal(mgr.providers.has('missing_type'), false, `${label}: typeless stored-only provider should be dropped`);
+      assert.equal(mgr.providers.has('unsafe"]provider'), false, `${label}: unsafe stored-only provider id should be dropped`);
       assert.equal(mgr.providers.get('openai')?.config.type, 'openai', `${label}: built-in type should stay pinned`);
       assert.equal(mgr.providers.get('openai')?.config.apiKey, `${label}-kept-key`, `${label}: built-in overrides should survive`);
       assert.equal(mgr.providers.get('openai')?.config.model, `${label}-kept-model`, `${label}: built-in model should survive`);
