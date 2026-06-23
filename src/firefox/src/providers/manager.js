@@ -442,7 +442,11 @@ export class ProviderManager {
    * Update a provider's configuration.
    */
   async updateProvider(id, config) {
-    const merged = { ...this.providers.get(id)?.config, ...config };
+    if (!this.providers.has(id)) {
+      throw new Error(`Provider not found: ${id}`);
+    }
+    const current = this.providers.get(id).config;
+    const merged = { ...current, ...this._storedDefaultOverride(current, config) };
     this.providers.set(id, this._createProvider(id, merged));
     await this.save();
   }

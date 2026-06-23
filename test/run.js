@@ -4758,6 +4758,57 @@ test('ProviderManager load ignores unsupported stored provider configs', async (
   }
 });
 
+test('ProviderManager update rejects unknown providers and pins existing provider type', async () => {
+  const originalChrome = globalThis.chrome;
+  const originalBrowser = globalThis.browser;
+
+  function makeRuntime(writes) {
+    return {
+      storage: {
+        local: {
+          async set(patch) {
+            writes.push(patch);
+          },
+        },
+      },
+    };
+  }
+
+  try {
+    for (const [label, PM, runtimeKey] of [
+      ['chrome', ProviderManagerCh, 'chrome'],
+      ['firefox', ProviderManagerFx, 'browser'],
+    ]) {
+      const writes = [];
+      globalThis[runtimeKey] = makeRuntime(writes);
+      const mgr = new PM();
+      const defaults = mgr._defaultConfigs();
+      mgr.providers.set('openai', mgr._createProvider('openai', defaults.openai));
+      mgr.activeProviderId = 'openai';
+
+      await assert.rejects(
+        () => mgr.updateProvider('unsafe"]provider', {
+          type: 'openai',
+          baseUrl: 'https://unsafe.example.test/v1',
+          model: 'unsafe-model',
+        }),
+        /Provider not found/,
+        `${label}: unknown provider updates should be rejected`,
+      );
+      assert.equal(mgr.providers.has('unsafe"]provider'), false, `${label}: rejected update should not create a provider`);
+      assert.equal(writes.length, 0, `${label}: rejected update should not persist provider state`);
+
+      await mgr.updateProvider('openai', { type: 'llamacpp', model: 'updated-model' });
+      assert.equal(mgr.providers.get('openai')?.config.type, 'openai', `${label}: provider type should remain pinned`);
+      assert.equal(mgr.providers.get('openai')?.config.model, 'updated-model', `${label}: normal provider fields should update`);
+      assert.equal(writes.length, 1, `${label}: accepted update should persist provider state`);
+    }
+  } finally {
+    globalThis.chrome = originalChrome;
+    globalThis.browser = originalBrowser;
+  }
+});
+
 test('_defaultConfigs: every entry carries an explicit category', () => {
   // Walk the actual default config table on each platform and assert
   // each entry has a category field. Catches "I added a provider but
