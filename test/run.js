@@ -2042,6 +2042,23 @@ test('chrome sidepanel drops stale async tab-chat restores', () => {
   assert.equal(setIdx < loadIdx && loadIdx < guardIdx && guardIdx < restoreIdx && guardIdx < consumeIdx, true, 'chrome: stale guard must run after async chat load and before DOM/context-menu work');
 });
 
+test('chrome sidepanel persists tab chat to the tab captured before debounce', () => {
+  const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
+  const start = panel.indexOf('function schedulePersist() {');
+  assert.notEqual(start, -1, 'chrome: schedulePersist missing');
+  const body = panel.slice(start, panel.indexOf('\n}\n\n// Observe', start) + 2);
+  const captureTabIdx = body.indexOf('const tabId = currentTabId;');
+  const captureHtmlIdx = body.indexOf('const html = messagesEl.innerHTML;');
+  const timerIdx = body.indexOf('persistTimer = setTimeout(() => {');
+  const persistIdx = body.indexOf('persistTabChat(tabId, html);');
+  assert.notEqual(captureTabIdx, -1, 'chrome: persistence should capture the tab id before the debounce delay');
+  assert.notEqual(captureHtmlIdx, -1, 'chrome: persistence should capture the chat HTML before the debounce delay');
+  assert.notEqual(timerIdx, -1, 'chrome: persistence debounce missing');
+  assert.notEqual(persistIdx, -1, 'chrome: persistence should write the captured tab/html');
+  assert.equal(captureTabIdx < timerIdx && captureHtmlIdx < timerIdx && timerIdx < persistIdx, true, 'chrome: persistence must not read mutable tab state after the debounce delay');
+  assert.doesNotMatch(body, /persistTabChat\(currentTabId,\s*messagesEl\.innerHTML\)/, 'chrome: debounced persistence should not save live DOM under the later currentTabId');
+});
+
 test('sidepanel does not miss startup tab switches before consuming tab-scoped state', () => {
   for (const [label, panelRel] of [
     ['chrome', 'src/chrome/src/ui/sidepanel.js'],

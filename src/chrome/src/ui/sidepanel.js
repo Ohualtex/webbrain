@@ -489,9 +489,11 @@ function renderClearedConversationForTab(tabId) {
 let persistTimer = null;
 function schedulePersist() {
   if (persistTimer) clearTimeout(persistTimer);
+  const tabId = currentTabId;
+  const html = messagesEl.innerHTML;
   persistTimer = setTimeout(() => {
     persistTimer = null;
-    if (currentTabId != null) persistTabChat(currentTabId, messagesEl.innerHTML);
+    if (tabId != null) persistTabChat(tabId, html);
   }, 400);
 }
 
