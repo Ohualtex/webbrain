@@ -2712,11 +2712,44 @@ test('sidepanel drops stale provider selection and connection checks', () => {
     assert.notEqual(statusIdx, -1, `${label}: provider status update missing`);
     assert.equal(captureIdx < requestIdx && requestIdx < sendIdx && sendIdx < staleGuardIdx && staleGuardIdx < statusIdx, true, `${label}: provider test stale guard must run after the async request and before status updates`);
     assert.doesNotMatch(testBody, /providerId: providerSelect\.value/, `${label}: provider test should not read the mutable selection after async delay`);
+    assert.match(panel, /function markSelectedProviderFailed\(error\) \{[\s\S]*?const msg = error\?\.message \|\| t\('sp\.status\.failed'\);[\s\S]*?statusDot\.className = 'status-dot offline';[\s\S]*?statusDot\.title = t\('sp\.status\.error', \{ msg \}\);[\s\S]*?\}/, `${label}: provider activation failures should surface on the selected provider`);
 
     const changeStart = panel.indexOf("providerSelect.addEventListener('change', async () => {");
     assert.notEqual(changeStart, -1, `${label}: provider change handler missing`);
     const changeBody = panel.slice(changeStart, panel.indexOf('\n});', changeStart) + 4);
-    assert.match(changeBody, /const providerId = providerSelect\.value;[\s\S]*?const requestId = \+\+providerSelectionRequestId;[\s\S]*?sendToBackground\('set_active_provider', \{ providerId \}\);[\s\S]*?if \(requestId !== providerSelectionRequestId \|\| providerSelect\.value !== providerId\) \{[\s\S]*?const latestProviderId = providerSelect\.value;[\s\S]*?sendToBackground\('set_active_provider', \{ providerId: latestProviderId \}\)\.catch\(\(\) => \{\}\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?await testConnection\(\{ providerId \}\);/, `${label}: provider changes should drop stale completions and test only the captured provider`);
+    const changeCaptureIdx = changeBody.indexOf('const providerId = providerSelect.value;');
+    const changeRequestIdx = changeBody.indexOf('const requestId = ++providerSelectionRequestId;');
+    const invalidateIdx = changeBody.indexOf('providerTestRequestId += 1;');
+    const activateIdx = changeBody.indexOf("await sendToBackground('set_active_provider', { providerId });");
+    const catchIdx = changeBody.indexOf('} catch (e) {');
+    const failureGuardIdx = changeBody.indexOf('if (requestId === providerSelectionRequestId && providerSelect.value === providerId) {');
+    const failureStatusIdx = changeBody.indexOf('markSelectedProviderFailed(e);');
+    const changeStaleGuardIdx = changeBody.indexOf('if (requestId !== providerSelectionRequestId || providerSelect.value !== providerId) {');
+    const repairIdx = changeBody.indexOf("sendToBackground('set_active_provider', { providerId: latestProviderId }).catch(() => {});");
+    const changeTestIdx = changeBody.indexOf('await testConnection({ providerId });');
+    assert.notEqual(changeCaptureIdx, -1, `${label}: provider change should capture the intended provider`);
+    assert.notEqual(changeRequestIdx, -1, `${label}: provider change should increment a request sequence`);
+    assert.notEqual(invalidateIdx, -1, `${label}: provider change should invalidate pending provider tests`);
+    assert.notEqual(activateIdx, -1, `${label}: provider activation request missing`);
+    assert.notEqual(catchIdx, -1, `${label}: provider activation failures should be caught`);
+    assert.notEqual(failureGuardIdx, -1, `${label}: stale provider activation failures should be dropped`);
+    assert.notEqual(failureStatusIdx, -1, `${label}: current provider activation failures should update status`);
+    assert.notEqual(changeStaleGuardIdx, -1, `${label}: stale provider activation completions should be dropped`);
+    assert.notEqual(repairIdx, -1, `${label}: stale provider activation completions should repair the latest selected provider`);
+    assert.notEqual(changeTestIdx, -1, `${label}: provider change should test the captured provider`);
+    assert.equal(
+      changeCaptureIdx < changeRequestIdx
+        && changeRequestIdx < invalidateIdx
+        && invalidateIdx < activateIdx
+        && activateIdx < catchIdx
+        && catchIdx < failureGuardIdx
+        && failureGuardIdx < failureStatusIdx
+        && failureStatusIdx < changeStaleGuardIdx
+        && changeStaleGuardIdx < repairIdx
+        && repairIdx < changeTestIdx,
+      true,
+      `${label}: provider activation failure/stale guards should run before testing the captured provider`,
+    );
     assert.match(panel, /await testConnection\(\{ providerId: choice\.providerId \}\);/, `${label}: onboarding provider enablement should test the selected provider explicitly`);
   }
 });

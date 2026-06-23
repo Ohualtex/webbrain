@@ -1579,6 +1579,12 @@ function markSelectedProviderUntested() {
   statusDot.title = providerSelect?.selectedOptions?.[0]?.textContent || providerSelect?.value || '';
 }
 
+function markSelectedProviderFailed(error) {
+  const msg = error?.message || t('sp.status.failed');
+  statusDot.className = 'status-dot offline';
+  statusDot.title = t('sp.status.error', { msg });
+}
+
 async function testConnection(options = {}) {
   const providerId = options.providerId || providerSelect.value;
   const requestId = ++providerTestRequestId;
@@ -3367,7 +3373,15 @@ clearBtn.addEventListener('click', async () => {
 providerSelect.addEventListener('change', async () => {
   const providerId = providerSelect.value;
   const requestId = ++providerSelectionRequestId;
-  await sendToBackground('set_active_provider', { providerId });
+  providerTestRequestId += 1;
+  try {
+    await sendToBackground('set_active_provider', { providerId });
+  } catch (e) {
+    if (requestId === providerSelectionRequestId && providerSelect.value === providerId) {
+      markSelectedProviderFailed(e);
+    }
+    return;
+  }
   if (requestId !== providerSelectionRequestId || providerSelect.value !== providerId) {
     const latestProviderId = providerSelect.value;
     if (latestProviderId && latestProviderId !== providerId) {
