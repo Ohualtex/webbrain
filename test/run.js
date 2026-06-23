@@ -2931,6 +2931,27 @@ test('background awaits context-menu prompt clear before agent chat starts', () 
   }
 });
 
+test('background saves context-menu prompts before opening the panel', () => {
+  for (const [label, bgRel, openCall] of [
+    ['chrome', 'src/chrome/src/background.js', 'openSidePanelForContextMenu(tab);'],
+    ['firefox', 'src/firefox/src/background.js', 'openSidebarForContextMenu(tab);'],
+  ]) {
+    const bg = fs.readFileSync(path.join(ROOT, bgRel), 'utf8');
+    const match = bg.match(/async function handleContextMenuAsk\(info, tab\) \{([\s\S]*?)\n\}/);
+    assert.ok(match, `${label}: context-menu handler should be async`);
+    const body = match[1];
+    const saveIdx = body.indexOf('await contextMenuStorage.save(tab.id, payload);');
+    const openIdx = body.indexOf(openCall);
+    const notifyIdx = body.indexOf('notifySidePanelOfContextMenuPrompt(payload);');
+    assert.notEqual(saveIdx, -1, `${label}: context-menu prompt save should be awaited`);
+    assert.notEqual(openIdx, -1, `${label}: context-menu handler should open the panel/sidebar`);
+    assert.notEqual(notifyIdx, -1, `${label}: context-menu handler should notify the sidepanel`);
+    assert.equal(saveIdx < openIdx && openIdx < notifyIdx, true, `${label}: prompt recovery storage should be written before the panel is opened/notified`);
+    assert.doesNotMatch(body, /contextMenuStorage\.save\(tab\.id,\s*payload\)\.catch\(\(\) => \{\}\)/, `${label}: context-menu prompt save should not be fire-and-forget`);
+    assert.match(bg, /handleContextMenuAsk\(info, tab\)\.catch\(\(\) => \{\}\);/, `${label}: listener should consume async handler failures`);
+  }
+});
+
 function deferred() {
   let resolve;
   const promise = new Promise((r) => { resolve = r; });
