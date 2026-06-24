@@ -83,6 +83,14 @@
     },
     {
       "@type": "Question",
+      "name": "WebBrain Cloud aboneliği ne kadar?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain Cloud şu anda cihaz profili başına ayda 5 ABD doları; şimdilik Claude Pro’dan çok daha ucuz. Kullanım şu anda adil kullanım politikası kapsamında sınırsızdır: normal kişisel kullanım uygundur, ancak kötüye kullanım, otomatikleştirilmiş kullanım, yeniden satış veya olağan dışı yüksek hacimli kullanım yasaktır. Abonelik, bir kullanıcı hesabına değil, eklentinin bu tarayıcı + işletim sistemi GUID’si için ürettiği cihaz tanımlayıcısına bağlıdır. Uzantı depolamasını sıfırladığınız, tarayıcı profilini sildiğiniz, tarayıcıyı yeniden yüklediğiniz, tarayıcı/işletim sistemi değiştirdiğiniz veya cihazı kaybettiğiniz için bu tanımlayıcı kaybolursa onu geri getiremeyiz veya aktaramayız; bu kayıp için para iadesi yapmayız. Plugin ayarları sayfasındaki Hesap bölümünden Faturayı yönet düğmesiyle abone olabilir veya faturayı yönetebilirsiniz. Manuel iptal için ödeme sırasında kullandığınız e-posta adresiyle bize e-posta gönderin."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "WebBrain; OpenClaw, Browser-Use ve diğer AI ajan çatılarından nasıl farklı?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -118,7 +126,15 @@
       "name": "Ağımdaki yerel bir LLM sunucusuna (vLLM, Ollama, llama.cpp) bağlanırken «Failed to fetch» alıyorum",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "LLM sunucunuz yerel ağınızdaki başka bir makinedeyse (ör. http://192.168.1.x:8000), sunucu CORS başlıkları göndermedikçe Chrome isteği engeller. Çözüm sunucuya göre değişir: vLLM: --allowed-origins '[\"*\"]' ile başlatın (değer bir JSON listesi olmalıdır). Ollama: Başlatmadan önce OLLAMA_ORIGINS=* ortam değişkenini ayarlayın. llama.cpp: CORS varsayılan olarak açıktır — değişiklik gerekmez. Sunucunuz localhost'ta (tarayıcıyla aynı makinede) çalışıyorsa genellikle CORS gerekmez. Sorun yalnızca yerel ağdaki makineler arası bağlantıları etkiler. WebBrain ayarlarındaki taban URL'nin /v1 ile bittiğinden emin olun (ör. http://192.168.1.47:8000/v1)."
+        "text": "LLM sunucunuz yerel ağınızdaki başka bir makinedeyse (ör. http://192.168.1.x:8000), sunucu CORS başlıkları göndermedikçe Chrome isteği engeller. Çözüm sunucuya göre değişir: vLLM: --allowed-origins '[\"*\"]' ile başlatın (değer bir JSON listesi olmalıdır). Ollama: Başlatmadan önce OLLAMA_ORIGINS=* ortam değişkenini ayarlayın. llama.cpp: CORS varsayılan olarak açıktır — değişiklik gerekmez. Sunucunuz localhost'ta (tarayıcıyla aynı makinede) çalışıyorsa genellikle CORS gerekmez. Sorun yalnızca yerel ağdaki makineler arası bağlantıları etkiler. WebBrain ayarlarındaki taban URL'nin /v1 ile bittiğinden emin olun (ör. http://192.168.1.47:8000/v1). İstisna: Bir tarayıcı uzantısından kullanılan Ollama yine de OLLAMA_ORIGINS gerektirebilir; aşağıdaki Ollama SSS’ine bakın."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "localhost üzerindeki Ollama, WebBrain uzantısından neden 403 döndürüyor?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yeni Ollama sürümleri, Ollama aynı makinede çalışıyor olsa bile tarayıcı uzantısı origin’lerinden gelen istekleri reddedebilir. Uzantı chrome-extension://... veya moz-extension://... gibi bir Origin gönderir; bu origin’lere izin verilmezse Ollama 403 döndürebilir. 11434 portunu zaten tutan herhangi bir Ollama masaüstü uygulamasını kapatın, sonra Ollama’yı şu komutlardan biriyle başlatın: OLLAMA_ORIGINS=\"*\" ollama serve OLLAMA_ORIGINS=\"chrome-extension://*,moz-extension://*\" ollama serve WebBrain’in Ollama temel URL’sini http://localhost:11434/v1 olarak tutun. Terminaldeki curl kontrolleri bu ayar olmadan da çalışabilir, çünkü tarayıcı uzantısı origin’i göndermezler."
       }
     },
     {
@@ -2113,6 +2129,11 @@
     </details>
 
     <details class="faq-item">
+      <summary>WebBrain Cloud aboneliği ne kadar?</summary>
+      <p>WebBrain Cloud şu anda <strong>cihaz profili başına ayda 5 ABD doları</strong>; şimdilik Claude Pro’dan çok daha ucuz. Kullanım şu anda adil kullanım politikası kapsamında sınırsızdır: normal kişisel kullanım uygundur, ancak kötüye kullanım, otomatikleştirilmiş kullanım, yeniden satış veya olağan dışı yüksek hacimli kullanım yasaktır.</p><p>Abonelik, bir kullanıcı hesabına değil, eklentinin bu tarayıcı + işletim sistemi GUID’si için ürettiği cihaz tanımlayıcısına bağlıdır. Uzantı depolamasını sıfırladığınız, tarayıcı profilini sildiğiniz, tarayıcıyı yeniden yüklediğiniz, tarayıcı/işletim sistemi değiştirdiğiniz veya cihazı kaybettiğiniz için bu tanımlayıcı kaybolursa onu geri getiremeyiz veya aktaramayız; bu kayıp için para iadesi yapmayız.</p><p>Plugin ayarları sayfasındaki <strong>Hesap</strong> bölümünden <strong>Faturayı yönet</strong> düğmesiyle abone olabilir veya faturayı yönetebilirsiniz. Manuel iptal için ödeme sırasında kullandığınız e-posta adresiyle bize e-posta gönderin.</p>
+    </details>
+
+    <details class="faq-item">
       <summary>WebBrain; OpenClaw, Browser-Use ve diğer AI ajan çatılarından nasıl farklı?</summary>
       <p>Bunlar farklı kategoride araçlar. WebBrain bir tarayıcı uzantısı — Chrome veya Firefox'a kurar ve yan panelde sohbet edersin, kod gerekmez. OpenClaw ve Browser-Use gibi çatılar ise genellikle başlıksız tarayıcılar ve CDP kullanarak Python'da otomatik tarayıcı işlem hatları kuran geliştiriciler için SDK'dır. Kısaca: WebBrain, günlük gezinme için bir AI asistanı; ajan çatıları ise kazıma botları ve test otomasyonu inşa etmek içindir. İkisini de kullanabilirsin — birbirlerini tamamlarlar.</p>
     </details>
@@ -2134,7 +2155,12 @@
 
     <details class="faq-item">
       <summary>Ağımdaki yerel bir LLM sunucusuna (vLLM, Ollama, llama.cpp) bağlanırken «Failed to fetch» alıyorum</summary>
-      <p>LLM sunucunuz yerel ağınızdaki başka bir makinedeyse (ör. <code>http://192.168.1.x:8000</code>), sunucu <strong>CORS başlıkları</strong> göndermedikçe Chrome isteği engeller. Çözüm sunucuya göre değişir:</p><p><strong>vLLM:</strong> <code>--allowed-origins '["*"]'</code> ile başlatın (değer bir JSON listesi olmalıdır).<br><strong>Ollama:</strong> Başlatmadan önce <code>OLLAMA_ORIGINS=*</code> ortam değişkenini ayarlayın.<br><strong>llama.cpp:</strong> CORS varsayılan olarak açıktır — değişiklik gerekmez.</p><p>Sunucunuz <code>localhost</code>'ta (tarayıcıyla aynı makinede) çalışıyorsa genellikle CORS gerekmez. Sorun yalnızca yerel ağdaki makineler arası bağlantıları etkiler. WebBrain ayarlarındaki taban URL'nin <code>/v1</code> ile bittiğinden emin olun (ör. <code>http://192.168.1.47:8000/v1</code>).</p>
+      <p>LLM sunucunuz yerel ağınızdaki başka bir makinedeyse (ör. <code>http://192.168.1.x:8000</code>), sunucu <strong>CORS başlıkları</strong> göndermedikçe Chrome isteği engeller. Çözüm sunucuya göre değişir:</p><p><strong>vLLM:</strong> <code>--allowed-origins '["*"]'</code> ile başlatın (değer bir JSON listesi olmalıdır).<br><strong>Ollama:</strong> Başlatmadan önce <code>OLLAMA_ORIGINS=*</code> ortam değişkenini ayarlayın.<br><strong>llama.cpp:</strong> CORS varsayılan olarak açıktır — değişiklik gerekmez.</p><p>Sunucunuz <code>localhost</code>'ta (tarayıcıyla aynı makinede) çalışıyorsa genellikle CORS gerekmez. Sorun yalnızca yerel ağdaki makineler arası bağlantıları etkiler. WebBrain ayarlarındaki taban URL'nin <code>/v1</code> ile bittiğinden emin olun (ör. <code>http://192.168.1.47:8000/v1</code>). İstisna: Bir tarayıcı uzantısından kullanılan Ollama yine de <code>OLLAMA_ORIGINS</code> gerektirebilir; aşağıdaki Ollama SSS’ine bakın.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>localhost üzerindeki Ollama, WebBrain uzantısından neden 403 döndürüyor?</summary>
+      <p>Yeni Ollama sürümleri, Ollama aynı makinede çalışıyor olsa bile tarayıcı uzantısı origin’lerinden gelen istekleri reddedebilir. Uzantı <code>chrome-extension://...</code> veya <code>moz-extension://...</code> gibi bir <code>Origin</code> gönderir; bu origin’lere izin verilmezse Ollama 403 döndürebilir.</p><p><code>11434</code> portunu zaten tutan herhangi bir Ollama masaüstü uygulamasını kapatın, sonra Ollama’yı şu komutlardan biriyle başlatın:</p><p><code>OLLAMA_ORIGINS="*" ollama serve</code><br><code>OLLAMA_ORIGINS="chrome-extension://*,moz-extension://*" ollama serve</code></p><p>WebBrain’in Ollama temel URL’sini <code>http://localhost:11434/v1</code> olarak tutun. Terminaldeki <code>curl</code> kontrolleri bu ayar olmadan da çalışabilir, çünkü tarayıcı uzantısı origin’i göndermezler.</p>
     </details>
 
     <details class="faq-item">

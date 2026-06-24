@@ -83,6 +83,14 @@
     },
     {
       "@type": "Question",
+      "name": "¿Cuánto cuesta una suscripción a WebBrain Cloud?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain Cloud cuesta actualmente 5 USD/mes por perfil de dispositivo, mucho menos que Claude Pro por ahora. El uso es actualmente ilimitado bajo una política de uso justo: el uso personal normal está bien, pero el uso abusivo, automatizado, de reventa o con volumen inusualmente alto no está permitido. La suscripción está vinculada al identificador de dispositivo que genera la extensión para ese GUID de navegador + sistema operativo, no a una cuenta de usuario. Si ese identificador se pierde porque restableces el almacenamiento de la extensión, eliminas el perfil del navegador, reinstalas el navegador, cambias de navegador/SO o pierdes el dispositivo, no podemos recuperarlo ni transferirlo y no emitimos reembolsos por esa pérdida. Puedes suscribirte o gestionar la facturación desde la sección Cuenta de la página de ajustes del plugin con el botón Gestionar facturación. Para cancelar manualmente, escríbenos por correo con la dirección que usaste al pagar."
+      }
+    },
+    {
+      "@type": "Question",
       "name": "¿En qué se diferencia WebBrain de OpenClaw, Browser-Use y otros frameworks de agentes?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -118,7 +126,15 @@
       "name": "Recibo «Failed to fetch» al conectar con un servidor LLM local (vLLM, Ollama, llama.cpp) en mi red",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Si tu servidor LLM está en otra máquina de tu red local (por ejemplo http://192.168.1.x:8000), Chrome bloquea la petición salvo que el servidor envíe cabeceras CORS. La solución depende del servidor: vLLM: arranca con --allowed-origins '[\"*\"]' (el valor debe ser una lista JSON). Ollama: define la variable de entorno OLLAMA_ORIGINS=* antes de arrancar. llama.cpp: CORS está activado por defecto — no hay que cambiar nada. Si tu servidor se ejecuta en localhost (la misma máquina que el navegador), normalmente no hace falta CORS. El problema afecta solo a conexiones entre máquinas en la red local. Asegúrate de que la URL base en los ajustes de WebBrain termina en /v1 (por ejemplo http://192.168.1.47:8000/v1)."
+        "text": "Si tu servidor LLM está en otra máquina de tu red local (por ejemplo http://192.168.1.x:8000), Chrome bloquea la petición salvo que el servidor envíe cabeceras CORS. La solución depende del servidor: vLLM: arranca con --allowed-origins '[\"*\"]' (el valor debe ser una lista JSON). Ollama: define la variable de entorno OLLAMA_ORIGINS=* antes de arrancar. llama.cpp: CORS está activado por defecto — no hay que cambiar nada. Si tu servidor se ejecuta en localhost (la misma máquina que el navegador), normalmente no hace falta CORS. El problema afecta solo a conexiones entre máquinas en la red local. Asegúrate de que la URL base en los ajustes de WebBrain termina en /v1 (por ejemplo http://192.168.1.47:8000/v1). Excepción: Ollama usado desde una extensión de navegador puede seguir necesitando OLLAMA_ORIGINS; consulta la pregunta de Ollama más abajo."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "¿Por qué Ollama en localhost devuelve 403 desde la extensión WebBrain?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Las versiones recientes de Ollama pueden rechazar solicitudes desde orígenes de extensiones del navegador aunque Ollama se ejecute en la misma máquina. La extensión envía un Origin como chrome-extension://... o moz-extension://..., y Ollama puede responder 403 si esos orígenes no están permitidos. Cierra cualquier app de escritorio de Ollama que ya esté usando el puerto 11434 y luego inicia Ollama con uno de estos comandos: OLLAMA_ORIGINS=\"*\" ollama serve OLLAMA_ORIGINS=\"chrome-extension://*,moz-extension://*\" ollama serve Mantén la URL base de Ollama en WebBrain como http://localhost:11434/v1. Las pruebas con curl en la terminal pueden seguir funcionando sin este ajuste porque no envían un origen de extensión del navegador."
       }
     },
     {
@@ -2113,6 +2129,11 @@
     </details>
 
     <details class="faq-item">
+      <summary>¿Cuánto cuesta una suscripción a WebBrain Cloud?</summary>
+      <p>WebBrain Cloud cuesta actualmente <strong>5 USD/mes por perfil de dispositivo</strong>, mucho menos que Claude Pro por ahora. El uso es actualmente ilimitado bajo una política de uso justo: el uso personal normal está bien, pero el uso abusivo, automatizado, de reventa o con volumen inusualmente alto no está permitido.</p><p>La suscripción está vinculada al identificador de dispositivo que genera la extensión para ese GUID de navegador + sistema operativo, no a una cuenta de usuario. Si ese identificador se pierde porque restableces el almacenamiento de la extensión, eliminas el perfil del navegador, reinstalas el navegador, cambias de navegador/SO o pierdes el dispositivo, no podemos recuperarlo ni transferirlo y no emitimos reembolsos por esa pérdida.</p><p>Puedes suscribirte o gestionar la facturación desde la sección <strong>Cuenta</strong> de la página de ajustes del plugin con el botón <strong>Gestionar facturación</strong>. Para cancelar manualmente, escríbenos por correo con la dirección que usaste al pagar.</p>
+    </details>
+
+    <details class="faq-item">
       <summary>¿En qué se diferencia WebBrain de OpenClaw, Browser-Use y otros frameworks de agentes?</summary>
       <p>Son categorías distintas. WebBrain es una extensión de navegador: la instalas en Chrome o Firefox y chateas con ella en un panel lateral, sin código. Frameworks como OpenClaw y Browser-Use son SDK para desarrolladores que construyen pipelines automatizados en Python, habitualmente con navegadores headless y CDP. En una frase: WebBrain es para navegar día a día con un asistente de IA; los frameworks son para construir bots de scraping y automatización de pruebas. Puedes usar ambos — se complementan.</p>
     </details>
@@ -2134,7 +2155,12 @@
 
     <details class="faq-item">
       <summary>Recibo «Failed to fetch» al conectar con un servidor LLM local (vLLM, Ollama, llama.cpp) en mi red</summary>
-      <p>Si tu servidor LLM está en otra máquina de tu red local (por ejemplo <code>http://192.168.1.x:8000</code>), Chrome bloquea la petición salvo que el servidor envíe <strong>cabeceras CORS</strong>. La solución depende del servidor:</p><p><strong>vLLM:</strong> arranca con <code>--allowed-origins '["*"]'</code> (el valor debe ser una lista JSON).<br><strong>Ollama:</strong> define la variable de entorno <code>OLLAMA_ORIGINS=*</code> antes de arrancar.<br><strong>llama.cpp:</strong> CORS está activado por defecto — no hay que cambiar nada.</p><p>Si tu servidor se ejecuta en <code>localhost</code> (la misma máquina que el navegador), normalmente no hace falta CORS. El problema afecta solo a conexiones entre máquinas en la red local. Asegúrate de que la URL base en los ajustes de WebBrain termina en <code>/v1</code> (por ejemplo <code>http://192.168.1.47:8000/v1</code>).</p>
+      <p>Si tu servidor LLM está en otra máquina de tu red local (por ejemplo <code>http://192.168.1.x:8000</code>), Chrome bloquea la petición salvo que el servidor envíe <strong>cabeceras CORS</strong>. La solución depende del servidor:</p><p><strong>vLLM:</strong> arranca con <code>--allowed-origins '["*"]'</code> (el valor debe ser una lista JSON).<br><strong>Ollama:</strong> define la variable de entorno <code>OLLAMA_ORIGINS=*</code> antes de arrancar.<br><strong>llama.cpp:</strong> CORS está activado por defecto — no hay que cambiar nada.</p><p>Si tu servidor se ejecuta en <code>localhost</code> (la misma máquina que el navegador), normalmente no hace falta CORS. El problema afecta solo a conexiones entre máquinas en la red local. Asegúrate de que la URL base en los ajustes de WebBrain termina en <code>/v1</code> (por ejemplo <code>http://192.168.1.47:8000/v1</code>). Excepción: Ollama usado desde una extensión de navegador puede seguir necesitando <code>OLLAMA_ORIGINS</code>; consulta la pregunta de Ollama más abajo.</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>¿Por qué Ollama en localhost devuelve 403 desde la extensión WebBrain?</summary>
+      <p>Las versiones recientes de Ollama pueden rechazar solicitudes desde orígenes de extensiones del navegador aunque Ollama se ejecute en la misma máquina. La extensión envía un <code>Origin</code> como <code>chrome-extension://...</code> o <code>moz-extension://...</code>, y Ollama puede responder 403 si esos orígenes no están permitidos.</p><p>Cierra cualquier app de escritorio de Ollama que ya esté usando el puerto <code>11434</code> y luego inicia Ollama con uno de estos comandos:</p><p><code>OLLAMA_ORIGINS="*" ollama serve</code><br><code>OLLAMA_ORIGINS="chrome-extension://*,moz-extension://*" ollama serve</code></p><p>Mantén la URL base de Ollama en WebBrain como <code>http://localhost:11434/v1</code>. Las pruebas con <code>curl</code> en la terminal pueden seguir funcionando sin este ajuste porque no envían un origen de extensión del navegador.</p>
     </details>
 
     <details class="faq-item">

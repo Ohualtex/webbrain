@@ -58,11 +58,13 @@ const LOCALES = [
 const FAQ_KEYS = [
   // Order matters — this is the rendered order in-page AND in JSON-LD.
   'faq.alt_claude',
+  'faq.cloud_subscription',
   'faq.vs_frameworks',
   'faq.offline',
   'faq.models_supported',
   'faq.recommended_model',
   'faq.cors',
+  'faq.ollama_origins',
   'faq.firefox',
   'faq.firefox_sidebar_move',
   'faq.safe',

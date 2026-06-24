@@ -83,6 +83,14 @@
     },
     {
       "@type": "Question",
+      "name": "WebBrain Cloud のサブスクリプション料金はいくらですか？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain Cloud は現在、デバイスプロファイルごとに月額 5 ドルです。当面は Claude Pro よりかなり安価です。現在はフェアユースポリシーの範囲内で無制限に利用できます。通常の個人利用は問題ありませんが、悪用、自動化された大量利用、再販売、通常を大きく超える高負荷利用は認められません。 サブスクリプションはユーザーアカウントではなく、拡張機能がそのブラウザ + OS GUID に対して生成するデバイス識別子に紐づきます。拡張機能のストレージをリセットする、ブラウザプロファイルを削除する、ブラウザを再インストールする、ブラウザ/OS を変更する、またはデバイスを失うことでこの識別子が失われた場合、復旧や移行はできず、その損失に対する返金も行いません。 プラグイン設定ページの Account セクションにある Manage billing ボタンから、購読または請求管理ができます。手動で解約する場合は、決済時に使用したメールアドレスでメールしてください。"
+      }
+    },
+    {
+      "@type": "Question",
       "name": "WebBrain は OpenClaw や Browser-Use など、他の AI エージェントフレームワークとどう違いますか?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -118,7 +126,15 @@
       "name": "ネットワーク上のローカル LLM サーバー (vLLM、Ollama、llama.cpp) に接続すると「Failed to fetch」が出ます",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "LLM サーバーがローカルネットワーク上の別のマシン (例: http://192.168.1.x:8000) にある場合、サーバーが CORS ヘッダー を返さないと Chrome がリクエストをブロックします。対処はサーバーごとに異なります: vLLM: --allowed-origins '[\"*\"]' 付きで起動 (値は必ず JSON 配列)。 Ollama: 起動前に環境変数 OLLAMA_ORIGINS=* を設定。 llama.cpp: CORS はデフォルトで有効 — 変更不要です。 サーバーが localhost (ブラウザと同じマシン) で動いている場合、通常 CORS は不要です。問題が出るのはローカルネットワークの別マシンに接続するときだけ。WebBrain の設定で Base URL が /v1 で終わっていることも確認してください (例: http://192.168.1.47:8000/v1)。"
+        "text": "LLM サーバーがローカルネットワーク上の別のマシン (例: http://192.168.1.x:8000) にある場合、サーバーが CORS ヘッダー を返さないと Chrome がリクエストをブロックします。対処はサーバーごとに異なります: vLLM: --allowed-origins '[\"*\"]' 付きで起動 (値は必ず JSON 配列)。 Ollama: 起動前に環境変数 OLLAMA_ORIGINS=* を設定。 llama.cpp: CORS はデフォルトで有効 — 変更不要です。 サーバーが localhost (ブラウザと同じマシン) で動いている場合、通常 CORS は不要です。問題が出るのはローカルネットワークの別マシンに接続するときだけ。WebBrain の設定で Base URL が /v1 で終わっていることも確認してください (例: http://192.168.1.47:8000/v1)。 例外: ブラウザ拡張機能から Ollama を使う場合は、同じマシンでも OLLAMA_ORIGINS が必要になることがあります。下の Ollama FAQ を参照してください。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "localhost の Ollama が WebBrain 拡張機能から 403 を返すのはなぜですか？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "最近の Ollama は、同じマシン上で動作していても、ブラウザ拡張機能の origin からのリクエストを拒否することがあります。拡張機能は chrome-extension://... や moz-extension://... のような Origin を送信するため、それらの origin が許可されていないと Ollama が 403 を返す場合があります。 すでにポート 11434 を使用している Ollama デスクトップアプリを終了し、次のいずれかで Ollama を起動してください。 OLLAMA_ORIGINS=\"*\" ollama serve OLLAMA_ORIGINS=\"chrome-extension://*,moz-extension://*\" ollama serve WebBrain の Ollama ベース URL は http://localhost:11434/v1 のままにしてください。ターミナルの curl チェックはブラウザ拡張機能の origin を送信しないため、この設定なしでも成功することがあります。"
       }
     },
     {
@@ -2113,6 +2129,11 @@
     </details>
 
     <details class="faq-item">
+      <summary>WebBrain Cloud のサブスクリプション料金はいくらですか？</summary>
+      <p>WebBrain Cloud は現在、<strong>デバイスプロファイルごとに月額 5 ドル</strong>です。当面は Claude Pro よりかなり安価です。現在はフェアユースポリシーの範囲内で無制限に利用できます。通常の個人利用は問題ありませんが、悪用、自動化された大量利用、再販売、通常を大きく超える高負荷利用は認められません。</p><p>サブスクリプションはユーザーアカウントではなく、拡張機能がそのブラウザ + OS GUID に対して生成するデバイス識別子に紐づきます。拡張機能のストレージをリセットする、ブラウザプロファイルを削除する、ブラウザを再インストールする、ブラウザ/OS を変更する、またはデバイスを失うことでこの識別子が失われた場合、復旧や移行はできず、その損失に対する返金も行いません。</p><p>プラグイン設定ページの <strong>Account</strong> セクションにある <strong>Manage billing</strong> ボタンから、購読または請求管理ができます。手動で解約する場合は、決済時に使用したメールアドレスでメールしてください。</p>
+    </details>
+
+    <details class="faq-item">
       <summary>WebBrain は OpenClaw や Browser-Use など、他の AI エージェントフレームワークとどう違いますか?</summary>
       <p>それらは別カテゴリのツールです。WebBrain はブラウザ拡張で、Chrome や Firefox にインストールし、サイドパネルでチャットします。コーディングは不要です。OpenClaw や Browser-Use のようなフレームワークは、Python で自動ブラウザパイプラインを構築するための開発者向け SDK で、通常はヘッドレスブラウザと CDP を使います。要するに WebBrain は日常のブラウジングを AI アシスタントと一緒に行うためのもの、エージェントフレームワークはスクレイピングボットやテスト自動化を作るためのもの。両方を併用してもよく、補完関係にあります。</p>
     </details>
@@ -2134,7 +2155,12 @@
 
     <details class="faq-item">
       <summary>ネットワーク上のローカル LLM サーバー (vLLM、Ollama、llama.cpp) に接続すると「Failed to fetch」が出ます</summary>
-      <p>LLM サーバーがローカルネットワーク上の別のマシン (例: <code>http://192.168.1.x:8000</code>) にある場合、サーバーが <strong>CORS ヘッダー</strong> を返さないと Chrome がリクエストをブロックします。対処はサーバーごとに異なります:</p><p><strong>vLLM:</strong> <code>--allowed-origins '["*"]'</code> 付きで起動 (値は必ず JSON 配列)。<br><strong>Ollama:</strong> 起動前に環境変数 <code>OLLAMA_ORIGINS=*</code> を設定。<br><strong>llama.cpp:</strong> CORS はデフォルトで有効 — 変更不要です。</p><p>サーバーが <code>localhost</code> (ブラウザと同じマシン) で動いている場合、通常 CORS は不要です。問題が出るのはローカルネットワークの別マシンに接続するときだけ。WebBrain の設定で Base URL が <code>/v1</code> で終わっていることも確認してください (例: <code>http://192.168.1.47:8000/v1</code>)。</p>
+      <p>LLM サーバーがローカルネットワーク上の別のマシン (例: <code>http://192.168.1.x:8000</code>) にある場合、サーバーが <strong>CORS ヘッダー</strong> を返さないと Chrome がリクエストをブロックします。対処はサーバーごとに異なります:</p><p><strong>vLLM:</strong> <code>--allowed-origins '["*"]'</code> 付きで起動 (値は必ず JSON 配列)。<br><strong>Ollama:</strong> 起動前に環境変数 <code>OLLAMA_ORIGINS=*</code> を設定。<br><strong>llama.cpp:</strong> CORS はデフォルトで有効 — 変更不要です。</p><p>サーバーが <code>localhost</code> (ブラウザと同じマシン) で動いている場合、通常 CORS は不要です。問題が出るのはローカルネットワークの別マシンに接続するときだけ。WebBrain の設定で Base URL が <code>/v1</code> で終わっていることも確認してください (例: <code>http://192.168.1.47:8000/v1</code>)。 例外: ブラウザ拡張機能から Ollama を使う場合は、同じマシンでも <code>OLLAMA_ORIGINS</code> が必要になることがあります。下の Ollama FAQ を参照してください。</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>localhost の Ollama が WebBrain 拡張機能から 403 を返すのはなぜですか？</summary>
+      <p>最近の Ollama は、同じマシン上で動作していても、ブラウザ拡張機能の origin からのリクエストを拒否することがあります。拡張機能は <code>chrome-extension://...</code> や <code>moz-extension://...</code> のような <code>Origin</code> を送信するため、それらの origin が許可されていないと Ollama が 403 を返す場合があります。</p><p>すでにポート <code>11434</code> を使用している Ollama デスクトップアプリを終了し、次のいずれかで Ollama を起動してください。</p><p><code>OLLAMA_ORIGINS="*" ollama serve</code><br><code>OLLAMA_ORIGINS="chrome-extension://*,moz-extension://*" ollama serve</code></p><p>WebBrain の Ollama ベース URL は <code>http://localhost:11434/v1</code> のままにしてください。ターミナルの <code>curl</code> チェックはブラウザ拡張機能の origin を送信しないため、この設定なしでも成功することがあります。</p>
     </details>
 
     <details class="faq-item">

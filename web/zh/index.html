@@ -83,6 +83,14 @@
     },
     {
       "@type": "Question",
+      "name": "WebBrain Cloud 订阅多少钱？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "WebBrain Cloud 目前为每个设备配置文件每月 5 美元，暂时比 Claude Pro 便宜得多。当前用量在公平使用政策下不限量：正常个人使用没问题，但不允许滥用、自动化刷量、转售或异常高流量使用。 订阅绑定到扩展为该浏览器 + 操作系统 GUID 生成的设备标识符，而不是用户账户。如果你重置扩展存储、删除浏览器配置文件、重新安装浏览器、更换浏览器/操作系统或丢失设备而导致该标识符丢失，我们无法找回或转移，也不会因此退款。 你可以在插件设置页的账户区域通过管理账单按钮订阅或管理账单。若要手动取消，请用结账时使用的邮箱地址给我们发邮件。"
+      }
+    },
+    {
+      "@type": "Question",
       "name": "WebBrain 与 OpenClaw、Browser-Use 以及其他 AI 代理框架有何不同?",
       "acceptedAnswer": {
         "@type": "Answer",
@@ -118,7 +126,15 @@
       "name": "连接到我网络上的本地 LLM 服务器(vLLM、Ollama、llama.cpp)时出现「Failed to fetch」",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "如果你的 LLM 服务器在本地网络中的另一台机器上(例如 http://192.168.1.x:8000),除非服务器发送 CORS 头,否则 Chrome 会拦截该请求。解决方案因服务器而异: vLLM:启动时添加 --allowed-origins '[\"*\"]'(值必须是 JSON 列表)。 Ollama:启动前设置环境变量 OLLAMA_ORIGINS=*。 llama.cpp:默认启用 CORS,无需更改。 如果你的服务器运行在 localhost(与浏览器同一台机器),通常不需要 CORS。该问题仅影响本地网络上跨机器的连接。请确保 WebBrain 设置中的基础 URL 以 /v1 结尾(例如 http://192.168.1.47:8000/v1)。"
+        "text": "如果你的 LLM 服务器在本地网络中的另一台机器上(例如 http://192.168.1.x:8000),除非服务器发送 CORS 头,否则 Chrome 会拦截该请求。解决方案因服务器而异: vLLM:启动时添加 --allowed-origins '[\"*\"]'(值必须是 JSON 列表)。 Ollama:启动前设置环境变量 OLLAMA_ORIGINS=*。 llama.cpp:默认启用 CORS,无需更改。 如果你的服务器运行在 localhost(与浏览器同一台机器),通常不需要 CORS。该问题仅影响本地网络上跨机器的连接。请确保 WebBrain 设置中的基础 URL 以 /v1 结尾(例如 http://192.168.1.47:8000/v1)。 例外：从浏览器扩展使用 Ollama 时仍可能需要 OLLAMA_ORIGINS；请参见下方的 Ollama FAQ。"
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "为什么 localhost 上的 Ollama 会对 WebBrain 扩展返回 403？",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "较新的 Ollama 版本即使运行在同一台机器上，也可能拒绝来自浏览器扩展来源的请求。扩展会发送类似 chrome-extension://... 或 moz-extension://... 的 Origin，如果未允许这些来源，Ollama 可能返回 403。 先退出任何已经占用 11434 端口的 Ollama 桌面应用，然后用以下命令之一启动 Ollama： OLLAMA_ORIGINS=\"*\" ollama serve OLLAMA_ORIGINS=\"chrome-extension://*,moz-extension://*\" ollama serve 将 WebBrain 的 Ollama Base URL 保持为 http://localhost:11434/v1。终端中的 curl 检查即使没有这个设置也可能正常工作，因为它们不会发送浏览器扩展来源。"
       }
     },
     {
@@ -2113,6 +2129,11 @@
     </details>
 
     <details class="faq-item">
+      <summary>WebBrain Cloud 订阅多少钱？</summary>
+      <p>WebBrain Cloud 目前为<strong>每个设备配置文件每月 5 美元</strong>，暂时比 Claude Pro 便宜得多。当前用量在公平使用政策下不限量：正常个人使用没问题，但不允许滥用、自动化刷量、转售或异常高流量使用。</p><p>订阅绑定到扩展为该浏览器 + 操作系统 GUID 生成的设备标识符，而不是用户账户。如果你重置扩展存储、删除浏览器配置文件、重新安装浏览器、更换浏览器/操作系统或丢失设备而导致该标识符丢失，我们无法找回或转移，也不会因此退款。</p><p>你可以在插件设置页的<strong>账户</strong>区域通过<strong>管理账单</strong>按钮订阅或管理账单。若要手动取消，请用结账时使用的邮箱地址给我们发邮件。</p>
+    </details>
+
+    <details class="faq-item">
       <summary>WebBrain 与 OpenClaw、Browser-Use 以及其他 AI 代理框架有何不同?</summary>
       <p>它们属于不同类别的工具。WebBrain 是浏览器扩展 —— 你在 Chrome 或 Firefox 中安装它,并在侧边栏中与它对话,无需编码。OpenClaw 和 Browser-Use 等框架是面向开发者的 SDK,用 Python 构建自动化浏览器流水线,通常使用无头浏览器和 CDP。换句话说:WebBrain 用于日常浏览时的 AI 助手;代理框架用于构建抓取机器人和测试自动化。你可以同时使用 —— 二者互补。</p>
     </details>
@@ -2134,7 +2155,12 @@
 
     <details class="faq-item">
       <summary>连接到我网络上的本地 LLM 服务器(vLLM、Ollama、llama.cpp)时出现「Failed to fetch」</summary>
-      <p>如果你的 LLM 服务器在本地网络中的另一台机器上(例如 <code>http://192.168.1.x:8000</code>),除非服务器发送 <strong>CORS 头</strong>,否则 Chrome 会拦截该请求。解决方案因服务器而异:</p><p><strong>vLLM:</strong>启动时添加 <code>--allowed-origins '["*"]'</code>(值必须是 JSON 列表)。<br><strong>Ollama:</strong>启动前设置环境变量 <code>OLLAMA_ORIGINS=*</code>。<br><strong>llama.cpp:</strong>默认启用 CORS,无需更改。</p><p>如果你的服务器运行在 <code>localhost</code>(与浏览器同一台机器),通常不需要 CORS。该问题仅影响本地网络上跨机器的连接。请确保 WebBrain 设置中的基础 URL 以 <code>/v1</code> 结尾(例如 <code>http://192.168.1.47:8000/v1</code>)。</p>
+      <p>如果你的 LLM 服务器在本地网络中的另一台机器上(例如 <code>http://192.168.1.x:8000</code>),除非服务器发送 <strong>CORS 头</strong>,否则 Chrome 会拦截该请求。解决方案因服务器而异:</p><p><strong>vLLM:</strong>启动时添加 <code>--allowed-origins '["*"]'</code>(值必须是 JSON 列表)。<br><strong>Ollama:</strong>启动前设置环境变量 <code>OLLAMA_ORIGINS=*</code>。<br><strong>llama.cpp:</strong>默认启用 CORS,无需更改。</p><p>如果你的服务器运行在 <code>localhost</code>(与浏览器同一台机器),通常不需要 CORS。该问题仅影响本地网络上跨机器的连接。请确保 WebBrain 设置中的基础 URL 以 <code>/v1</code> 结尾(例如 <code>http://192.168.1.47:8000/v1</code>)。 例外：从浏览器扩展使用 Ollama 时仍可能需要 <code>OLLAMA_ORIGINS</code>；请参见下方的 Ollama FAQ。</p>
+    </details>
+
+    <details class="faq-item">
+      <summary>为什么 localhost 上的 Ollama 会对 WebBrain 扩展返回 403？</summary>
+      <p>较新的 Ollama 版本即使运行在同一台机器上，也可能拒绝来自浏览器扩展来源的请求。扩展会发送类似 <code>chrome-extension://...</code> 或 <code>moz-extension://...</code> 的 <code>Origin</code>，如果未允许这些来源，Ollama 可能返回 403。</p><p>先退出任何已经占用 <code>11434</code> 端口的 Ollama 桌面应用，然后用以下命令之一启动 Ollama：</p><p><code>OLLAMA_ORIGINS="*" ollama serve</code><br><code>OLLAMA_ORIGINS="chrome-extension://*,moz-extension://*" ollama serve</code></p><p>将 WebBrain 的 Ollama Base URL 保持为 <code>http://localhost:11434/v1</code>。终端中的 <code>curl</code> 检查即使没有这个设置也可能正常工作，因为它们不会发送浏览器扩展来源。</p>
     </details>
 
     <details class="faq-item">
