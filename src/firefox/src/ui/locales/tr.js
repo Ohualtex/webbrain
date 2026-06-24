@@ -149,6 +149,9 @@ export default {
   'st.account.sign_in': 'Giriş yap / Kaydol',
   'st.account.sign_out': 'Çıkış yap',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'Faturalandırma, kart bilgileri, e-posta ve iptal işlemleri bu tarayıcı profili için Stripe tarafından yönetilir.',
+  'st.account.billing_preparing': 'Bu tarayıcı profili için Stripe faturalandırma bağlantısı hazırlanıyor.',
+  'st.account.manage_billing': 'Faturalandırmayı yönet',
 
   'st.display.language.label': 'Dil',
   'st.display.language.desc': 'WebBrain eklentisinin arayüz dili.',
@@ -178,6 +181,8 @@ export default {
 
   'st.providers.info.html': '<strong>llama.cpp ile başlangıç:</strong><br>Yerel bir sunucu başlatmak için <code>llama-server -m modeliniz.gguf --port 8080</code> komutunu çalıştır.<br>API anahtarı gerekmez — tamamen makinende çalışır.',
   'st.providers.save': 'Kaydet',
+  'st.providers.webbrain_note.body': 'Ücretsiz günlük WebBrain Cloud kullanımı dahildir. İstekler api.webbrain.one üzerinden geçer; varsayılan olarak kota ve hata ayıklama için meta verileri kaydederiz; istem metnini, sayfa içeriğini, ekran görüntülerini veya model yanıtlarını kaydetmeyiz. {privacyLink}. Daha fazla kullanım için {subscribeLink} adresinden abone olun. Faturalandırmayı {accountLink} adresinden yönetin.',
+  'st.providers.webbrain_note.privacy_link': 'Gizlilik politikası',
   'st.providers.test': 'Bağlantıyı sına',
   'st.providers.set_active': 'Etkinleştir',
   'st.providers.active': 'ETKİN',

@@ -151,6 +151,9 @@ export default {
   'st.account.sign_in': 'Mag-sign In / Magrehistro',
   'st.account.sign_out': 'Mag-sign Out',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'Ang pagsingil, mga detalye ng card, email, at pagkansela ay pinamamahalaan ng Stripe para sa profile ng browser na ito.',
+  'st.account.billing_preparing': 'Inihahanda ang link ng pagsingil ng Stripe para sa profile ng browser na ito.',
+  'st.account.manage_billing': 'Pamahalaan ang pagsingil',
 
   'st.display.language.label': 'Wika',
   'st.display.language.desc': 'Wika ng interface para sa WebBrain plugin.',
@@ -180,6 +183,8 @@ export default {
 
   'st.providers.info.html': '<strong>Pagsisimula sa llama.cpp:</strong><br>Patakbuhin ang <code>llama-server -m your-model.gguf --port 8080</code> para magsimula ng lokal na server.<br>Hindi na kailangan ng API key — ganap itong tumatakbo sa iyong makina.',
   'st.providers.save': 'I-save',
+  'st.providers.webbrain_note.body': 'Kasama ang libreng pang-araw-araw na paggamit ng WebBrain Cloud. Dumadaan ang mga request sa api.webbrain.one; bilang default ay nagla-log kami ng metadata para sa quota at debugging, hindi ang teksto ng prompt, nilalaman ng pahina, mga screenshot, o mga tugon ng modelo. {privacyLink}. Para sa higit pang paggamit, mag-subscribe sa {subscribeLink}. Pamahalaan ang pagsingil sa {accountLink}.',
+  'st.providers.webbrain_note.privacy_link': 'Patakaran sa privacy',
   'st.providers.test': 'Subukan ang Koneksyon',
   'st.providers.set_active': 'Itakda Bilang Aktibo',
   'st.providers.active': 'AKTIBO',

@@ -16,8 +16,9 @@ import id from './locales/id.js';
 import th from './locales/th.js';
 import ms from './locales/ms.js';
 import tl from './locales/tl.js';
+import pl from './locales/pl.js';
 
-const DICTS = { en, es, fr, tr, zh, ru, uk, ar, ja, ko, id, th, ms, tl };
+const DICTS = { en, es, fr, tr, zh, ru, uk, ar, ja, ko, id, th, ms, tl, pl };
 const LS_KEY = 'wbLocale';
 
 export const LANGUAGES = [
@@ -35,6 +36,7 @@ export const LANGUAGES = [
   { code: 'th', label: 'ไทย' },
   { code: 'ms', label: 'Bahasa Melayu' },
   { code: 'tl', label: 'Filipino' },
+  { code: 'pl', label: 'Polski' },
 ];
 
 function detect() {

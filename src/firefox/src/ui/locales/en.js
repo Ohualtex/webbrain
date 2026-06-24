@@ -258,6 +258,9 @@ export default {
   'st.account.sign_in': 'Sign In / Register',
   'st.account.sign_out': 'Sign Out',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'Billing, card details, email, and cancellation are managed by Stripe for this browser profile.',
+  'st.account.billing_preparing': 'Preparing the Stripe billing link for this browser profile.',
+  'st.account.manage_billing': 'Manage billing',
 
   'st.display.language.label': 'Language',
   'st.display.language.desc': 'Interface language for the WebBrain plugin.',
@@ -322,6 +325,8 @@ export default {
   'st.providers.loading': 'Loading…',
   'st.providers.models_loaded': '{count} models loaded',
   'st.providers.get_api_key': 'Get API key',
+  'st.providers.webbrain_note.body': 'Free daily WebBrain Cloud usage is included. Requests go through api.webbrain.one; by default we log metadata for quota and debugging, not prompt text, page content, screenshots, or model responses. {privacyLink}. For more usage, subscribe at {subscribeLink}. Manage billing at {accountLink}.',
+  'st.providers.webbrain_note.privacy_link': 'Privacy policy',
 
   'st.provider.field.server_url': 'Server URL',
   'st.provider.field.api_base_url': 'API Base URL',

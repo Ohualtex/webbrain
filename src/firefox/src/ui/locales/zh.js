@@ -149,6 +149,9 @@ export default {
   'st.account.sign_in': '登录 / 注册',
   'st.account.sign_out': '退出',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': '此浏览器配置文件的账单、卡片信息、电子邮件和取消均由 Stripe 管理。',
+  'st.account.billing_preparing': '正在为此浏览器配置文件准备 Stripe 账单链接。',
+  'st.account.manage_billing': '管理账单',
 
   'st.display.language.label': '语言',
   'st.display.language.desc': 'WebBrain 插件的界面语言。',
@@ -178,6 +181,8 @@ export default {
 
   'st.providers.info.html': '<strong>llama.cpp 快速上手：</strong><br>运行 <code>llama-server -m 你的模型.gguf --port 8080</code> 启动本地服务器。<br>无需 API 密钥 — 完全在你的机器上运行。',
   'st.providers.save': '保存',
+  'st.providers.webbrain_note.body': '免费的每日 WebBrain Cloud 用量已包含在内。请求通过 api.webbrain.one 处理；默认情况下，我们仅记录用于配额和调试的元数据，不记录提示文本、页面内容、屏幕截图或模型响应。{privacyLink}。如需更多用量，请在 {subscribeLink} 订阅。在 {accountLink} 管理账单。',
+  'st.providers.webbrain_note.privacy_link': '隐私政策',
   'st.providers.test': '测试连接',
   'st.providers.set_active': '设为启用',
   'st.providers.active': '已启用',

@@ -149,6 +149,9 @@ export default {
   'st.account.sign_in': 'تسجيل الدخول / التسجيل',
   'st.account.sign_out': 'تسجيل الخروج',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'تتم إدارة الفوترة وبيانات البطاقة والبريد الإلكتروني والإلغاء بواسطة Stripe لملف المتصفح هذا.',
+  'st.account.billing_preparing': 'يتم تجهيز رابط الفوترة عبر Stripe لملف المتصفح هذا.',
+  'st.account.manage_billing': 'إدارة الفوترة',
 
   'st.display.language.label': 'اللغة',
   'st.display.language.desc': 'لغة واجهة إضافة WebBrain.',
@@ -178,6 +181,8 @@ export default {
 
   'st.providers.info.html': '<strong>بدء التشغيل مع llama.cpp:</strong><br>شغّل <code>llama-server -m your-model.gguf --port 8080</code> لتشغيل خادم محلي.<br>لا حاجة لمفتاح API — يعمل كاملًا على جهازك.',
   'st.providers.save': 'حفظ',
+  'st.providers.webbrain_note.body': 'يتضمّن الاستخدام اليومي المجاني لـ WebBrain Cloud. تمر الطلبات عبر api.webbrain.one؛ افتراضيًا نسجّل البيانات الوصفية للحصة وتصحيح الأخطاء، وليس نص المطالبات أو محتوى الصفحة أو لقطات الشاشة أو ردود النموذج. {privacyLink}. لمزيد من الاستخدام، اشترك عبر {subscribeLink}. أدِر الفوترة عبر {accountLink}.',
+  'st.providers.webbrain_note.privacy_link': 'سياسة الخصوصية',
   'st.providers.test': 'اختبار الاتصال',
   'st.providers.set_active': 'تعيينه نشطًا',
   'st.providers.active': 'نشط',
