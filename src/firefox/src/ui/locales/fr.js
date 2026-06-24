@@ -149,6 +149,9 @@ export default {
   'st.account.sign_in': 'Se connecter / S\'inscrire',
   'st.account.sign_out': 'Se déconnecter',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'La facturation, les informations de carte, l\'e-mail et la résiliation sont gérés par Stripe pour ce profil de navigateur.',
+  'st.account.billing_preparing': 'Préparation du lien de facturation Stripe pour ce profil de navigateur.',
+  'st.account.manage_billing': 'Gérer la facturation',
 
   'st.display.language.label': 'Langue',
   'st.display.language.desc': 'Langue de l\'interface de l\'extension WebBrain.',
@@ -178,6 +181,8 @@ export default {
 
   'st.providers.info.html': '<strong>Premiers pas avec llama.cpp :</strong><br>Exécutez <code>llama-server -m votre-modele.gguf --port 8080</code> pour démarrer un serveur local.<br>Pas besoin de clé d\'API — il fonctionne entièrement sur votre machine.',
   'st.providers.save': 'Enregistrer',
+  'st.providers.webbrain_note.body': 'Une utilisation quotidienne gratuite de WebBrain Cloud est incluse. Les requêtes passent par api.webbrain.one ; par défaut, nous enregistrons des métadonnées pour le quota et le débogage, pas le texte des invites, le contenu des pages, les captures d\'écran ni les réponses du modèle. {privacyLink}. Pour en faire plus, abonnez-vous sur {subscribeLink}. Gérez la facturation sur {accountLink}.',
+  'st.providers.webbrain_note.privacy_link': 'Politique de confidentialité',
   'st.providers.test': 'Tester la connexion',
   'st.providers.set_active': 'Définir comme actif',
   'st.providers.active': 'ACTIF',

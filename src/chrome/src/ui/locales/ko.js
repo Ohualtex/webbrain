@@ -151,6 +151,9 @@ export default {
   'st.account.sign_in': '로그인 / 가입',
   'st.account.sign_out': '로그아웃',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': '이 브라우저 프로필의 청구, 카드 정보, 이메일 및 해지는 Stripe에서 관리합니다.',
+  'st.account.billing_preparing': '이 브라우저 프로필의 Stripe 청구 링크를 준비하는 중입니다.',
+  'st.account.manage_billing': '청구 관리',
 
   'st.display.language.label': '언어',
   'st.display.language.desc': 'WebBrain 플러그인의 인터페이스 언어입니다.',
@@ -180,6 +183,8 @@ export default {
 
   'st.providers.info.html': '<strong>llama.cpp 시작하기:</strong><br><code>llama-server -m your-model.gguf --port 8080</code>을 실행해 로컬 서버를 띄우세요.<br>API 키가 필요 없습니다 — 전부 사용자 머신에서 실행됩니다.',
   'st.providers.save': '저장',
+  'st.providers.webbrain_note.body': '무료 일일 WebBrain Cloud 사용량이 포함되어 있습니다. 요청은 api.webbrain.one을 통해 처리됩니다. 기본적으로 할당량과 디버깅을 위한 메타데이터만 기록하며, 프롬프트 텍스트, 페이지 콘텐츠, 스크린샷, 모델 응답은 기록하지 않습니다. {privacyLink}. 더 많은 사용량이 필요하면 {subscribeLink}에서 구독하세요. 청구는 {accountLink}에서 관리하세요.',
+  'st.providers.webbrain_note.privacy_link': '개인정보 처리방침',
   'st.providers.test': '연결 테스트',
   'st.providers.set_active': '활성으로 설정',
   'st.providers.active': '활성',

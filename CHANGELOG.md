@@ -4,6 +4,27 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / `manifest.json` version.
 
+## [17.2.0] - 2026-06-24
+
+### Added
+- Added XML-style raw tool-call parsing for Chrome and Firefox so local/chat-template models that emit `<tool_call><function=...><parameter=...>` output can execute tools instead of returning raw markup.
+- Added a WebBrain Cloud billing panel in Chrome and Firefox settings with device-bound Stripe account links, localized account copy, and expanded WebBrain Cloud provider notes for subscription, billing, and privacy links.
+- Added Polish UI locale support for the Chrome and Firefox settings/payment flows.
+
+### Changed
+- Updated WebBrain Cloud `/subscribe` URLs and 402 allowance messages to include the device GUID as Stripe `client_reference_id`, and made the subscribe page require a device-bound link before redirecting to checkout.
+- Reworded the subscribe fallback page to tell users with outdated extension links to update the browser plugin.
+- Documented the newer slash commands in the English, French, and Chinese README files.
+- Updated release metadata, Settings subtitle versions, architecture docs, Chrome / Firefox manifests, and package versions for 17.2.0.
+
+### Fixed
+- Purged legacy `auth.webbrain.one` token, email, and default-model storage during settings startup now that WebBrain Cloud billing is device-GUID based.
+- Firefox side-panel message bubbles now expose copy buttons on user messages, with styling that remains legible on accent-colored bubbles.
+- Suppressed streamed raw tool-call text before rendered tool steps, so fallback tool calls do not linger as assistant text.
+
+### Tests
+- Added regression coverage for XML-style tool-call parsing/execution and raw tool-call stream suppression in Chrome and Firefox.
+
 ## [17.1.0] - 2026-06-24
 
 ### Added
