@@ -149,6 +149,9 @@ export default {
   'st.account.sign_in': 'Войти / Зарегистрироваться',
   'st.account.sign_out': 'Выйти',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'Оплата, данные карты, электронная почта и отмена управляются Stripe для этого профиля браузера.',
+  'st.account.billing_preparing': 'Подготовка ссылки на оплату Stripe для этого профиля браузера.',
+  'st.account.manage_billing': 'Управление оплатой',
 
   'st.display.language.label': 'Язык',
   'st.display.language.desc': 'Язык интерфейса плагина WebBrain.',
@@ -178,6 +181,8 @@ export default {
 
   'st.providers.info.html': '<strong>Быстрый старт с llama.cpp:</strong><br>Запустите <code>llama-server -m your-model.gguf --port 8080</code>, чтобы поднять локальный сервер.<br>API-ключ не нужен — всё работает на вашей машине.',
   'st.providers.save': 'Сохранить',
+  'st.providers.webbrain_note.body': 'Бесплатное ежедневное использование WebBrain Cloud включено. Запросы проходят через api.webbrain.one; по умолчанию мы записываем метаданные для квоты и отладки, а не текст запросов, содержимое страниц, скриншоты или ответы модели. {privacyLink}. Для большего объёма оформите подписку на {subscribeLink}. Управляйте оплатой на {accountLink}.',
+  'st.providers.webbrain_note.privacy_link': 'Политика конфиденциальности',
   'st.providers.test': 'Проверить соединение',
   'st.providers.set_active': 'Сделать активным',
   'st.providers.active': 'АКТИВЕН',

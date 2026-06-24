@@ -151,6 +151,9 @@ export default {
   'st.account.sign_in': 'Masuk / Daftar',
   'st.account.sign_out': 'Keluar',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'Penagihan, detail kartu, email, dan pembatalan dikelola oleh Stripe untuk profil browser ini.',
+  'st.account.billing_preparing': 'Menyiapkan tautan penagihan Stripe untuk profil browser ini.',
+  'st.account.manage_billing': 'Kelola penagihan',
 
   'st.display.language.label': 'Bahasa',
   'st.display.language.desc': 'Bahasa antarmuka untuk plugin WebBrain.',
@@ -180,6 +183,8 @@ export default {
 
   'st.providers.info.html': '<strong>Memulai dengan llama.cpp:</strong><br>Jalankan <code>llama-server -m your-model.gguf --port 8080</code> untuk memulai server lokal.<br>Tidak perlu kunci API — berjalan sepenuhnya di mesin Anda.',
   'st.providers.save': 'Simpan',
+  'st.providers.webbrain_note.body': 'Penggunaan harian gratis WebBrain Cloud sudah termasuk. Permintaan melewati api.webbrain.one; secara default kami mencatat metadata untuk kuota dan debugging, bukan teks prompt, konten halaman, tangkapan layar, atau respons model. {privacyLink}. Untuk penggunaan lebih, berlangganan di {subscribeLink}. Kelola penagihan di {accountLink}.',
+  'st.providers.webbrain_note.privacy_link': 'Kebijakan privasi',
   'st.providers.test': 'Uji koneksi',
   'st.providers.set_active': 'Jadikan aktif',
   'st.providers.active': 'AKTIF',

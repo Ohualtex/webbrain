@@ -121,9 +121,9 @@ let providersData = {};
 let activeProviderId = '';
 let providerActivationRequestId = 0;
 let requestedActiveProviderId = '';
-let authToken = '';
-let authEmail = '';
-let authDefaultModel = '';
+
+const WEBBRAIN_SUBSCRIBE_URL = 'https://webbrain.one/subscribe';
+const WEBBRAIN_ACCOUNT_URL = 'https://api.webbrain.one/account';
 
 const DEFAULT_COST_ALLOWANCE_USD = 10;
 const MAX_AGENT_STEPS_DEFAULT = 130;
@@ -144,7 +144,15 @@ function renderCostAllowanceSpent(spent, limit) {
 }
 
 function webbrainSubscribeUrl(deviceGuid) {
-  const url = new URL('https://webbrain.one/subscribe');
+  const url = new URL(WEBBRAIN_SUBSCRIBE_URL);
+  if (deviceGuid) {
+    url.searchParams.set('client_reference_id', deviceGuid);
+  }
+  return url.toString();
+}
+
+function webbrainAccountUrl(deviceGuid) {
+  const url = new URL(WEBBRAIN_ACCOUNT_URL);
   if (deviceGuid) {
     url.searchParams.set('client_reference_id', deviceGuid);
   }
@@ -171,12 +179,13 @@ const expandedProviders = new Set();
 // --- Init ---
 
 async function init() {
-  // Load auth state
-  const authStored = await browser.storage.local.get(['authToken', 'authEmail', 'authDefaultModel']);
-  authToken = authStored.authToken || '';
-  authEmail = authStored.authEmail || '';
-  authDefaultModel = authStored.authDefaultModel || '';
+  // Render once now; render again after providers load so deviceGuid is present.
   renderAuthSection();
+
+  // Migration: the old auth.webbrain.one sign-in stored a bearer token and
+  // account info here. Billing is now device-GUID based and there is no sign-in
+  // UI, so purge any stale credentials left over from that flow.
+  browser.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
   const stored = await browser.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'providerFilter', 'requestTimeoutMs', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'cloudCostSpentUsd']);
@@ -248,6 +257,7 @@ async function init() {
   const res = await sendToBackground('get_providers');
   providersData = res.providers;
   activeProviderId = res.active;
+  renderAuthSection();
   renderProviders();
 }
 
@@ -342,68 +352,41 @@ if (globalThis.browser?.storage?.onChanged) {
   });
 }
 
-// --- Auth ---
+// --- WebBrain Cloud Billing ---
+
+function currentWebbrainDeviceGuid() {
+  return providersData?.webbrain_cloud?.deviceGuid || '';
+}
 
 function renderAuthSection() {
-  if (authToken && authEmail) {
-    accountSection.innerHTML = `
-      <div class="account-card">
-        <div class="account-info">
-          <div class="account-email">${escapeHtml(authEmail)}</div>
-          <div class="account-provider">${escapeHtml(t('st.account.provider_name'))}</div>
-        </div>
-        <button class="btn-sign-out" id="btn-sign-out">${escapeHtml(t('st.account.sign_out'))}</button>
+  if (!accountSection) return;
+  const deviceGuid = currentWebbrainDeviceGuid();
+  const billingHref = webbrainAccountUrl(deviceGuid);
+  const disabledAttr = deviceGuid ? '' : ' disabled';
+  const statusText = deviceGuid
+    ? t('st.account.billing_managed')
+    : t('st.account.billing_preparing');
+
+  accountSection.innerHTML = `
+    <div class="account-card">
+      <div class="account-info">
+        <div class="account-email">${escapeHtml(t('st.account.provider_name'))}</div>
+        <div class="account-provider">${escapeHtml(statusText)}</div>
       </div>
-    `;
-    document.getElementById('btn-sign-out').addEventListener('click', logout);
-  } else {
-    accountSection.innerHTML = `
-      <div class="account-card">
-        <div class="account-info">
-          <div class="account-email not-signed-in">${escapeHtml(t('st.account.not_signed_in'))}</div>
-        </div>
-        <button class="btn-sign-in" id="btn-sign-in">${escapeHtml(t('st.account.sign_in'))}</button>
-      </div>
-    `;
-    document.getElementById('btn-sign-in').addEventListener('click', openAuthTab);
-  }
+      <button class="btn-sign-in" id="btn-manage-billing"${disabledAttr}>${escapeHtml(t('st.account.manage_billing'))}</button>
+    </div>
+  `;
+
+  document.getElementById('btn-manage-billing')?.addEventListener('click', () => {
+    if (!deviceGuid) return;
+    window.open(billingHref, '_blank', 'noopener,noreferrer');
+  });
 }
 
 function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
-}
-
-function openAuthTab() {
-  window.open('https://auth.webbrain.one', '_blank');
-}
-
-async function logout() {
-  await browser.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']);
-  authToken = '';
-  authEmail = '';
-  authDefaultModel = '';
-  renderAuthSection();
-}
-
-window.addEventListener('message', async (event) => {
-  if (event.data?.type === 'WB_AUTH_TOKEN') {
-    const { token, email, defaultModel } = event.data;
-    authToken = token;
-    authEmail = email;
-    authDefaultModel = defaultModel || 'openai/gpt-4o';
-    await browser.storage.local.set({ authToken, authEmail, authDefaultModel }).catch(() => {});
-    renderAuthSection();
-    autoConfigureWebbrainProvider();
-  }
-});
-
-async function autoConfigureWebbrainProvider() {
-  const res = await sendToBackground('get_providers');
-  providersData = res.providers;
-  activeProviderId = res.active;
-  renderProviders();
 }
 
 // --- Display Settings ---
@@ -1064,19 +1047,22 @@ function renderProviders() {
     }
 
     const subscribeHref = id === 'webbrain_cloud' ? webbrainSubscribeUrl(config.deviceGuid) : '';
-    const providerNote = id === 'webbrain_cloud'
-      ? `<div style="margin-top:10px;padding:10px 12px;border-radius:6px;
+    const accountHref = id === 'webbrain_cloud' ? webbrainAccountUrl(config.deviceGuid) : '';
+    let providerNote = '';
+    if (id === 'webbrain_cloud') {
+      const linkStyle = 'color:var(--accent,#4A90D9);text-decoration:none;';
+      const privacyLink = `<a href="https://webbrain.one/privacy" target="_blank" rel="noopener noreferrer"
+              style="${linkStyle}">${escapeHtml(t('st.providers.webbrain_note.privacy_link'))}</a>`;
+      const subscribeLink = `<a href="${escapeHtml(subscribeHref)}" target="_blank" rel="noopener noreferrer"
+              style="${linkStyle}">webbrain.one/subscribe</a>`;
+      const accountLink = `<a href="${escapeHtml(accountHref)}" target="_blank" rel="noopener noreferrer"
+              style="${linkStyle}">api.webbrain.one/account</a>`;
+      providerNote = `<div style="margin-top:10px;padding:10px 12px;border-radius:6px;
                   background:rgba(74,144,217,0.08);border:1px solid rgba(74,144,217,0.22);
                   font-size:12px;color:var(--text2);line-height:1.5;">
-           Free daily WebBrain Cloud usage is included. Requests go through api.webbrain.one; by default we log
-           metadata for quota and debugging, not prompt text, page content, screenshots, or model responses.
-           <a href="https://webbrain.one/privacy" target="_blank" rel="noopener noreferrer"
-              style="color:var(--accent,#4A90D9);text-decoration:none;">Privacy policy</a>.
-           For more usage, subscribe at
-           <a href="${escapeHtml(subscribeHref)}" target="_blank" rel="noopener noreferrer"
-              style="color:var(--accent,#4A90D9);text-decoration:none;">webbrain.one/subscribe</a>.
-         </div>`
-      : '';
+           ${t('st.providers.webbrain_note.body', { privacyLink, subscribeLink, accountLink })}
+         </div>`;
+    }
 
     const body = `
       ${fieldsHTML}

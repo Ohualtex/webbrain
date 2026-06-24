@@ -149,6 +149,9 @@ export default {
   'st.account.sign_in': 'เข้าสู่ระบบ / สมัคร',
   'st.account.sign_out': 'ออกจากระบบ',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'การเรียกเก็บเงิน รายละเอียดบัตร อีเมล และการยกเลิก จัดการโดย Stripe สำหรับโปรไฟล์เบราว์เซอร์นี้',
+  'st.account.billing_preparing': 'กำลังเตรียมลิงก์การเรียกเก็บเงินของ Stripe สำหรับโปรไฟล์เบราว์เซอร์นี้',
+  'st.account.manage_billing': 'จัดการการเรียกเก็บเงิน',
 
   'st.display.language.label': 'ภาษา',
   'st.display.language.desc': 'ภาษาของหน้าจอปลั๊กอิน WebBrain',
@@ -178,6 +181,8 @@ export default {
 
   'st.providers.info.html': '<strong>เริ่มต้นกับ llama.cpp:</strong><br>รัน <code>llama-server -m your-model.gguf --port 8080</code> เพื่อสตาร์ตเซิร์ฟเวอร์ในเครื่อง<br>ไม่ต้องใช้คีย์ API — ทำงานในเครื่องของคุณทั้งหมด',
   'st.providers.save': 'บันทึก',
+  'st.providers.webbrain_note.body': 'รวมการใช้งาน WebBrain Cloud รายวันฟรีไว้แล้ว คำขอจะผ่าน api.webbrain.one โดยค่าเริ่มต้นเราจะบันทึกข้อมูลเมตาสำหรับโควตาและการแก้จุดบกพร่อง ไม่ใช่ข้อความพรอมต์ เนื้อหาหน้าเว็บ ภาพหน้าจอ หรือการตอบกลับของโมเดล {privacyLink} หากต้องการใช้งานเพิ่มเติม สมัครสมาชิกที่ {subscribeLink} จัดการการเรียกเก็บเงินที่ {accountLink}',
+  'st.providers.webbrain_note.privacy_link': 'นโยบายความเป็นส่วนตัว',
   'st.providers.test': 'ทดสอบการเชื่อมต่อ',
   'st.providers.set_active': 'ตั้งเป็นใช้งาน',
   'st.providers.active': 'ใช้งานอยู่',

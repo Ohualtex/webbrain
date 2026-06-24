@@ -149,6 +149,9 @@ export default {
   'st.account.sign_in': 'サインイン / 登録',
   'st.account.sign_out': 'サインアウト',
   'st.account.provider_name': 'WebBrain Cloud',
+  'st.account.billing_managed': 'このブラウザープロファイルの請求、カード情報、メール、解約は Stripe が管理します。',
+  'st.account.billing_preparing': 'このブラウザープロファイルの Stripe 請求リンクを準備しています。',
+  'st.account.manage_billing': '請求を管理',
 
   'st.display.language.label': '言語',
   'st.display.language.desc': 'WebBrain プラグインのインターフェース言語です。',
@@ -178,6 +181,8 @@ export default {
 
   'st.providers.info.html': '<strong>llama.cpp を始める：</strong><br><code>llama-server -m your-model.gguf --port 8080</code> を実行してローカルサーバーを起動します。<br>API キーは不要 — 完全にあなたのマシン上で動きます。',
   'st.providers.save': '保存',
+  'st.providers.webbrain_note.body': '無料の毎日の WebBrain Cloud 利用が含まれています。リクエストは api.webbrain.one を経由します。デフォルトでは、割り当てとデバッグのためにメタデータを記録し、プロンプトテキスト、ページの内容、スクリーンショット、モデルの応答は記録しません。{privacyLink}。さらに利用するには {subscribeLink} で登録してください。請求は {accountLink} で管理できます。',
+  'st.providers.webbrain_note.privacy_link': 'プライバシーポリシー',
   'st.providers.test': '接続テスト',
   'st.providers.set_active': '有効化',
   'st.providers.active': '有効',
