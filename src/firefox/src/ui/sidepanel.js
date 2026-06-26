@@ -1154,7 +1154,8 @@ async function showScratchpad(tabId = currentTabId) {
       addMessage('system', t('sp.scratchpad.empty'));
       return;
     }
-    addMessage('system', `${t('sp.scratchpad.title_html')}<pre class="scratchpad-dump">${escapeHtml(body)}</pre>`);
+    const msgEl = addMessage('system', `${t('sp.scratchpad.title_html')}<pre class="scratchpad-dump">${escapeHtml(body)}</pre>`);
+    addScratchpadCopyButton(msgEl);
   } catch (e) {
     if (currentTabId !== tabId) return;
     addMessage('system', tSystemHtml('sp.scratchpad.error', { msg: e.message }));
@@ -1398,19 +1399,7 @@ async function runRecommendedAction(action) {
 // since serialized HTML loses listeners.
 function rebindCopyButtons() {
   document.querySelectorAll('.msg-copy-btn').forEach(btn => {
-    if (btn.dataset.bound) return;
-    btn.dataset.bound = 'true';
-    btn.addEventListener('click', () => {
-      const content = btn.closest('.message-content');
-      const textEl = content?.querySelector('.message-text');
-      if (textEl) {
-        navigator.clipboard.writeText(textEl.innerText).then(() => {
-          btn.textContent = t('sp.copied');
-          btn.classList.add('copied');
-          setTimeout(() => { btn.textContent = t('sp.copy'); btn.classList.remove('copied'); }, 1500);
-        });
-      }
-    });
+    bindMessageCopyButton(btn);
   });
   document.querySelectorAll('.code-copy-btn').forEach(btn => {
     if (btn.dataset.bound) return;
@@ -2994,17 +2983,44 @@ function addMessageCopyButton(msgEl) {
   btn.className = 'msg-copy-btn';
   btn.textContent = t('sp.copy');
   btn.title = t('sp.copy.code.title');
-  btn.addEventListener('click', () => {
-    const textEl = content.querySelector('.message-text');
-    if (textEl) {
-      navigator.clipboard.writeText(textEl.innerText).then(() => {
-        btn.textContent = t('sp.copied');
-        btn.classList.add('copied');
-        setTimeout(() => { btn.textContent = t('sp.copy'); btn.classList.remove('copied'); }, 1500);
-      });
-    }
-  });
+  bindMessageCopyButton(btn);
   content.appendChild(btn);
+}
+
+function addScratchpadCopyButton(msgEl) {
+  if (!msgEl) return;
+  const content = msgEl.querySelector('.message-content');
+  const pre = content?.querySelector('pre.scratchpad-dump');
+  if (!content || !pre) return;
+  const btn = document.createElement('button');
+  btn.className = 'msg-copy-btn scratchpad-copy-btn';
+  btn.textContent = t('sp.copy');
+  btn.title = t('sp.copy.code.title');
+  bindMessageCopyButton(btn);
+  content.appendChild(btn);
+}
+
+function getMessageCopyText(btn) {
+  const content = btn?.closest('.message-content');
+  if (!content) return null;
+  if (btn.classList.contains('scratchpad-copy-btn')) {
+    return content.querySelector('pre.scratchpad-dump')?.textContent || '';
+  }
+  return content.querySelector('.message-text')?.innerText || null;
+}
+
+function bindMessageCopyButton(btn) {
+  if (!btn || btn.__wbCopyBound) return;
+  btn.__wbCopyBound = true;
+  btn.addEventListener('click', () => {
+    const text = getMessageCopyText(btn);
+    if (text == null) return;
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = t('sp.copied');
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = t('sp.copy'); btn.classList.remove('copied'); }, 1500);
+    });
+  });
 }
 
 function escapeHtml(str) {

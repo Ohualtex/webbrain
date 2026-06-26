@@ -1989,6 +1989,9 @@ test('sidepanel exposes scratchpad slash commands in both builds', () => {
     assert.match(panel, /\/show-scratchpad\b/, `${label}: /show-scratchpad parser missing`);
     assert.match(panel, /\/edit-scratchpad\b/, `${label}: /edit-scratchpad parser missing`);
     assert.match(panel, /get_scratchpad/, `${label}: sidepanel should call background scratchpad reader`);
+    assert.match(panel, /const msgEl = addMessage\('system', [\s\S]*?scratchpad-dump[\s\S]*?\);\s*addScratchpadCopyButton\(msgEl\);/, `${label}: /show-scratchpad should attach a scratchpad-only copy button`);
+    assert.match(panel, /function addScratchpadCopyButton\(msgEl\) \{[\s\S]*?querySelector\('pre\.scratchpad-dump'\)[\s\S]*?scratchpad-copy-btn[\s\S]*?bindMessageCopyButton\(btn\);/, `${label}: scratchpad copy button should target the scratchpad pre`);
+    assert.match(panel, /function getMessageCopyText\(btn\) \{[\s\S]*?classList\.contains\('scratchpad-copy-btn'\)[\s\S]*?querySelector\('pre\.scratchpad-dump'\)\?\.textContent/, `${label}: scratchpad copy should copy only pre textContent`);
     assert.match(panel, /write_scratchpad/, `${label}: sidepanel should call background scratchpad writer`);
     assert.match(bg, /get_scratchpad/, `${label}: background scratchpad action missing`);
     assert.match(bg, /write_scratchpad/, `${label}: background scratchpad write action missing`);
@@ -2570,7 +2573,9 @@ test('sidepanel rebinds interactive controls after restoring serialized tab chat
   ]) {
     const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
     assert.match(panel, /function rebindCopyButtons\(\)/, `${label}: copy-button rebinding helper missing`);
-    assert.match(panel, /document\.querySelectorAll\('\.msg-copy-btn'\)[\s\S]*?addEventListener\('click'/, `${label}: assistant message copy buttons should be rebound`);
+    assert.match(panel, /document\.querySelectorAll\('\.msg-copy-btn'\)[\s\S]*?bindMessageCopyButton\(btn\)/, `${label}: message copy buttons should be rebound`);
+    assert.match(panel, /function bindMessageCopyButton\(btn\) \{[\s\S]*?addEventListener\('click'/, `${label}: message copy rebinding should attach a click listener`);
+    assert.match(panel, /btn\.__wbCopyBound = true;/, `${label}: message copy binding should use an in-memory flag so restored HTML can rebind`);
     assert.match(panel, /document\.querySelectorAll\('\.code-copy-btn'\)[\s\S]*?addEventListener\('click'/, `${label}: code copy buttons should be rebound`);
     assert.match(panel, /function rebindContinueButtons\(\) \{[\s\S]*?document\.querySelectorAll\('\.continue-btn'\)[\s\S]*?addEventListener\('click', continueAgent\)/, `${label}: restored Continue buttons should be rebound`);
     assert.match(panel, /function rebindClarifyCards\(\) \{[\s\S]*?document\.querySelectorAll\('\.clarify-card'\)[\s\S]*?submitClarify\(card, tabId, clarifyId/, `${label}: restored clarify cards should be rebound`);
