@@ -23,7 +23,7 @@ Open-source AI browser agent for Chrome and Firefox. Chat with any web page, aut
   - **Anthropic Claude** (native API)
   - **Google Gemini**, **Mistral AI**, **DeepSeek**, **xAI Grok**, **Groq**
   - **MiniMax**, **Alibaba Cloud (Qwen)**
-  - **Nvidia NIM**
+  - **Cloudflare Workers AI**, **Nvidia NIM**
   - **OpenRouter** (default model: `stepfun/step-3.7-flash`; access 100+ models)
 - **Onboarding Wizard** — First-launch walkthrough covering Act mode safety and provider setup
 - **Side Panel UI** — Clean chat interface that lives alongside your browsing
@@ -110,6 +110,7 @@ Click the gear icon or go to the extension's Options page to configure:
 | OpenAI | `https://api.openai.com/v1` | Required | gpt-5.5 |
 | Anthropic Claude | `https://api.anthropic.com` | Required | claude-sonnet-4-6 |
 | Google Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | Required | gemini-3.1-flash |
+| Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1` | Required (plus Account ID) | @cf/zai-org/glm-5.2 |
 | Mistral AI | `https://api.mistral.ai/v1` | Required | mistral-large-latest |
 | DeepSeek | `https://api.deepseek.com/v1` | Required | deepseek-v4-flash |
 | xAI Grok | `https://api.x.ai/v1` | Required | grok-4.3 |
