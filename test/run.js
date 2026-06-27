@@ -372,12 +372,23 @@ class LoopDetectorShim {
       if (hitIndex < 0) continue;
       const hit = apiRequests[hitIndex];
       if (!hit) continue;
-      if (!candidate) candidate = { url: hit.url, method: String(hit.method || '').toUpperCase() };
+      if (!candidate) {
+        candidate = {
+          url: hit.url,
+          method: String(hit.method || '').toUpperCase(),
+          replayRequestId: hit.replayRequestId,
+        };
+      }
       usedRequestIndexes.add(hitIndex);
       matches++;
     }
     if (!candidate || matches < 2) return null;
-    return { url: candidate.url, method: candidate.method, occurrences: matches };
+    return {
+      url: candidate.url,
+      method: candidate.method,
+      occurrences: matches,
+      replayRequestId: candidate.replayRequestId,
+    };
   }
 }
 
@@ -782,7 +793,7 @@ test('window of 6 means a loop can fall out of the window', () => {
 
 console.log('\n_detectApiShortcut');
 
-test('_detectApiShortcut: match found returns url + method', () => {
+test('_detectApiShortcut: match found returns url + method + replay id', () => {
   const d = new LoopDetectorShim();
   const tabId = 200;
   d._recordCall(tabId, 'click', { selector: '#next' }, { success: true });
@@ -795,10 +806,11 @@ test('_detectApiShortcut: match found returns url + method', () => {
   // One API request per click, within the 3 s window.
   const clickTimes = buf.filter(e => e.key === loop.key).map(e => e.ts);
   const apiMap = new Map();
-  apiMap.set(tabId, clickTimes.map(ts => ({
+  apiMap.set(tabId, clickTimes.map((ts, index) => ({
     url: 'https://api.example.com/items?page=2',
     method: 'GET',
     ts: ts + 100,
+    replayRequestId: `api_${tabId}_req_${index}`,
   })));
   globalThis.__webbrainApiRequests = apiMap;
 
@@ -807,6 +819,7 @@ test('_detectApiShortcut: match found returns url + method', () => {
     assert.ok(shortcut, 'expected a shortcut to be returned');
     assert.equal(shortcut.url, 'https://api.example.com/items?page=2');
     assert.equal(shortcut.method, 'GET');
+    assert.equal(shortcut.replayRequestId, `api_${tabId}_req_0`);
     assert.ok(shortcut.occurrences >= 2, `expected occurrences >= 2, got ${shortcut.occurrences}`);
   } finally {
     delete globalThis.__webbrainApiRequests;
@@ -7552,6 +7565,85 @@ test('agent blocks mutating fetch_url until /allow-api even when permission prom
     const denied = JSON.parse(messages[0].content);
     assert.equal(denied.requiresApiAllow, true, `${AgentClass.name}: block did not identify /allow-api requirement`);
     assert.ok(updates.some(update => /allow-api/.test(update.data?.message || '')), `${AgentClass.name}: missing /allow-api warning`);
+  }
+});
+
+test('agent blocks captured replay mutations until /allow-api when method is omitted', async () => {
+  const previousReplay = globalThis.__webbrainApiRequestReplay;
+  try {
+    for (const AgentClass of [AgentCh, AgentFx]) {
+      const tabId = 4897;
+      globalThis.__webbrainApiRequestReplay = new Map([[
+        'api_4897_req_1',
+        {
+          tabId,
+          url: 'https://github.com/users/follow?target=alice',
+          method: 'POST',
+        },
+      ]]);
+
+      const blockedAgent = new AgentClass({ getVisionProvider: async () => null });
+      let blockedExecuted = false;
+      blockedAgent.executeTool = async () => {
+        blockedExecuted = true;
+        return { success: true };
+      };
+      blockedAgent._ensureGateSetting = async () => {};
+      blockedAgent._skipPermissionGate = true;
+      const blockedMessages = [];
+      const blockedUpdates = [];
+
+      await blockedAgent._executeToolBatch(
+        tabId,
+        [{
+          id: 'tool_1',
+          function: { name: 'fetch_url', arguments: '{"url":"https://github.com/users/follow?target=bob","replayRequestId":"api_4897_req_1"}' },
+        }],
+        blockedMessages,
+        (type, data) => blockedUpdates.push({ type, data }),
+        { supportsVision: false },
+        '',
+        new Set(['fetch_url']),
+        1,
+      );
+
+      assert.equal(blockedExecuted, false, `${AgentClass.name}: replayed captured mutation ran without /allow-api`);
+      const denied = JSON.parse(blockedMessages[0].content);
+      assert.equal(denied.requiresApiAllow, true, `${AgentClass.name}: replayed captured mutation was not blocked by /allow-api`);
+      assert.ok(blockedUpdates.some(update => /allow-api/.test(update.data?.message || '')), `${AgentClass.name}: missing replay /allow-api warning`);
+
+      const allowedAgent = new AgentClass({ getVisionProvider: async () => null });
+      let seenArgs = null;
+      allowedAgent.executeTool = async (_tabId, _name, args) => {
+        seenArgs = args;
+        return { success: true };
+      };
+      allowedAgent._ensureGateSetting = async () => {};
+      allowedAgent._skipPermissionGate = true;
+      allowedAgent.setApiMutationsAllowed(tabId, true);
+      const allowedMessages = [];
+
+      await allowedAgent._executeToolBatch(
+        tabId,
+        [{
+          id: 'tool_2',
+          function: { name: 'fetch_url', arguments: '{"url":"https://github.com/users/follow?target=bob","replayRequestId":"api_4897_req_1"}' },
+        }],
+        allowedMessages,
+        () => {},
+        { supportsVision: false },
+        '',
+        new Set(['fetch_url']),
+        1,
+      );
+
+      assert.equal(seenArgs?.method, 'POST', `${AgentClass.name}: replay method was not resolved before execution`);
+      assert.equal(allowedMessages.length, 1, `${AgentClass.name}: allowed replay mutation should produce one tool result`);
+      assert.doesNotMatch(allowedMessages[0].content, /requiresApiAllow/, `${AgentClass.name}: replay mutation stayed blocked after /allow-api`);
+    }
+  } finally {
+    if (previousReplay === undefined) delete globalThis.__webbrainApiRequestReplay;
+    else globalThis.__webbrainApiRequestReplay = previousReplay;
   }
 });
 

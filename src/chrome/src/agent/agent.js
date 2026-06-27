@@ -683,7 +683,12 @@ export class Agent {
       matches++;
     }
     if (!candidate || matches < 2) return null;
-    return { url: candidate.url, method: candidate.method, occurrences: matches };
+    return {
+      url: candidate.url,
+      method: candidate.method,
+      occurrences: matches,
+      replayRequestId: candidate.replayRequestId,
+    };
   }
 
   _bulkClickLabel(toolName, args, result) {
@@ -869,6 +874,16 @@ export class Agent {
     }
   }
 
+  _toolCallArgsWithReplayMethod(tabId, name, args) {
+    if ((name !== 'fetch_url' && name !== 'research_url') || !args || args.method) return args;
+    const replayRequestId = args.replayRequestId || args.apiReplayRequestId;
+    if (!replayRequestId) return args;
+    const replay = globalThis.__webbrainApiRequestReplay?.get(String(replayRequestId));
+    if (!replay?.method) return args;
+    if (tabId != null && replay.tabId != null && Number(replay.tabId) !== Number(tabId)) return args;
+    return { ...args, method: String(replay.method).toUpperCase() };
+  }
+
   _bulkApiReplayInstruction(shortcut) {
     return `Stop executing same-shape UI clicks. API mutations are enabled and WebBrain captured replayRequestId "${shortcut.replayRequestId}" for ${shortcut.method} ${shortcut.requestShape}. On the next turn, sample one remaining matching item with fetch_url({url: "<next matching concrete URL>", method: "${shortcut.method}", replayRequestId: "${shortcut.replayRequestId}"}). If that sample fails, fall back to the visible UI for this request shape.`;
   }
@@ -878,7 +893,7 @@ export class Agent {
     for (let i = startIndex; i < toolCalls.length; i++) {
       const tc = toolCalls[i];
       const fnName = tc?.function?.name || 'unknown_tool';
-      const fnArgs = this._toolCallArgs(tc);
+      const fnArgs = this._toolCallArgsWithReplayMethod(tabId, fnName, this._toolCallArgs(tc));
       const result = makeResult(fnName, fnArgs, i);
       messages.push({
         role: 'tool',
@@ -1555,7 +1570,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         });
         continue;
       }
-      const fnArgs = this._toolCallArgs(tc);
+      const fnArgs = this._toolCallArgsWithReplayMethod(tabId, fnName, this._toolCallArgs(tc));
 
       // Deterministic capability × origin permission gate (permission-gate.js).
       // Maps the tool to a capability and requires a (capability, host) grant —
