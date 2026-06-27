@@ -9640,9 +9640,9 @@ function plannerFixtureJson() {
   });
 }
 
-test('plan before act: enabled by default unless explicitly disabled', () => {
-  assert.equal(new AgentCh({}).planBeforeAct, true, 'chrome agent default');
-  assert.equal(new AgentFx({}).planBeforeAct, true, 'firefox agent default');
+test('plan before act: disabled by default unless explicitly enabled', () => {
+  assert.equal(new AgentCh({}).planBeforeAct, false, 'chrome agent default');
+  assert.equal(new AgentFx({}).planBeforeAct, false, 'firefox agent default');
   for (const file of [
     'src/chrome/src/background.js',
     'src/firefox/src/background.js',
@@ -9650,7 +9650,7 @@ test('plan before act: enabled by default unless explicitly disabled', () => {
     'src/firefox/src/ui/settings.js',
   ]) {
     const source = fs.readFileSync(path.join(ROOT, file), 'utf8');
-    assert.match(source, /planBeforeAct !== false/, `${file} should treat unset storage as enabled`);
+    assert.match(source, /planBeforeAct === true/, `${file} should treat unset storage as disabled`);
   }
 });
 

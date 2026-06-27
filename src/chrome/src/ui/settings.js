@@ -220,7 +220,7 @@ async function init() {
   autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
   if (planBeforeActToggle) {
-    planBeforeActToggle.checked = stored.planBeforeAct !== false;
+    planBeforeActToggle.checked = stored.planBeforeAct === true;
   }
   notifySoundToggle.checked = stored.notifySound ?? true; // on by default
   completionConfettiToggle.checked = stored.completionConfetti ?? true; // on by default

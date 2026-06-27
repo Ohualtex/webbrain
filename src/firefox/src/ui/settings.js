@@ -215,7 +215,7 @@ async function init() {
   }
   if (autoScreenshotSelect) autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   if (siteAdaptersToggle) siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
-  if (planBeforeActToggle) planBeforeActToggle.checked = stored.planBeforeAct !== false;
+  if (planBeforeActToggle) planBeforeActToggle.checked = stored.planBeforeAct === true;
   if (notifySoundToggle) notifySoundToggle.checked = stored.notifySound ?? true;
   if (completionConfettiToggle) completionConfettiToggle.checked = stored.completionConfetti ?? true;
   if (tracingToggle) tracingToggle.checked = stored.tracingEnabled === true;

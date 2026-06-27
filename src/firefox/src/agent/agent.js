@@ -108,7 +108,7 @@ export class Agent {
     // model to try `solve_captcha` once before falling back to asking
     // the user. The API key is read at call time from browser.storage.
     this.captchaSolverEnabled = false;
-    this.planBeforeAct = true;
+    this.planBeforeAct = false;
     this._pendingPlans = new Map();
     // Strict secret-handling mode — see chrome/agent.js for rationale.
     // Default off; user opts in via Settings → "Strict secret handling".

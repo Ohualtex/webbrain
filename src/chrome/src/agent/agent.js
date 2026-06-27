@@ -143,7 +143,7 @@ export class Agent {
     // Pre-execution planner (Settings → Plan before Act). When enabled, Act-mode
     // runs a read-only planning LLM call, shows the plan in the side panel, and
     // pins it to the scratchpad on user approval before the tool loop starts.
-    this.planBeforeAct = true;
+    this.planBeforeAct = false;
     this._pendingPlans = new Map(); // tabId → (planId → { resolve, ts })
     // Stale click detection: per-tab last clicked element identity.
     this._lastCdpClickIdent = new Map(); // tabId -> string

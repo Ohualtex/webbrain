@@ -139,7 +139,7 @@ loadCaptchaSolver();
 
 async function loadPlanBeforeAct() {
   const stored = await chrome.storage.local.get('planBeforeAct');
-  agent.planBeforeAct = stored.planBeforeAct !== false;
+  agent.planBeforeAct = stored.planBeforeAct === true;
 }
 // Hydrate once at SW boot. handleMessage awaits this promise so the first chat
 // can't race ahead of hydration, but it does NOT re-read storage per message —
@@ -196,7 +196,7 @@ chrome.storage.onChanged.addListener((changes) => {
     refreshPrompts = true;
   }
   if (changes.planBeforeAct) {
-    agent.planBeforeAct = changes.planBeforeAct.newValue !== false;
+    agent.planBeforeAct = changes.planBeforeAct.newValue === true;
   }
   if (refreshPrompts) agent._refreshSystemPrompts();
 });
