@@ -668,6 +668,8 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     const contentType = (res.headers.get('content-type') || '').toLowerCase();
     const status = res.status;
     const finalUrl = res.url;
+    const success = status < 400;
+    const error = success ? undefined : `Fetch returned HTTP ${status}`;
 
     // JSON
     if (contentType.includes('json')) {
@@ -675,7 +677,8 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
       let pretty = text;
       try { pretty = JSON.stringify(JSON.parse(text), null, 2); } catch (e) {}
       return {
-        success: true,
+        success,
+        ...(error ? { error } : {}),
         status, contentType, url: finalUrl,
         json: pretty.slice(0, FETCH_JSON_LIMIT),
         truncated: pretty.length > FETCH_JSON_LIMIT,
@@ -688,7 +691,8 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
       const html = await res.text();
       const { title, text } = htmlToText(html);
       return {
-        success: true,
+        success,
+        ...(error ? { error } : {}),
         status, contentType, url: finalUrl, title,
         text: text.slice(0, FETCH_TEXT_LIMIT),
         truncated: text.length > FETCH_TEXT_LIMIT,
@@ -705,7 +709,8 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
         contentType === '') {
       const text = await res.text();
       return {
-        success: true,
+        success,
+        ...(error ? { error } : {}),
         status, contentType, url: finalUrl,
         text: text.slice(0, FETCH_TEXT_LIMIT),
         truncated: text.length > FETCH_TEXT_LIMIT,
@@ -716,7 +721,8 @@ export async function fetchUrl(url, opts = {}, ctx = {}) {
     // Binary or unknown — don't bloat the conversation; tell the model how to get it
     const len = res.headers.get('content-length');
     return {
-      success: true,
+      success,
+      ...(error ? { error } : {}),
       status, contentType, url: finalUrl,
       note: 'Binary content not inlined. Use download_file({url}) to save it, then read_downloaded_file({downloadId}) if you need to inspect contents.',
       sizeBytes: len ? parseInt(len, 10) : null,

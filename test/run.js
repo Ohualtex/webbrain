@@ -29,10 +29,10 @@ const { getActiveAdapter, listAdapters } = await import(
 // network-tools.js references chrome.* inside a try/catch at module load, so
 // it imports cleanly under Node — the storage init silently no-ops and
 // validateFetchUrl / registrableDomain are pure functions.
-const { validateFetchUrl, registrableDomain, downloadFiles: downloadFilesCh } = await import(
+const { validateFetchUrl, registrableDomain, fetchUrl: fetchUrlCh, downloadFiles: downloadFilesCh } = await import(
   'file://' + path.join(ROOT, 'src/chrome/src/network/network-tools.js').replace(/\\/g, '/')
 );
-const { validateFetchUrl: validateFetchUrlFx, registrableDomain: registrableDomainFx, downloadFiles: downloadFilesFx } = await import(
+const { validateFetchUrl: validateFetchUrlFx, registrableDomain: registrableDomainFx, fetchUrl: fetchUrlFx, downloadFiles: downloadFilesFx } = await import(
   'file://' + path.join(ROOT, 'src/firefox/src/network/network-tools.js').replace(/\\/g, '/')
 );
 
@@ -646,7 +646,7 @@ test('stale repeated fetch_url entries do not stop after switching tools', () =>
       tab,
       'fetch_url',
       { url: `https://github.com/users/follow?target=user${i}`, method: 'POST' },
-      { success: true, status: 422, title: 'Oh no' },
+      { success: false, status: 422, title: 'Oh no' },
     );
     assert.notEqual(result.kind, 'stop', `fetch attempt ${i + 1} stopped too early`);
   }
@@ -1504,6 +1504,32 @@ test('firefox port validator agrees with chrome on a sample of cases', () => {
     const fr = validateFetchUrlFx(url, opts);
     assert.equal(cr.ok, fr.ok, `chrome/firefox disagree on ${url} (allowLocal=${allowLocal})`);
     assert.equal(cr.ok, expectOk, `wrong result for ${url} (allowLocal=${allowLocal})`);
+  }
+});
+
+test('fetchUrl reports HTTP 4xx/5xx as unsuccessful while preserving response text', async () => {
+  const previousFetch = globalThis.fetch;
+  try {
+    for (const [label, fetchUrl] of [['chrome', fetchUrlCh], ['firefox', fetchUrlFx]]) {
+      globalThis.fetch = async (rawUrl) => ({
+        status: 422,
+        url: String(rawUrl),
+        headers: new Headers({ 'content-type': 'text/html; charset=utf-8' }),
+        text: async () => '<html><title>Oh no &middot; GitHub</title><body>What&#8253; Your browser did something unexpected.</body></html>',
+      });
+
+      const result = await fetchUrl('https://github.com/users/follow?target=alice', { method: 'POST' });
+      assert.equal(result.success, false, `${label}: expected HTTP 422 to be unsuccessful`);
+      assert.equal(result.status, 422, `${label}: expected status to be preserved`);
+      assert.equal(result.error, 'Fetch returned HTTP 422', `${label}: expected HTTP error message`);
+      assert.match(result.text, /Your browser did something unexpected/, `${label}: expected body text to be preserved`);
+    }
+  } finally {
+    if (previousFetch === undefined) {
+      delete globalThis.fetch;
+    } else {
+      globalThis.fetch = previousFetch;
+    }
   }
 });
 
@@ -7260,7 +7286,7 @@ test('agent counts failed API mutation batch as one loop strategy', async () => 
     let executed = 0;
     agent.executeTool = async () => {
       executed++;
-      return { success: true, status: 422, title: 'Oh no', text: 'What‽ Your browser did something unexpected.' };
+      return { success: false, status: 422, error: 'Fetch returned HTTP 422', title: 'Oh no', text: 'What‽ Your browser did something unexpected.' };
     };
     agent._ensureGateSetting = async () => {};
     agent._skipPermissionGate = true;
