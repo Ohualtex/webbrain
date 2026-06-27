@@ -4,6 +4,21 @@ All notable changes to WebBrain are documented in this file.
 
 This changelog was generated from the repository Git history and release tags. Versions without a Git tag are inferred from version-bump commits and the current `package.json` / `manifest.json` version.
 
+## [17.8.0] - 2026-06-27
+
+### Added
+- Added completion confetti for successful Chrome and Firefox tasks, with a Settings toggle and localized labels so users can turn off the celebratory finish.
+
+### Changed
+- Updated release metadata, Settings subtitle versions, architecture docs, Chrome / Firefox manifests, and package versions for 17.8.0.
+
+### Fixed
+- Fixed side-panel tab race issues by queueing tab-switch updates during restore and preventing stale flushes from writing to the wrong tab conversation.
+- Scoped accepted completion and success-confetti updates to the active tab so finished tasks do not trigger stale success UI in another tab.
+
+### Tests
+- Added regression coverage for completion confetti settings and rendering, accepted completion gating, and tab-switch restore / flush races.
+
 ## [17.7.0] - 2026-06-26
 
 ### Added
