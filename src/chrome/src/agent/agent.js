@@ -560,8 +560,8 @@ export class Agent {
    * can call fetch_url directly instead of clicking again.
    *
    * Strict matching only: same tab, exact url+method repeated, request must
-   * land within WINDOW_MS after the click that triggered it. No fuzzy
-   * param-pattern matching.
+   * land within WINDOW_MS after the click that triggered it, and only GET
+   * requests are suggested. No fuzzy param-pattern matching.
    */
   _detectApiShortcut(tabId, loop, buf) {
     if (loop.type !== 'repeat') return null;
@@ -573,15 +573,17 @@ export class Agent {
     if (clickTimes.length < 2) return null;
 
     const WINDOW_MS = 3000;
+    const SAFE_SHORTCUT_METHODS = new Set(['GET']);
     let candidate = null;
     let matches = 0;
     for (const clickTs of clickTimes) {
       const hit = apiRequests.find(r =>
+        SAFE_SHORTCUT_METHODS.has(String(r.method || '').toUpperCase()) &&
         r.ts >= clickTs && r.ts <= clickTs + WINDOW_MS &&
-        (!candidate || (r.url === candidate.url && r.method === candidate.method))
+        (!candidate || (r.url === candidate.url && String(r.method || '').toUpperCase() === candidate.method))
       );
       if (!hit) continue;
-      if (!candidate) candidate = { url: hit.url, method: hit.method };
+      if (!candidate) candidate = { url: hit.url, method: String(hit.method || '').toUpperCase() };
       matches++;
     }
     if (!candidate || matches < 2) return null;

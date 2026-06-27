@@ -329,15 +329,17 @@ class LoopDetectorShim {
     if (clickTimes.length < 2) return null;
 
     const WINDOW_MS = 3000;
+    const SAFE_SHORTCUT_METHODS = new Set(['GET']);
     let candidate = null;
     let matches = 0;
     for (const clickTs of clickTimes) {
       const hit = apiRequests.find(r =>
+        SAFE_SHORTCUT_METHODS.has(String(r.method || '').toUpperCase()) &&
         r.ts >= clickTs && r.ts <= clickTs + WINDOW_MS &&
-        (!candidate || (r.url === candidate.url && r.method === candidate.method))
+        (!candidate || (r.url === candidate.url && String(r.method || '').toUpperCase() === candidate.method))
       );
       if (!hit) continue;
-      if (!candidate) candidate = { url: hit.url, method: hit.method };
+      if (!candidate) candidate = { url: hit.url, method: String(hit.method || '').toUpperCase() };
       matches++;
     }
     if (!candidate || matches < 2) return null;
@@ -804,6 +806,35 @@ test('_detectApiShortcut: request outside 3 s window returns null', () => {
 
   try {
     assert.equal(d._detectApiShortcut(tabId, loop, buf), null, 'out-of-window requests should not match');
+  } finally {
+    delete globalThis.__webbrainApiRequests;
+  }
+});
+
+test('_detectApiShortcut: write-method requests are not suggested', () => {
+  const d = new LoopDetectorShim();
+  const tabId = 204;
+  d._recordCall(tabId, 'click', { selector: '#delete' }, { success: true });
+  d._recordCall(tabId, 'click', { selector: '#delete' }, { success: true });
+  const buf = d._recordCall(tabId, 'click', { selector: '#delete' }, { success: true });
+  const loop = d._detectLoop(buf);
+  assert.ok(loop);
+
+  const clickTimes = buf.filter(e => e.key === loop.key).map(e => e.ts);
+  const apiMap = new Map();
+  apiMap.set(tabId, clickTimes.map(ts => ({
+    url: 'https://api.example.com/items/delete',
+    method: 'POST',
+    ts: ts + 100,
+  })));
+  globalThis.__webbrainApiRequests = apiMap;
+
+  try {
+    assert.equal(
+      d._detectApiShortcut(tabId, loop, buf),
+      null,
+      'write-method requests should not be turned into fetch_url shortcut suggestions'
+    );
   } finally {
     delete globalThis.__webbrainApiRequests;
   }
