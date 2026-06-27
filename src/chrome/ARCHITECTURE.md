@@ -1,6 +1,6 @@
 # WebBrain Chrome Extension — Architecture
 
-> Version 18.0.9 · Manifest V3 · Service Worker background
+> Version 18.0.10 · Manifest V3 · Service Worker background
 
 ## High-Level Overview
 
@@ -89,7 +89,7 @@ src/chrome/
 | Permission | Why |
 |---|---|
 | `debugger` | CDP access — trusted mouse/keyboard, pixel-perfect screenshots, shadow-DOM piercing. The single most important differentiator vs Firefox. |
-| `webRequest` | In-memory same-tab XHR/fetch URL+method observer for repeated-click API shortcut hints. Request bodies are not captured. |
+| `webRequest` | Opt-in, in-memory same-tab XHR/fetch observer for repeated-click API shortcut hints and opaque same-origin replay. Off by default. |
 | `alarms` | Scheduled tasks and scheduled resumes across browser sessions. |
 | `unlimitedStorage` | Optional trace recorder persists agent runs (LLM I/O + screenshots) into IndexedDB. A multi-step run can be 1–10 MB; the default ~10 MB origin cap fills after a few runs. |
 | `offscreen` | Localhost LLM servers (llama.cpp, LM Studio, Ollama) are unreachable from the MV3 service worker due to CORS / Private Network Access restrictions. An offscreen document hosts the fetch proxy AND the tab recorder. |
@@ -336,13 +336,14 @@ Before any `click` whose resolved text matches `^(create|save|submit|add|post|pu
 
 ### API shortcut observer (v18.0.0)
 
-`background.js` records the last 40 same-tab XHR/fetch requests as `{url,
-method, ts}` using `chrome.webRequest.onBeforeRequest`. When loop detection sees
-the same `click` / `click_ax` repeat, `_detectApiShortcut()` checks whether each
-click produced the same exact URL + method within 3 seconds. If so, the warning
-suggests `fetch_url({url, method})` instead of another click. This is advisory
-only: POST/PUT/PATCH/DELETE still depend on the conversation's `/allow-api`
-state, and GET/non-network capabilities still follow the normal permission gate.
+When the API mutation observer setting is enabled, `background.js` records the
+last 40 same-tab XHR/fetch requests using `chrome.webRequest.onBeforeRequest`.
+The setting is off by default. When loop detection sees the same `click` /
+`click_ax` repeat, `_detectApiShortcut()` checks whether each click produced the
+same exact URL + method within 3 seconds. If so, the warning suggests
+`fetch_url({url, method})` instead of another click. This is advisory only:
+POST/PUT/PATCH/DELETE still depend on the conversation's `/allow-api` state, and
+GET/non-network capabilities still follow the normal permission gate.
 
 ### Ambiguous-click CDP enrichment (v3.6.4+)
 

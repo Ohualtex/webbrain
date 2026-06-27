@@ -1,6 +1,6 @@
 # WebBrain Firefox Extension — Architecture
 
-> Version 18.0.9 · Manifest V2 · Background Page
+> Version 18.0.10 · Manifest V2 · Background Page
 
 ## How Firefox Differs from Chrome
 
@@ -111,7 +111,7 @@ Notably **missing** vs Chrome: `debugger`, `sidePanel`, `scripting`, `offscreen`
 - No `debugger` → no CDP, no trusted events
 - No `offscreen` → no HTTP fetch proxy; direct fetch from background page only
 - No `privateNetworkAccess` → localhost LLM servers must send CORS headers themselves
-- `webRequest` is used for the same in-memory API shortcut observer as Chrome: URL + method + timestamp only, no request body capture
+- `webRequest` is used for the same opt-in in-memory API shortcut observer as Chrome. The setting is off by default.
 - Uses `sidebar_action` (MV2) instead of `side_panel` (MV3)
 - Uses `browser.tabs.executeScript()` / `browser.tabs.sendMessage()` instead of `chrome.scripting.executeScript()`
 
@@ -465,7 +465,7 @@ Same as Chrome, minus CDP:
 - `<all_urls>` host permission allows content-script injection anywhere
 - Cross-origin iframes accessible via extension privilege
 - Plan before Act can require user approval before any Act-mode tool executes
-- API shortcut observer records same-tab XHR/fetch URL + method metadata only
+- API shortcut observer is off by default; when enabled, it records bounded same-tab XHR/fetch replay metadata in memory only
 - `/allow-api` flag required for API mutations (POST/PUT/PATCH/DELETE via `fetch_url`)
 - Finance adapters get extra safety warnings
 - Tool results capped at 8KB

@@ -3862,6 +3862,7 @@ test('API mutation observer setting is opt-in and controls the request observer'
     assert.match(settings, /apiMutationObserverToggle\.checked = stored\.apiMutationObserverEnabled === true/, `${label}: observer should load off by default`);
     assert.match(settings, /apiMutationObserverEnabled:\s*apiMutationObserverToggle\.checked/, `${label}: observer toggle should save storage`);
     assert.match(bg, /const API_MUTATION_OBSERVER_KEY = 'apiMutationObserverEnabled';/, `${label}: storage key missing`);
+    assert.match(bg, /const API_MUTATION_OBSERVER_DEFAULT = false;/, `${label}: observer default should be explicit and off`);
     assert.match(bg, /function setApiMutationObserverEnabled\(enabled\)/, `${label}: observer gate missing`);
     assert.doesNotMatch(bg, /(?:chrome|browser)\.webRequest\.onBeforeRequest\.addListener\(/, `${label}: observer should not register unconditionally`);
     assert.match(bg, /onBeforeRequest\.addListener\(recordApiRequest/, `${label}: observer should register only through the gate`);
@@ -3870,7 +3871,8 @@ test('API mutation observer setting is opt-in and controls the request observer'
     assert.match(bg, /globalThis\.__webbrainApiRequestReplay = apiRequestReplayById/, `${label}: replay store should be available to fetch_url`);
     assert.match(bg, /onBeforeRequest\.removeListener\(recordApiRequest\)/, `${label}: observer should unregister when disabled`);
     assert.match(bg, /onBeforeSendHeaders\?\.removeListener\(recordApiRequestHeaders\)/, `${label}: header observer should unregister when disabled`);
-    assert.match(bg, /setApiMutationObserverEnabled\(stored\[API_MUTATION_OBSERVER_KEY\] === true\)/, `${label}: unset storage should load as off`);
+    assert.match(bg, /storage\.local\.get\(\{ \[API_MUTATION_OBSERVER_KEY\]: API_MUTATION_OBSERVER_DEFAULT \}\)/, `${label}: unset storage should use explicit off default`);
+    assert.match(bg, /setApiMutationObserverEnabled\(stored\[API_MUTATION_OBSERVER_KEY\] === true\)/, `${label}: only explicit true should enable observer`);
     assert.match(
       bg,
       /changes\[API_MUTATION_OBSERVER_KEY\][\s\S]*setApiMutationObserverEnabled\(changes\[API_MUTATION_OBSERVER_KEY\]\.newValue === true\)/,

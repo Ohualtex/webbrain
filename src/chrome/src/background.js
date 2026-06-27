@@ -644,6 +644,7 @@ chrome.tabs.onRemoved.addListener((tabId) => lastNavByTab.delete(tabId));
 // tokens and form bodies do not get printed into model context.
 const API_REQUESTS_PER_TAB_LIMIT = 40;
 const API_MUTATION_OBSERVER_KEY = 'apiMutationObserverEnabled';
+const API_MUTATION_OBSERVER_DEFAULT = false;
 const API_REPLAY_BODY_LIMIT = 16000;
 const apiRequestsByTab = new Map(); // tabId -> [{ url, method, ts, replayRequestId, ... }]
 const apiRequestReplayById = new Map(); // replayRequestId -> captured same-origin replay options
@@ -786,10 +787,10 @@ function setApiMutationObserverEnabled(enabled) {
 
 async function loadApiMutationObserverSetting() {
   try {
-    const stored = await chrome.storage.local.get(API_MUTATION_OBSERVER_KEY);
+    const stored = await chrome.storage.local.get({ [API_MUTATION_OBSERVER_KEY]: API_MUTATION_OBSERVER_DEFAULT });
     setApiMutationObserverEnabled(stored[API_MUTATION_OBSERVER_KEY] === true);
   } catch (e) {
-    setApiMutationObserverEnabled(false);
+    setApiMutationObserverEnabled(API_MUTATION_OBSERVER_DEFAULT);
   }
 }
 

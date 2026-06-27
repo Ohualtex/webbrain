@@ -83,8 +83,9 @@ The only outbound HTTP requests are:
 3. **Content fetches** via `fetch_url` / `research_url` tools (to URLs the agent is asked to fetch)
 4. **Tab recording** creates no outbound traffic (the .webm is saved to the Downloads folder via `chrome.downloads.download`)
 
-The `webRequest` API shortcut observer does not create outbound requests; it
-only observes URL/method metadata for requests the page already made.
+The opt-in `webRequest` API shortcut observer is off by default and does not
+create outbound requests; when enabled, it observes replay metadata for requests
+the page already made so repeated UI mutations can be diagnosed.
 
 ---
 
