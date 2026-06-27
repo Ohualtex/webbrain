@@ -13,6 +13,9 @@ vanilla JS/CSS unless there is a very strong reason to add a framework.
   exists for deliberate exceptions, not as a default path.
 - Preserve local-model usability: compact prompts, smaller tool surfaces, context
   trimming, and clear failure-mode reminders matter.
+- Gate optional prompt guidance with mechanical state where possible. For
+  example, only add API-replay planner instructions when `/allow-api` is active
+  for that tab, instead of bloating every LLM call with unavailable paths.
 - Keep Chrome and Firefox behavior aligned where the platform allows it. When a
   difference is platform-real, document it near the implementation or in docs.
 - Treat site adapters as high-leverage product work. Short, concrete adapter

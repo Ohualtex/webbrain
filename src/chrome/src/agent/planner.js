@@ -8,6 +8,8 @@ import { sanitizeText } from './text-sanitize.js';
 
 const UNTRUSTED_PAGE_CONTENT_TAG_RE = /<\/?untrusted_page_content\b[^>]*>/gi;
 
+export const PLANNER_API_REPLAY_RULE = '- Because /allow-api is enabled for this conversation, repeated same-kind UI mutations may include a conditional API branch: if WebBrain later reports a [BULK API MUTATION PATTERN], sample exactly one fetch_url replay with the provided replayRequestId. If that sample fails with success:false or HTTP 4xx/5xx, stop using API for that request shape and continue through the paced visible-UI loop.';
+
 export const PLANNER_SYSTEM_PROMPT = `You are the planning subsystem for WebBrain, a browser automation agent. Given the user's task and current page context, output ONLY a single JSON object (no markdown fences, no commentary outside the JSON).
 
 Schema:
@@ -40,13 +42,17 @@ Rules:
   memory: scratchpad_write, progress_update, progress_read
   schedule: schedule_task (future/recurring work the user explicitly asked for), schedule_resume (pause CURRENT run blocked on external event)
   finish: done
-- For repeated same-kind UI mutations (for example following many users), plan visible UI first. If /allow-api is enabled and WebBrain later reports a [BULK API MUTATION PATTERN], include a conditional branch to sample exactly one fetch_url replay with the provided replayRequestId. If that sample fails with success:false or HTTP 4xx/5xx, stop using API for that request shape and continue through the visible UI with any needed delays.
+- For repeated same-kind UI mutations (for example following many users), plan visible UI first with bounded batches, verification, progress_update, and wait_for_stable pacing; do not plan one huge same-shape click/tool batch.
 - scheduling.tool = schedule_task when the user wants reminders, monitors, or recurring checks later.
 - scheduling.tool = schedule_resume only when the CURRENT task must pause until an external event (deploy finishes, email arrives) — not for generic waits (use wait_for_stable).
 - memory.use_progress_ledger = true for repeated per-item tasks (follow users, collect emails, process each search result). One ledger row per item.
 - memory.use_scratchpad = true for download IDs, file paths, multi-step plans, and facts that must survive compaction.
 - Do not invent URLs or credentials. If the task is unclear, still output a best-effort plan and note ambiguity in risks.
 - mode is always "act" for this planner.`;
+
+export function buildPlannerSystemPrompt(opts = {}) {
+  return opts.allowApi ? `${PLANNER_SYSTEM_PROMPT}\n${PLANNER_API_REPLAY_RULE}` : PLANNER_SYSTEM_PROMPT;
+}
 
 /**
  * Canonical message-content → text flattener, shared by the agent loop
@@ -99,7 +105,7 @@ export function buildPlannerMessages(enrichedUserMessage, pageUrl, pageTitle, hi
   const safeUrl = sanitizePlannerPageField(pageUrl, 300) || 'unknown';
   const safeTitle = sanitizePlannerPageField(pageTitle, 200);
   return [
-    { role: 'system', content: PLANNER_SYSTEM_PROMPT },
+    { role: 'system', content: buildPlannerSystemPrompt(opts) },
     {
       role: 'user',
       content: `${thinkingDirective}${historyBlock}<untrusted_page_content>\nPage URL: ${safeUrl}\nPage title: ${safeTitle}\n</untrusted_page_content>\n\nUser task:\n${userText}`,

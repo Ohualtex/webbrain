@@ -3557,6 +3557,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const provider = this.providerManager.getActive();
     const plannerMessages = buildPlannerMessages(enriched, tabUrl, tabTitle, historyDigest, {
       noThink: this._plannerPrefersNoThinkPrompt(provider),
+      allowApi: this.apiAllowedTabs.has(tabId),
     });
     const plannerStep = 0;
 

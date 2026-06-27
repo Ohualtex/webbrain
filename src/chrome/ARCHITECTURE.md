@@ -1,6 +1,6 @@
 # WebBrain Chrome Extension — Architecture
 
-> Version 18.0.8 · Manifest V3 · Service Worker background
+> Version 18.0.9 · Manifest V3 · Service Worker background
 
 ## High-Level Overview
 
@@ -110,6 +110,11 @@ pressing Stop cancels before browser tools execute. Scheduled runs can set
 
 Planner LLM requests are recorded in traces with `phase: "planner"` and use the
 same cost allowance and abort checks as the main loop.
+
+Planner prompts keep optional policy text mechanically gated. The base planner
+prompt includes general repeated-task pacing, but API replay guidance is appended
+only when the tab conversation already has `/allow-api`; unavailable paths should
+not bloat every planner request.
 
 ---
 

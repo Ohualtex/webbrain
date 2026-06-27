@@ -1,6 +1,6 @@
 # WebBrain Firefox Extension — Architecture
 
-> Version 18.0.8 · Manifest V2 · Background Page
+> Version 18.0.9 · Manifest V2 · Background Page
 
 ## How Firefox Differs from Chrome
 
@@ -433,6 +433,10 @@ All identical to Chrome:
 ```
 
 Same end-to-end shape as Chrome, minus the CDP-trusted-event path and the offscreen fetch fallback.
+
+Planner prompts follow Chrome's token-minimal gating: the base planner prompt
+includes general repeated-task pacing, while API replay guidance is appended only
+when the tab conversation already has `/allow-api`.
 
 ---
 
