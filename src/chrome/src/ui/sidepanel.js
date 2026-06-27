@@ -1756,6 +1756,84 @@ function rebindClarifyCards() {
   });
 }
 
+function bindPlanReviewCard(card) {
+  if (!card || card.classList.contains('plan-reviewed')) return;
+  const planId = String(card.dataset.planId || '');
+  if (!planId) return;
+  const rawTabId = card.dataset.tabId;
+  const tabId = rawTabId != null && rawTabId !== '' ? Number(rawTabId) : currentTabId;
+  if (tabId == null || Number.isNaN(tabId)) return;
+
+  const textarea = card.querySelector('.plan-review-edit');
+  const originalMarkdown = String(textarea?.defaultValue || textarea?.value || '').trim();
+
+  // A <textarea>'s live `.value` is NOT captured when the conversation is
+  // persisted via innerHTML (only its defaultValue / child text is), so edits
+  // made before a tab switch would be lost on restore — and silently pinned
+  // un-edited on approval. Mirror live edits into a data attribute on the card
+  // (which DOES survive the persist→restore round-trip) and rehydrate the
+  // textarea from it on rebind. (#3)
+  if (textarea) {
+    const saved = card.dataset.editedText;
+    if (saved != null && saved !== '') textarea.value = saved;
+    if (!textarea.dataset.bound) {
+      textarea.dataset.bound = 'true';
+      textarea.addEventListener('input', () => {
+        card.dataset.editedText = textarea.value;
+        // The persist observer only watches childList/characterData, not
+        // attributes, so the data attribute above won't trigger a save on its
+        // own — schedule one so the edit reaches storage before a panel reload.
+        schedulePersist();
+      });
+    }
+  }
+
+  const approveBtn = card.querySelector('.plan-review-approve');
+  if (approveBtn && !approveBtn.dataset.bound) {
+    approveBtn.dataset.bound = 'true';
+    approveBtn.addEventListener('click', () => {
+      const current = String(textarea?.value || '').trim();
+      const editedText = current && current !== originalMarkdown ? current : '';
+      submitPlanReview(card, tabId, planId, 'approve', editedText);
+    });
+  }
+
+  const cancelBtn = card.querySelector('.plan-review-cancel');
+  if (cancelBtn && !cancelBtn.dataset.bound) {
+    cancelBtn.dataset.bound = 'true';
+    cancelBtn.addEventListener('click', () => {
+      submitPlanReview(card, tabId, planId, 'reject', '');
+    });
+  }
+}
+
+function reattachPlanReviewActiveRun(card) {
+  const assistantEl = card?.closest?.('.message.assistant');
+  if (!assistantEl) return null;
+  currentAssistantEl = assistantEl;
+  isProcessing = true;
+  abortRequested = false;
+  sendBtn.disabled = true;
+  hideRecommendedActions();
+  showActivity(t('sp.activity.thinking'));
+  return assistantEl;
+}
+
+function clearPlanReviewActiveRun(assistantEl) {
+  if (currentAssistantEl === assistantEl) currentAssistantEl = null;
+  isProcessing = false;
+  sendBtn.disabled = false;
+  hideActivity();
+  drainQueuedContextMenuPromptsAfterPendingTabSwitch();
+  refreshRecommendedActions();
+}
+
+function rebindPlanReviewCards() {
+  document.querySelectorAll('.plan-review-card').forEach(card => {
+    bindPlanReviewCard(card);
+  });
+}
+
 function rebindScheduleComposers() {
   document.querySelectorAll('form.schedule-composer').forEach(form => {
     bindScheduleComposer(form);
@@ -1774,6 +1852,7 @@ function rebindRestoredMessageControls() {
   rebindCopyButtons();
   rebindContinueButtons();
   rebindClarifyCards();
+  rebindPlanReviewCards();
   rebindScheduleComposers();
   rebindSubscribeButtons();
 }
@@ -2680,7 +2759,19 @@ function handleAgentUpdateMessage(msg) {
 
   switch (type) {
     case 'thinking':
-      showActivity(t('sp.activity.thinking_step', { step: data.step }));
+      if (data?.note) {
+        // Keep the step indicator alongside the note when there's real
+        // progress (step > 0) so a slow call still shows movement; the planner
+        // emits step 0, so it shows just "Planning…". (#4)
+        const note = String(data.note);
+        showActivity(
+          data.step
+            ? `${note} · ${t('sp.activity.thinking_step', { step: data.step })}`
+            : note,
+        );
+      } else {
+        showActivity(t('sp.activity.thinking_step', { step: data.step }));
+      }
       break;
 
     case 'text':
@@ -2777,6 +2868,18 @@ function handleAgentUpdateMessage(msg) {
       hideActivity();
       break;
 
+    case 'run_complete':
+      if (currentAssistantEl) finalizeSteps(currentAssistantEl);
+      // When a local send is still in flight (isProcessing), its own finally
+      // resets run state and refreshes recommended actions *after* the final
+      // text renders — so only finalize the steps visually here and let that
+      // owner tear down, avoiding a premature double refresh/drain. When nothing
+      // is processing locally (e.g. the panel remounted on a tab switch away and
+      // back mid-run), run_complete is the sole finalizer and must tear down. (#4)
+      if (!isProcessing) clearPlanReviewActiveRun(currentAssistantEl);
+      scrollToBottom();
+      break;
+
     case 'context_compacted':
       // The agent auto-summarized older turns to stay within the model's
       // context window. Show a subtle inline separator so the user knows
@@ -2789,6 +2892,10 @@ function handleAgentUpdateMessage(msg) {
       // the current assistant bubble; the user picks an option or types a
       // custom answer, and we post `clarify_response` back to the bg.
       renderClarifyCard(data);
+      break;
+
+    case 'plan_review':
+      renderPlanReviewCard(data);
       break;
   }
 }
@@ -2933,6 +3040,113 @@ function renderClarifyCard(data) {
   content.appendChild(card);
   scrollToBottom();
   try { input.focus(); } catch {}
+}
+
+/**
+ * Render a planner gate card — structured plan with approve/cancel.
+ */
+function renderPlanReviewCard(data) {
+  hideActivity();
+  const tabId = data?.tabId ?? currentTabId;
+  if (tabId == null) return;
+  let assistantEl = currentAssistantEl;
+  if (!assistantEl) {
+    assistantEl = addMessage('assistant', '');
+    currentAssistantEl = assistantEl;
+  }
+
+  const planId = String(data.planId || '');
+  if (!planId) return;
+
+  const content = assistantEl.querySelector('.message-content');
+  if (!content) return;
+
+  const card = document.createElement('div');
+  card.className = 'plan-review-card';
+  card.dataset.planId = planId;
+  card.dataset.tabId = String(tabId);
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'plan-review-title';
+  titleEl.textContent = typeof t === 'function' ? t('sp.plan.title') : 'Review plan';
+  card.appendChild(titleEl);
+
+  // Match the agent-side scratchpad cap (formatPlanScratchpad keeps up to 8000
+  // chars). A lower display cap would silently drop the plan's tail the moment
+  // the user edits a long plan, since the edited textarea becomes the pinned
+  // text. (#5)
+  const originalMarkdown = String(data.markdown || data.plan?.summary || '').slice(0, 8000);
+
+  const editHint = document.createElement('div');
+  editHint.className = 'plan-review-hint';
+  editHint.textContent = typeof t === 'function' ? t('sp.plan.edit_hint') : 'Optional: edit the plan before approving';
+  card.appendChild(editHint);
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'plan-review-edit';
+  textarea.rows = 8;
+  textarea.value = originalMarkdown;
+  textarea.defaultValue = originalMarkdown;
+  card.appendChild(textarea);
+
+  const actions = document.createElement('div');
+  actions.className = 'plan-review-actions';
+
+  const approveBtn = document.createElement('button');
+  approveBtn.type = 'button';
+  approveBtn.className = 'plan-review-approve';
+  approveBtn.textContent = typeof t === 'function' ? t('sp.plan.approve') : 'Approve & run';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'plan-review-cancel';
+  cancelBtn.textContent = typeof t === 'function' ? t('sp.plan.cancel') : 'Cancel';
+
+  actions.appendChild(approveBtn);
+  actions.appendChild(cancelBtn);
+  card.appendChild(actions);
+  bindPlanReviewCard(card);
+
+  content.appendChild(card);
+  scrollToBottom();
+}
+
+function submitPlanReview(card, tabId, planId, action, editedText) {
+  if (card.classList.contains('plan-reviewed')) return;
+  const activeAssistantEl = action === 'approve' ? reattachPlanReviewActiveRun(card) : null;
+  card.classList.add('plan-reviewed');
+  for (const el of card.querySelectorAll('button, textarea')) {
+    el.disabled = true;
+  }
+  const note = document.createElement('div');
+  note.className = 'plan-review-note';
+  const approvedText = () => (typeof t === 'function' ? t('sp.plan.approved') : 'Plan approved — running…');
+  const cancelledText = () => (typeof t === 'function' ? t('sp.plan.cancelled') : 'Plan cancelled.');
+  const expiredText = () => (typeof t === 'function' ? t('sp.plan.expired') : 'This plan is no longer awaiting review — the run was cancelled.');
+  // Cancellation is local and always valid. For approval, wait for the
+  // background to confirm a pending plan actually matched: if the agent-side
+  // gate already resolved (timeout/abort/cleared) nothing will run, so claiming
+  // "running…" would be a lie — show the expired notice instead.
+  if (action !== 'approve') {
+    note.textContent = cancelledText();
+  }
+  card.appendChild(note);
+  scrollToBottom();
+
+  sendToBackground('plan_response', { tabId, planId, decision: action, editedText })
+    .then((res) => {
+      if (action !== 'approve') return;
+      note.textContent = res && res.matched ? approvedText() : expiredText();
+      if (!res?.matched && activeAssistantEl) clearPlanReviewActiveRun(activeAssistantEl);
+      scrollToBottom();
+    })
+    .catch(() => {
+      if (action === 'approve') {
+        note.textContent = expiredText();
+        if (activeAssistantEl) clearPlanReviewActiveRun(activeAssistantEl);
+        scrollToBottom();
+      }
+    });
 }
 
 function submitClarify(card, tabId, clarifyId, answer, source) {

@@ -23,6 +23,7 @@ const costSpentValueLabel = document.getElementById('cost-spent-value');
 const btnResetCostSpend = document.getElementById('btn-reset-cost-spend');
 const autoScreenshotSelect = document.getElementById('select-auto-screenshot');
 const siteAdaptersToggle = document.getElementById('toggle-site-adapters');
+const planBeforeActToggle = document.getElementById('toggle-plan-before-act');
 const notifySoundToggle = document.getElementById('toggle-notify-sound');
 const completionConfettiToggle = document.getElementById('toggle-completion-confetti');
 const tracingToggle = document.getElementById('toggle-tracing');
@@ -193,7 +194,7 @@ async function init() {
   chrome.storage.local.remove(['authToken', 'authEmail', 'authDefaultModel']).catch(() => {});
 
   // Load display settings
-  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'notifySound', 'completionConfetti', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'providerFilter', 'requestTimeoutMs', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'cloudCostSpentUsd']);
+  const stored = await chrome.storage.local.get(['verboseMode', 'screenshotFallback', 'maxAgentSteps', 'autoScreenshot', 'useSiteAdapters', 'planBeforeAct', 'notifySound', 'completionConfetti', 'tracingEnabled', 'strictSecretMode', 'agentAllowLocalNetwork', 'scheduledTasksEnabled', 'scheduledRequireConsequentialConfirmation', 'providerFilter', 'requestTimeoutMs', 'costAllowanceSessionUsd', 'costAllowanceTotalUsd', 'cloudCostSpentUsd']);
   if (typeof stored.providerFilter === 'string' && ['all','local','cloud','router'].includes(stored.providerFilter)) {
     providerFilter = stored.providerFilter;
   }
@@ -218,6 +219,9 @@ async function init() {
   }
   autoScreenshotSelect.value = stored.autoScreenshot || 'state_change';
   siteAdaptersToggle.checked = stored.useSiteAdapters ?? true;
+  if (planBeforeActToggle) {
+    planBeforeActToggle.checked = stored.planBeforeAct !== false;
+  }
   notifySoundToggle.checked = stored.notifySound ?? true; // on by default
   completionConfettiToggle.checked = stored.completionConfetti ?? true; // on by default
   tracingToggle.checked = stored.tracingEnabled === true; // off by default
@@ -445,6 +449,12 @@ autoScreenshotSelect.addEventListener('change', async () => {
 siteAdaptersToggle.addEventListener('change', async () => {
   await chrome.storage.local.set({ useSiteAdapters: siteAdaptersToggle.checked }).catch(() => {});
 });
+
+if (planBeforeActToggle) {
+  planBeforeActToggle.addEventListener('change', async () => {
+    await chrome.storage.local.set({ planBeforeAct: planBeforeActToggle.checked }).catch(() => {});
+  });
+}
 
 notifySoundToggle.addEventListener('change', async () => {
   await chrome.storage.local.set({ notifySound: notifySoundToggle.checked }).catch(() => {});
