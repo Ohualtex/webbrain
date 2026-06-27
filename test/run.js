@@ -371,12 +371,15 @@ test('click_ax is nav-prone but non-submitting set_field is not', () => {
   }
 });
 
-test('firefox URL normalization preserves query and hash for nav change detection', () => {
-  const agent = new AgentFx({});
-  assert.equal(
-    agent._normalizeUrl('https://example.com/inbox?page=2#/sent'),
-    'https://example.com/inbox?page=2#/sent'
-  );
+test('agent URL normalization preserves query and hash for nav change detection', () => {
+  for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
+    const agent = new AgentClass({});
+    assert.equal(
+      agent._normalizeUrl('https://example.com/inbox?page=2#/sent'),
+      'https://example.com/inbox?page=2#/sent',
+      `${label}: query/hash-only history entries should count as URL changes`
+    );
+  }
 });
 
 // ────────────────────────────────────────────────────────────────────────

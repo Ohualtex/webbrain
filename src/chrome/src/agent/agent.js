@@ -1094,15 +1094,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   /**
-   * Strip query params + hash for "did the URL meaningfully change" comparison.
-   * Lets things like ?utm_source=... or hash anchors slide without triggering
-   * the navigation notice, while still catching real route changes.
+   * Normalize URLs for navigation-change checks. Keep query and hash so
+   * history entries that differ only by search params or anchors still count as
+   * successful back/forward movement.
    */
   _normalizeUrl(url) {
     if (!url) return '';
     try {
       const u = new URL(url);
-      return u.origin + u.pathname;
+      return u.origin + u.pathname + u.search + u.hash;
     } catch (e) { return url; }
   }
 
