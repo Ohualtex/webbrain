@@ -1671,20 +1671,6 @@ body {
   color: var(--text-primary);
 }
 
-.plan-review-body {
-  font-size: 12px;
-  line-height: 1.45;
-  color: var(--text-secondary);
-  white-space: pre-wrap;
-  margin: 0;
-  max-height: 200px;
-  overflow: auto;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 8px;
-}
-
 .plan-review-hint {
   font-size: 11px;
   color: var(--text-secondary);

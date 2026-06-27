@@ -3024,15 +3024,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return /\b(qwen[-_ ]?3|qwq)\b/.test(model) || /deepseek[-_ ]?r1/.test(model);
   }
 
-  _plannerReasoningContent(result) {
-    return String(
-      result?.reasoningContent
-      || result?.raw?.choices?.[0]?.message?.reasoning_content
-      || result?.raw?.choices?.[0]?.message?.reasoning
-      || ''
-    ).trim();
-  }
-
   _plannerRepairMessages(plannerMessages) {
     return [
       ...plannerMessages,
