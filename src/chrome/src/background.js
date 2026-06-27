@@ -137,6 +137,15 @@ async function loadCaptchaSolver() {
 }
 loadCaptchaSolver();
 
+async function loadPlanBeforeAct() {
+  const stored = await chrome.storage.local.get('planBeforeAct');
+  agent.planBeforeAct = stored.planBeforeAct !== false;
+}
+// Hydrate once at SW boot. handleMessage awaits this promise so the first chat
+// can't race ahead of hydration, but it does NOT re-read storage per message —
+// the storage.onChanged listener below keeps agent.planBeforeAct in sync. (#5)
+const planBeforeActReady = loadPlanBeforeAct();
+
 // Initialize on install
 chrome.runtime.onInstalled.addListener(async () => {
   createContextMenus();
@@ -185,6 +194,9 @@ chrome.storage.onChanged.addListener((changes) => {
   if (changes.captchaSolverEnabled) {
     agent.captchaSolverEnabled = !!changes.captchaSolverEnabled.newValue;
     refreshPrompts = true;
+  }
+  if (changes.planBeforeAct) {
+    agent.planBeforeAct = changes.planBeforeAct.newValue !== false;
   }
   if (refreshPrompts) agent._refreshSystemPrompts();
 });
@@ -436,6 +448,17 @@ function sendIndicatorMessage(tabId, type) {
   } catch { /* ignore */ }
 }
 
+function sendAgentRunComplete(tabId) {
+  if (tabId == null) return;
+  chrome.runtime.sendMessage({
+    target: 'sidepanel',
+    action: 'agent_update',
+    tabId,
+    type: 'run_complete',
+    data: {},
+  }).catch(() => {});
+}
+
 // Stop button on the page → abort the agent run for that tab. Mirrors
 // the sidepanel's Stop button.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -580,6 +603,10 @@ async function handleMessage(msg, sender) {
   if (providerManager.providers.size === 0) {
     await providerManager.load();
   }
+  // Agent toggles (planBeforeAct, etc.) hydrate once at SW boot — await that
+  // single promise so the first chat can't race ahead of hydration, without a
+  // storage round-trip on every message.
+  await planBeforeActReady;
 
   switch (msg.action) {
     // --- Chat / Agent ---
@@ -621,6 +648,7 @@ async function handleMessage(msg, sender) {
 
         return { content: result, updates };
       } finally {
+        sendAgentRunComplete(tabId);
         sendIndicatorMessage(tabId, 'WB_HIDE_AGENT_INDICATORS');
       }
     }
@@ -646,6 +674,7 @@ async function handleMessage(msg, sender) {
 
         return { content: result };
       } finally {
+        sendAgentRunComplete(tabId);
         sendIndicatorMessage(tabId, 'WB_HIDE_AGENT_INDICATORS');
       }
     }
@@ -669,6 +698,7 @@ async function handleMessage(msg, sender) {
 
         return { content: result };
       } finally {
+        sendAgentRunComplete(tabId);
         sendIndicatorMessage(tabId, 'WB_HIDE_AGENT_INDICATORS');
       }
     }
@@ -773,6 +803,17 @@ async function handleMessage(msg, sender) {
       if (!clarifyId) return { ok: false, error: 'clarifyId required' };
       if (!answer) return { ok: false, error: 'answer required' };
       const matched = agent.submitClarifyResponse(tabId, clarifyId, answer, msg.source || 'user');
+      return { ok: matched, matched };
+    }
+
+    case 'plan_response': {
+      const tabId = msg.tabId || sender.tab?.id;
+      if (!tabId) return { ok: false, error: 'No tab ID' };
+      const planId = String(msg.planId || '');
+      const decision = String(msg.decision || 'reject');
+      const editedText = String(msg.editedText || '');
+      if (!planId) return { ok: false, error: 'planId required' };
+      const matched = agent.submitPlanResponse(tabId, planId, decision, editedText);
       return { ok: matched, matched };
     }
 

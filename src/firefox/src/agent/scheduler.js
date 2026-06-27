@@ -1093,6 +1093,7 @@ export class ScheduledJobManager {
     this.showIndicator(tabId);
     this.agent.setScheduledRunPolicy(tabId, {
       requireConsequentialConfirmation: settings.requireConsequentialConfirmation,
+      autoApprovePlanReview: true,
     });
     try {
       await this.loadProviders();

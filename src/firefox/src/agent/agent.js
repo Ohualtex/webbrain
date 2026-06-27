@@ -24,6 +24,16 @@ import {
 import * as trace from '../trace/recorder.js';
 import { solveCaptcha, detectCaptcha, injectToken } from './captcha-solver.js';
 import { Capability, CAPABILITY_LABEL, capabilitiesFor, requiredHosts, frameHostMatches, isNetworkMutation, PermissionManager, UNTRUSTED_CONTENT_TOOLS } from './permission-gate.js';
+import {
+  buildPlannerMessages,
+  parsePlanFromContent,
+  formatPlanMarkdown,
+  formatPlanScratchpad,
+  userMessageToText,
+  messageContentToText,
+} from './planner.js';
+import { extractFirstJsonObject } from './json-extract.js';
+import { sanitizeText as sanitizePlannerText } from './text-sanitize.js';
 
 const DEFAULT_CLOUD_COST_ALLOWANCE_USD = 10;
 const COST_ALLOWANCE_SESSION_KEY = 'costAllowanceSessionUsd';
@@ -98,6 +108,8 @@ export class Agent {
     // model to try `solve_captcha` once before falling back to asking
     // the user. The API key is read at call time from browser.storage.
     this.captchaSolverEnabled = false;
+    this.planBeforeAct = true;
+    this._pendingPlans = new Map();
     // Strict secret-handling mode — see chrome/agent.js for rationale.
     // Default off; user opts in via Settings → "Strict secret handling".
     this.strictSecretMode = false;
@@ -116,7 +128,7 @@ export class Agent {
     this._recentSubmitClicks = new Map();
     this._runningTabs = new Set(); // tabIds with an active processMessage/Stream in flight
     this.scheduler = null;
-    this.scheduledRunPolicies = new Map(); // tabId -> { requireConsequentialConfirmation }
+    this.scheduledRunPolicies = new Map(); // tabId -> { requireConsequentialConfirmation, autoApprovePlanReview }
     // Pending clarify() tool calls awaiting user input — see Chrome
     // agent.js. Keyed by tabId → (clarifyId → {resolve, ts}).
     this._pendingClarifications = new Map();
@@ -217,6 +229,7 @@ export class Agent {
   setScheduledRunPolicy(tabId, policy) {
     this.scheduledRunPolicies.set(tabId, {
       requireConsequentialConfirmation: policy?.requireConsequentialConfirmation !== false,
+      autoApprovePlanReview: policy?.autoApprovePlanReview === true,
     });
   }
 
@@ -1722,48 +1735,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   static _extractFirstJsonObject(raw) {
-    const text = String(raw || '').trim();
-    if (!text) return null;
-    const candidates = [];
-    const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
-    if (fenced) candidates.push(fenced[1].trim());
-    candidates.push(text);
-
-    for (const candidate of candidates) {
-      const start = candidate.indexOf('{');
-      if (start < 0) continue;
-      let depth = 0;
-      let inString = false;
-      let escaped = false;
-      for (let i = start; i < candidate.length; i++) {
-        const ch = candidate[i];
-        if (inString) {
-          if (escaped) {
-            escaped = false;
-          } else if (ch === '\\') {
-            escaped = true;
-          } else if (ch === '"') {
-            inString = false;
-          }
-          continue;
-        }
-        if (ch === '"') {
-          inString = true;
-        } else if (ch === '{') {
-          depth += 1;
-        } else if (ch === '}') {
-          depth -= 1;
-          if (depth === 0) {
-            try {
-              return JSON.parse(candidate.slice(start, i + 1));
-            } catch (_) {
-              break;
-            }
-          }
-        }
-      }
-    }
-    return null;
+    return extractFirstJsonObject(raw);
   }
 
   static _normalizeVisibleMediaLocation(raw, viewport = {}) {
@@ -2084,6 +2056,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   abort(tabId) {
     this.abortFlags.set(tabId, true);
     this._cancelClarifications(tabId, 'aborted by user');
+    this._cancelPendingPlans(tabId, 'aborted by user');
   }
 
   /**
@@ -2112,6 +2085,312 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       try { entry.resolve({ cancelled: true, reason }); } catch {}
     }
     this._pendingClarifications.delete(tabId);
+  }
+
+  submitPlanResponse(tabId, planId, action, editedText = '') {
+    const tabPending = this._pendingPlans.get(tabId);
+    if (!tabPending) return false;
+    const entry = tabPending.get(planId);
+    if (!entry) return false;
+    try {
+      entry.resolve({
+        action: String(action || 'reject'),
+        editedText: String(editedText || '').trim(),
+      });
+    } catch {}
+    return true;
+  }
+
+  _cancelPendingPlans(tabId, reason) {
+    const tabPending = this._pendingPlans.get(tabId);
+    if (!tabPending) return;
+    for (const [, entry] of tabPending) {
+      try { entry.resolve({ action: 'reject', cancelled: true, reason }); } catch {}
+    }
+    this._pendingPlans.delete(tabId);
+  }
+
+  async _waitForPlanReview(tabId, planId, plan, markdown, onUpdate) {
+    const PLAN_REVIEW_TIMEOUT_MS = 10 * 60 * 1000;
+    const tabPending = this._pendingPlans.get(tabId) || new Map();
+    this._pendingPlans.set(tabId, tabPending);
+    const responsePromise = new Promise((resolve) => {
+      tabPending.set(planId, { resolve, ts: Date.now() });
+    });
+    let timeoutId = null;
+    const timeoutPromise = new Promise((resolve) => {
+      timeoutId = setTimeout(() => resolve({
+        action: 'reject',
+        cancelled: true,
+        reason: 'plan review timed out',
+      }), PLAN_REVIEW_TIMEOUT_MS);
+    });
+    if (typeof onUpdate === 'function') {
+      try {
+        onUpdate('plan_review', { planId, plan, markdown });
+      } catch {}
+    }
+    try {
+      return await Promise.race([responsePromise, timeoutPromise]);
+    } finally {
+      // Cancel the 10-minute timer once the race settles so a fast approval
+      // doesn't leave an armed timer (and its captured resolve/plan closure)
+      // alive for up to 10 minutes.
+      if (timeoutId != null) clearTimeout(timeoutId);
+      tabPending.delete(planId);
+      if (!tabPending.size) this._pendingPlans.delete(tabId);
+    }
+  }
+
+  /**
+   * Fetch the tab's url/title, tolerating a missing tab. Returns empty strings
+   * on failure so callers never have to guard. Centralized so the planner gate
+   * and trace start can share one fetch instead of hitting browser.tabs.get twice.
+   */
+  async _getTabUrlTitle(tabId) {
+    try {
+      const tab = await browser.tabs.get(tabId);
+      return { tabUrl: tab?.url || '', tabTitle: tab?.title || '' };
+    } catch {
+      return { tabUrl: '', tabTitle: '' };
+    }
+  }
+
+  async _startTraceRun(tabId, userMessage, mode, provider, tabInfo = null) {
+    const { tabUrl, tabTitle } = tabInfo || await this._getTabUrlTitle(tabId);
+    // Tracing must never break a run: a recorder failure returns null and the
+    // run proceeds untraced rather than throwing out of the message path.
+    let runId = null;
+    try {
+      runId = await trace.startRun({
+        model: provider?.model,
+        providerId: provider?.name,
+        providerClass: provider?.constructor?.name,
+        userMessage: typeof userMessage === 'string' ? userMessage : JSON.stringify(userMessage).slice(0, 2000),
+        tabUrl,
+        tabTitle,
+        mode,
+        conversationId: this.conversationIds.get(tabId) || null,
+      });
+    } catch {
+      return null;
+    }
+    if (runId) this.currentRunId.set(tabId, runId);
+    return runId;
+  }
+
+  /**
+   * End a trace run and clear its currentRunId, tolerating recorder errors.
+   * No-op when runId is falsy. Shared by the streaming and non-streaming
+   * message paths so the teardown stays in one place. (#9)
+   */
+  _endTraceRun(tabId, runId, status, finalContent) {
+    if (!runId) return;
+    try {
+      const r = trace.endRun(runId, { status, finalContent });
+      if (r && typeof r.then === 'function') r.catch(() => {});
+    } catch {}
+    this.currentRunId.delete(tabId);
+  }
+
+  /**
+   * Build a compact, single-line-per-turn digest of recent conversation so the
+   * planner can resolve follow-up references ("continue", "open the first
+   * result"). Skips system / scratchpad / progress-ledger bookkeeping turns.
+   */
+  _buildPlannerHistoryDigest(messages, maxChars = 1500) {
+    if (!Array.isArray(messages) || messages.length === 0) return '';
+    const lines = [];
+    for (const m of messages.slice(-10)) {
+      if (!m || (m.role !== 'user' && m.role !== 'assistant')) continue;
+      if (this._isScratchpadMessage(m) || this._isProgressLedgerMessage(m)) continue;
+      const text = sanitizePlannerText(userMessageToText(m), 300, { collapseWhitespace: true });
+      if (!text) continue;
+      lines.push(`${m.role === 'user' ? 'User' : 'Assistant'}: ${text}`);
+    }
+    if (lines.length === 0) return '';
+    const digest = lines.join('\n');
+    return digest.length > maxChars ? `…${digest.slice(digest.length - maxChars)}` : digest;
+  }
+
+  async _maybeRunPlannerGate(tabId, messages, enriched, onUpdate, mode, costState, runId, tabInfo = null) {
+    const runPlanner = mode === 'act' && this.planBeforeAct;
+
+    // Snapshot prior turns for the planner digest BEFORE appending, then always
+    // record the user's turn first so a planner failure (or a throw while
+    // building the digest) can never drop the just-typed message from the
+    // transcript.
+    const priorMessages = runPlanner ? messages.slice() : null;
+    messages.push(enriched);
+    if (!runPlanner) return { proceed: true };
+
+    const historyDigest = this._buildPlannerHistoryDigest(priorMessages);
+    const gate = await this._runPlannerGate(tabId, enriched, onUpdate, costState, runId, historyDigest, tabInfo);
+    if (!gate.proceed) {
+      messages.push({ role: 'assistant', content: gate.message || 'Task cancelled.' });
+      return { proceed: false, message: gate.message || 'Task cancelled.' };
+    }
+
+    if (gate.approvedScratchpadText) {
+      const scratchResult = this._scratchpadWrite(tabId, { text: gate.approvedScratchpadText });
+      if (!scratchResult?.success) {
+        onUpdate('warning', { message: scratchResult?.error || 'Could not pin plan to scratchpad.' });
+      } else {
+        const scratchIdx = this._findScratchpadIndex(messages);
+        if (scratchIdx >= 0 && scratchIdx < messages.length - 1) {
+          const scratchMsg = messages[scratchIdx];
+          messages.splice(scratchIdx, 1);
+          messages.push(scratchMsg);
+        }
+        // Note: the "Plan approved — running…" confirmation is rendered locally
+        // by submitPlanReview in the sidepanel, so there's no plan_approved
+        // agent_update to emit here (no handler consumed it).
+      }
+    }
+    return { proceed: true };
+  }
+
+  _plannerChatOptions(provider, retry = false) {
+    const opts = {
+      temperature: retry ? 0.1 : 0.3,
+      maxTokens: 4096,
+    };
+    const providerName = String(provider?.config?.providerName || provider?.name || '').toLowerCase();
+    // vLLM/SGLang expose Qwen-style chat_template_kwargs; disabling thinking
+    // keeps planner calls from spending the whole output budget on hidden
+    // reasoning and returning empty final content.
+    if (providerName === 'vllm' || providerName === 'sglang') {
+      opts.extraBody = { chat_template_kwargs: { enable_thinking: false } };
+    }
+    return opts;
+  }
+
+  _plannerPrefersNoThinkPrompt(provider) {
+    const model = String(provider?.model || provider?.config?.model || '').toLowerCase();
+    return /\b(qwen[-_ ]?3|qwq)\b/.test(model) || /deepseek[-_ ]?r1/.test(model);
+  }
+
+  _plannerReasoningContent(result) {
+    return String(
+      result?.reasoningContent
+      || result?.raw?.choices?.[0]?.message?.reasoning_content
+      || result?.raw?.choices?.[0]?.message?.reasoning
+      || ''
+    ).trim();
+  }
+
+  _plannerRepairMessages(plannerMessages) {
+    return [
+      ...plannerMessages,
+      {
+        role: 'user',
+        content:
+          '/no_think\n' +
+          'The previous planner attempt did not return a parseable final JSON object. ' +
+          'Re-read the task above and output exactly one JSON object matching the schema. ' +
+          'No prose, no markdown, no tool calls, and no reasoning text.',
+      },
+    ];
+  }
+
+  async _runPlannerGate(tabId, enriched, onUpdate, costState, runId = null, historyDigest = '', tabInfo = null) {
+    const { tabUrl, tabTitle } = tabInfo || await this._getTabUrlTitle(tabId);
+
+    onUpdate('thinking', { step: 0, note: 'Planning…' });
+
+    const provider = this.providerManager.getActive();
+    const plannerMessages = buildPlannerMessages(enriched, tabUrl, tabTitle, historyDigest, {
+      noThink: this._plannerPrefersNoThinkPrompt(provider),
+    });
+    const plannerStep = 0;
+
+    try {
+      if (runId) {
+        try {
+          await trace.recordLLMRequest(runId, plannerStep, {
+            providerClass: provider?.constructor?.name,
+            model: provider?.model,
+            messageCount: plannerMessages.length,
+            toolsCount: 0,
+            phase: 'planner',
+          });
+        } catch {}
+      }
+      const _llmStart = Date.now();
+      let result = await this._chatWithCostAllowance(
+        provider,
+        plannerMessages,
+        this._plannerChatOptions(provider),
+        costState,
+      );
+      if (runId) {
+        try {
+          await trace.recordLLMResponse(runId, plannerStep, {
+            content: result.content,
+            toolCalls: null,
+            usage: result.usage,
+            latencyMs: Date.now() - _llmStart,
+            model: provider?.model,
+            phase: 'planner',
+          });
+        } catch {}
+      }
+      if (this._checkAbort(tabId)) {
+        return { proceed: false, message: '[Stopped by user]' };
+      }
+      let plan = parsePlanFromContent(result.content);
+      // Retry whenever the first attempt yields no parseable plan — empty
+      // output, thinking-only output, OR non-JSON prose ("Sure, here's the
+      // plan…"). The repair prompt exists precisely to coerce JSON out of that
+      // prose case, so it must not be gated on emptiness/reasoning. (#1)
+      if (!plan) {
+        onUpdate('thinking', { step: 0, note: 'Planning… retrying JSON output' });
+        result = await this._chatWithCostAllowance(
+          provider,
+          this._plannerRepairMessages(plannerMessages),
+          this._plannerChatOptions(provider, true),
+          costState,
+        );
+        plan = parsePlanFromContent(result.content);
+      }
+      // The retry above is a paid LLM call that does not honor the abort flag
+      // itself; re-check before pinning the plan or showing the review card so
+      // a Stop pressed during the retry isn't ignored until after approval. (#2)
+      if (this._checkAbort(tabId)) {
+        return { proceed: false, message: '[Stopped by user]' };
+      }
+      if (!plan) {
+        const msg = 'Plan before Act is enabled but the planner could not produce a valid structured plan. Task cancelled — no actions were taken.';
+        onUpdate('warning', { message: msg });
+        return { proceed: false, message: msg };
+      }
+
+      const planId = `plan_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+      const markdown = formatPlanMarkdown(plan);
+      const scheduledPolicy = this.scheduledRunPolicies.get(tabId);
+      if (scheduledPolicy?.autoApprovePlanReview === true) {
+        const approvedScratchpadText = formatPlanScratchpad(plan, '', markdown);
+        return { proceed: true, approvedScratchpadText, planId };
+      }
+      const choice = await this._waitForPlanReview(tabId, planId, plan, markdown, onUpdate);
+
+      if (this._checkAbort(tabId)) {
+        return { proceed: false, message: '[Stopped by user]' };
+      }
+      if (choice?.cancelled || choice?.action === 'reject') {
+        return { proceed: false, message: 'Task cancelled — plan was not approved.' };
+      }
+
+      const approvedScratchpadText = formatPlanScratchpad(plan, choice?.editedText, markdown);
+      return { proceed: true, approvedScratchpadText, planId };
+    } catch (e) {
+      if (this._isCostAllowanceError(e)) {
+        return { proceed: false, message: e.message };
+      }
+      const msg = `Plan before Act is enabled but planning failed (${e.message || 'unknown error'}). Task cancelled — no actions were taken.`;
+      onUpdate('warning', { message: msg });
+      return { proceed: false, message: msg };
+    }
   }
 
   /**
@@ -2255,6 +2534,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    */
   clearConversation(tabId) {
     this._cancelClarifications(tabId, 'conversation cleared');
+    this._cancelPendingPlans(tabId, 'conversation cleared');
     this.conversations.delete(tabId);
     this.progressLedgers.delete(tabId);
     this.progressPageScopes.delete(tabId);
@@ -2270,6 +2550,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   _cleanupTab(tabId, { preserveRunGuard = false } = {}) {
+    this._cancelPendingPlans(tabId, 'tab closed');
     this._isPdfTabCache.delete(tabId);
     this.progressPageScopes.delete(tabId);
     this.progressSessions.delete(tabId);
@@ -2777,11 +3058,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   _messageText(content) {
-    if (typeof content === 'string') return content;
-    if (Array.isArray(content)) {
-      return content.map(part => typeof part?.text === 'string' ? part.text : '').filter(Boolean).join('\n');
-    }
-    return '';
+    return messageContentToText(content);
   }
 
   _originalTaskText(tabId) {
@@ -5194,9 +5471,42 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     await this._manageContext(tabId, messages, onUpdate, costState);
 
     const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage, costState);
-    messages.push(enriched);
 
     const provider = this.providerManager.getActive();
+
+    // Clear any stale abort flag before any LLM work. The planner gate makes a
+    // paid LLM call and checks/consumes this flag, so a leftover flag from a
+    // prior run must not cancel this fresh task. (#1)
+    this.abortFlags.delete(tabId);
+
+    let runId = null;
+    let finalResponse = '';
+    let _traceStatus = 'done';
+
+    // Everything that can throw — trace start, planner gate, run setup, and the
+    // agent loop — runs inside this try so the finally always ends the trace
+    // run and clears currentRunId, even on an early throw during setup. (#2)
+    try {
+    // When the planner gate runs, start the trace up-front so the planner LLM
+    // call is recorded under this run; otherwise it's started just before the
+    // loop. _startTraceRun is the single source of truth (no duplicate tab
+    // fetch / startRun payload). (#6)
+    let plannerTabInfo = null;
+    if (mode === 'act' && this.planBeforeAct) {
+      // Fetch the tab url/title once and reuse it for both the trace start and
+      // the planner gate, instead of fetching the same tab twice.
+      plannerTabInfo = await this._getTabUrlTitle(tabId);
+      runId = await this._startTraceRun(tabId, userMessage, mode, provider, plannerTabInfo);
+    }
+
+    const gateOutcome = await this._maybeRunPlannerGate(
+      tabId, messages, enriched, onUpdate, mode, costState, runId, plannerTabInfo,
+    );
+    if (!gateOutcome.proceed) {
+      _traceStatus = 'cancelled';
+      return (finalResponse = gateOutcome.message || 'Task cancelled.');
+    }
+
     if (mode === 'act') {
       await this._ensureProgressSessionForCurrentTask(tabId, { provider, costState });
     }
@@ -5205,35 +5515,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const allowedToolNames = new Set(tools.map(t => t.function.name));
     const plannerTemperature = mode === 'act' ? 0.15 : 0.3;
     let steps = 0;
-    let finalResponse = '';
-    let _traceStatus = 'done';
     // Tracks whether we've already nudged the model after an empty
     // (no-content + no-tool-call) response. Prevents an infinite
     // empty→nudge→empty→nudge cycle.
     let emptyOutputRecoveryAttempted = false;
 
-    this.abortFlags.delete(tabId); // clear any stale abort
+    if (!runId) {
+      runId = await this._startTraceRun(tabId, userMessage, mode, provider);
+    }
 
-    // Start trace run (gated inside recorder by tracingEnabled setting).
-    let runId = null;
-    try {
-      let tabUrl = '', tabTitle = '';
-      try {
-        const tab = await browser.tabs.get(tabId);
-        tabUrl = tab?.url || ''; tabTitle = tab?.title || '';
-      } catch {}
-      runId = await trace.startRun({
-        model: provider.model,
-        providerId: provider.name,
-        providerClass: provider.constructor.name,
-        userMessage: typeof userMessage === 'string' ? userMessage : JSON.stringify(userMessage).slice(0, 2000),
-        tabUrl, tabTitle, mode,
-        conversationId: this.conversationIds.get(tabId) || null,
-      });
-      if (runId) this.currentRunId.set(tabId, runId);
-    } catch {}
-
-    try {
     while (steps < this.maxSteps) {
       if (this._checkAbort(tabId)) {
         finalResponse = finalResponse || '[Stopped by user]';
@@ -5440,12 +5730,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
     return finalResponse;
     } finally {
-      try {
-        if (runId) {
-          await trace.endRun(runId, { status: _traceStatus, finalContent: finalResponse });
-          this.currentRunId.delete(tabId);
-        }
-      } catch {}
+      this._endTraceRun(tabId, runId, _traceStatus, finalResponse);
     }
   }
 
@@ -5476,9 +5761,42 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     await this._manageContext(tabId, messages, onUpdate, costState);
 
     const enriched = await this._enrichUserMessageWithCurrentPage(tabId, messages, userMessage, costState);
-    messages.push(enriched);
 
     const provider = this.providerManager.getActive();
+
+    // Clear any stale abort flag before any LLM work. The planner gate makes a
+    // paid LLM call and checks/consumes this flag, so a leftover flag from a
+    // prior run must not cancel this fresh task. (#1)
+    this.abortFlags.delete(tabId);
+
+    let runId = null;
+    let finalResponse = '';
+    let _traceStatus = 'done';
+    const finish = (response, status = _traceStatus) => {
+      finalResponse = response || '';
+      _traceStatus = status;
+      return response;
+    };
+
+    // All throwing work — trace start, planner gate, run setup, and the agent
+    // loop — runs inside this try so the finally always ends the trace run and
+    // clears currentRunId, even on an early throw during setup. (#2)
+    try {
+    let plannerTabInfo = null;
+    if (mode === 'act' && this.planBeforeAct) {
+      // Fetch the tab url/title once and reuse it for both the trace start and
+      // the planner gate, instead of fetching the same tab twice.
+      plannerTabInfo = await this._getTabUrlTitle(tabId);
+      runId = await this._startTraceRun(tabId, userMessage, mode, provider, plannerTabInfo);
+    }
+
+    const gateOutcome = await this._maybeRunPlannerGate(
+      tabId, messages, enriched, onUpdate, mode, costState, runId, plannerTabInfo,
+    );
+    if (!gateOutcome.proceed) {
+      return finish(gateOutcome.message || 'Task cancelled.', 'cancelled');
+    }
+
     if (mode === 'act') {
       await this._ensureProgressSessionForCurrentTask(tabId, { provider, costState });
     }
@@ -5490,12 +5808,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // See processMessage — used to break the empty-response→nudge cycle.
     let emptyOutputRecoveryAttempted = false;
 
-    this.abortFlags.delete(tabId);
-
     while (steps < this.maxSteps) {
       if (this._checkAbort(tabId)) {
         onUpdate('warning', { message: 'Stopped by user.' });
-        return '[Stopped by user]';
+        return finish('[Stopped by user]', 'cancelled');
       }
 
       if (steps > 0) {
@@ -5522,7 +5838,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (beforeCost) {
           messages.push({ role: 'assistant', content: beforeCost });
           onUpdate('warning', { message: beforeCost });
-          return beforeCost;
+          return finish(beforeCost, 'cost_limit');
         }
         let costStopMessage = '';
 
@@ -5578,7 +5894,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (costStopMessage) {
             messages.push({ role: 'assistant', content: costStopMessage });
             onUpdate('warning', { message: costStopMessage });
-            return costStopMessage;
+            return finish(costStopMessage, 'cost_limit');
           }
           const toolCalls = Object.values(toolCallsAccumulator);
           this._logDebug({ type: 'llm_stream_response', step: steps, content: fullText, toolCalls });
@@ -5591,7 +5907,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             tabId, toolCalls, messages, onUpdate, provider, fullText, allowedToolNames, steps
           );
           if (batchResult.action === 'return') {
-            return batchResult.value;
+            return finish(batchResult.value);
           }
           continue;
         }
@@ -5603,7 +5919,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if ((!fullText || !fullText.trim()) && costStopMessage) {
           messages.push({ role: 'assistant', content: costStopMessage });
           onUpdate('warning', { message: costStopMessage });
-          return costStopMessage;
+          return finish(costStopMessage, 'cost_limit');
         }
         if (!fullText || !fullText.trim()) {
           if (!emptyOutputRecoveryAttempted) {
@@ -5617,7 +5933,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const failMsg = '[Agent emitted no output and no tool call, even after a recovery nudge. This usually means the task exceeded the current model\'s capability or context budget. Try a stronger model, raise the step limit in settings, or break the task into smaller parts.]';
           messages.push({ role: 'assistant', content: failMsg });
           onUpdate('warning', { message: failMsg });
-          return failMsg;
+          return finish(failMsg, 'empty_output');
         }
         emptyOutputRecoveryAttempted = false;
         const progressFinalBlock = this._plainFinalProgressBlock(tabId);
@@ -5632,7 +5948,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           fullText = `${fullText}\n\n${costStopMessage}`;
         }
         messages.push({ role: 'assistant', content: fullText });
-        return fullText;
+        return finish(fullText);
 
       } catch (e) {
         this._logDebug({ type: 'llm_stream_error', step: steps, error: e.message });
@@ -5645,7 +5961,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         onUpdate('error', { message: e.message });
         const errMsg = `Error: ${e.message}`;
         messages.push({ role: 'assistant', content: errMsg });
-        return errMsg;
+        return finish(errMsg, 'error');
       }
     }
 
@@ -5655,6 +5971,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const summary = this._buildStepLimitSummary(messages, steps);
     messages.push({ role: 'assistant', content: summary });
     onUpdate('text', { content: summary });
-    return summary;
+    return finish(summary, 'max_steps');
+    } finally {
+      this._endTraceRun(tabId, runId, _traceStatus, finalResponse);
+    }
   }
 }
