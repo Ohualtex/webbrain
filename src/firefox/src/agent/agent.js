@@ -4239,6 +4239,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     while (recentMessages.length && recentMessages[0].role === 'tool') {
       oldMessages.push(recentMessages.shift());
     }
+    let retainedRecentOverBudget = false;
     if (tooManyTokens) {
       // Small-window runs can exceed the token budget before they have more
       // than 30 post-task messages. In that case, keeping all 30 recent turns
@@ -4274,10 +4275,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       while (oldMessages.length >= 4 && canMoveOldestRecentToSummary() && this._estimateContextChars(recentMessages) > maxRecentChars) {
         moveOldestRecentToSummary();
       }
+      retainedRecentOverBudget = this._estimateContextChars(recentMessages) > maxRecentChars;
     }
 
     const minSummarizableMessages = tooManyTokens && oldMessages.some(m => m?.role === 'user') ? 1 : 4;
-    if (oldMessages.length < minSummarizableMessages) {
+    if (oldMessages.length < minSummarizableMessages || retainedRecentOverBudget) {
       // Not enough history to summarize. But if the TOKEN budget is what
       // tripped us (e.g. a single huge page/tool result early in a run on a
       // small local model), returning unchanged would re-send the same

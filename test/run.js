@@ -9789,6 +9789,42 @@ test('context compaction preserves the latest user turn while seeding a small su
   }
 });
 
+test('context compaction truncates when protected recent history still exceeds budget', async () => {
+  const latestUserTurn = 'CURRENT USER REQUEST: inspect this large result next';
+  const hugeToolResult = 'tool-result '.repeat(900);
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 4000, supportsVision: false }) });
+    const tabId = AgentClass === AgentCh ? 198 : 199;
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'keep working on the task' },
+      { role: 'assistant', content: `first exchange ${'x'.repeat(3900)}` },
+      { role: 'user', content: `previous clarification ${'y'.repeat(3900)}` },
+      { role: 'assistant', content: `second exchange ${'z'.repeat(3900)}` },
+      { role: 'user', content: latestUserTurn },
+      { role: 'assistant', tool_calls: [{ id: 'tool-protected', function: { name: 'read_page' } }] },
+      { role: 'tool', tool_call_id: 'tool-protected', content: hugeToolResult },
+    ];
+
+    const origLog = console.log;
+    console.log = () => {};
+    let result;
+    try {
+      result = await agent._manageContext(tabId, messages, () => {});
+    } finally {
+      console.log = origLog;
+    }
+
+    assert.equal(result.compacted, true, `${AgentClass.name}: protected oversized recent tail should still compact via truncation`);
+    assert.equal(result.reason, 'truncated_oversized_messages', `${AgentClass.name}: should fall back to truncation instead of rebuilding over budget`);
+    assert.ok(messages.some(m => m.role === 'user' && m.content === latestUserTurn), `${AgentClass.name}: latest user turn should remain verbatim`);
+    assert.match(messages[messages.length - 1].content, /\[\.\.\.truncated to fit context\]/, `${AgentClass.name}: protected recent tool result should be truncated`);
+
+    const h = agent.persistTimers?.get?.(tabId);
+    if (h) clearTimeout(h);
+  }
+});
+
 test('context compaction shrinks bulky retained recent history to fit small-window budget', async () => {
   for (const AgentClass of [AgentCh, AgentFx]) {
     const agent = new AgentClass({ getActive: () => ({ contextWindow: 16384, supportsVision: false }) });
