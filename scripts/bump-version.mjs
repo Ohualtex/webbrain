@@ -35,10 +35,10 @@
  * automatic — the operator runs `git push --follow-tags origin <branch>`.
  *
  * The pure helpers `bumpSemver`, `rewriteVersionInJsonText`,
- * `rewriteVersionByAnchor`, `isReleaseBoundary`, and `submissionZipPaths`
- * are exported for unit tests — the CLI side is guarded by an
- * `import.meta.url` check so importing this file doesn't trigger
- * filesystem writes or git calls.
+ * `rewriteVersionByAnchor`, `isReleaseBoundary`, `submissionZipPaths`, and
+ * `submissionZipRemoveCommand` are exported for unit tests — the CLI side is
+ * guarded by an `import.meta.url` check so importing this file doesn't
+ * trigger filesystem writes or git calls.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -125,6 +125,10 @@ export const SUBMISSION_ZIP_PACKAGES = Object.freeze(['chrome', 'edge', 'firefox
 
 export function submissionZipPaths(version) {
   return SUBMISSION_ZIP_PACKAGES.map((browser) => `dist/webbrain-${browser}-${version}.zip`);
+}
+
+export function submissionZipRemoveCommand(version) {
+  return `git rm --ignore-unmatch ${submissionZipPaths(version).join(' ')}`;
 }
 
 /**
@@ -307,7 +311,7 @@ function runCli() {
     console.log(`  git tag -a v${newVersion} -m "Release v${newVersion}"   # ${newVersion} is a release boundary`);
   }
   console.log('  npm run build:zip       # rebuild ' + submissionZipPaths(newVersion).join(', '));
-  console.log('  git rm ' + submissionZipPaths(oldVersion).join(' '));
+  console.log('  ' + submissionZipRemoveCommand(oldVersion));
   console.log('  git add ' + submissionZipPaths(newVersion).join(' '));
   console.log('  git commit -m "dist: rebuild submission zips for v' + newVersion + '"');
 }
