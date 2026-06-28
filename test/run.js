@@ -3212,14 +3212,14 @@ function runSettingsTabsScript(script, { saved = null, hash = '' } = {}) {
       },
     };
   }
-  const buttons = ['display', 'providers', 'multimodal', 'profile'].map((name) => ({
+  const buttons = ['display', 'providers', 'multimodal', 'permissions'].map((name) => ({
     dataset: { tab: name },
     classList: makeClassList(),
     addEventListener(type, handler) {
       if (type === 'click') this.clickHandler = handler;
     },
   }));
-  const panels = ['display', 'providers', 'multimodal', 'profile'].map((name) => ({
+  const panels = ['display', 'providers', 'multimodal', 'permissions'].map((name) => ({
     dataset: { panel: name },
     classList: makeClassList(),
   }));
@@ -3275,6 +3275,90 @@ test('settings tabs validate saved and hash tab names without selector interpola
     assert.equal(valid.activeButton, 'multimodal', `${label}: valid hash should override saved tab`);
     assert.equal(valid.activePanel, 'multimodal', `${label}: valid hash should activate its panel`);
     assert.equal(valid.stored, 'multimodal', `${label}: activated hash tab should persist`);
+
+    const removed = runSettingsTabsScript(script, { saved: 'profile', hash: '#captcha' });
+    assert.equal(removed.activeButton, 'providers', `${label}: removed profile/captcha tabs should fall back to providers`);
+    assert.equal(removed.activePanel, 'providers', `${label}: removed profile/captcha panels should not activate`);
+  }
+});
+
+test('settings moves profile and CAPTCHA controls into General advanced', () => {
+  for (const [label, htmlRel] of [
+    ['chrome', 'src/chrome/src/ui/settings.html'],
+    ['firefox', 'src/firefox/src/ui/settings.html'],
+  ]) {
+    const html = fs.readFileSync(path.join(ROOT, htmlRel), 'utf8');
+    assert.doesNotMatch(html, /data-tab="profile"/, `${label}: Profile should not be a top-level tab`);
+    assert.doesNotMatch(html, /data-tab="captcha"/, `${label}: CAPTCHA should not be a top-level tab`);
+    assert.doesNotMatch(html, /data-panel="profile"/, `${label}: Profile should not be a top-level panel`);
+    assert.doesNotMatch(html, /data-panel="captcha"/, `${label}: CAPTCHA should not be a top-level panel`);
+
+    const displayStart = html.indexOf('<section class="tab-panel" data-panel="display"');
+    assert.notEqual(displayStart, -1, `${label}: General panel missing`);
+    const providersStart = html.indexOf('<section class="tab-panel active" data-panel="providers"', displayStart);
+    assert.notEqual(providersStart, -1, `${label}: providers panel should follow General panel`);
+    const displayPanel = html.slice(displayStart, providersStart);
+    const advancedStart = displayPanel.indexOf('<details class="advanced-settings">');
+    assert.notEqual(advancedStart, -1, `${label}: General panel should include collapsed Advanced settings`);
+
+    const searchStart = displayPanel.indexOf('id="input-general-search"');
+    assert.notEqual(searchStart, -1, `${label}: General panel should include a search input`);
+    assert.ok(searchStart < advancedStart, `${label}: General search should stay above settings and Advanced`);
+    assert.match(displayPanel, /id="general-search-empty" hidden/, `${label}: General search should include an empty-result state`);
+    assert.match(html, /\.general-search-hidden \{ display: none !important; \}/, `${label}: General search should force-hide filtered rows/cards`);
+
+    for (const id of [
+      'toggle-screenshot-fallback',
+      'toggle-site-adapters',
+      'toggle-api-mutation-observer',
+      'select-auto-screenshot',
+      'toggle-tracing',
+      'input-cost-session-limit',
+      'input-cost-total-limit',
+      'toggle-strict-secret',
+      'toggle-allow-local-network',
+      'profile-card',
+      'captcha-card',
+    ]) {
+      const index = displayPanel.indexOf(`id="${id}"`);
+      assert.notEqual(index, -1, `${label}: ${id} should remain in General`);
+      assert.ok(index > advancedStart, `${label}: ${id} should be inside Advanced`);
+    }
+
+    for (const id of [
+      'select-language',
+      'select-theme',
+      'toggle-verbose',
+      'select-plan-before-act-mode',
+      'toggle-scheduled-tasks',
+      'toggle-scheduled-confirm',
+      'toggle-notify-sound',
+      'toggle-completion-confetti',
+      'range-max-steps',
+      'range-request-timeout',
+      'btn-open-traces',
+    ]) {
+      const index = displayPanel.indexOf(`id="${id}"`);
+      assert.notEqual(index, -1, `${label}: ${id} should remain visible in General`);
+      assert.ok(index < advancedStart, `${label}: ${id} should stay outside Advanced`);
+    }
+
+    assert.match(html, /\.advanced-settings \{[\s\S]*?margin: 22px 0 32px;[\s\S]*?padding: 16px 0 22px;[\s\S]*?border-bottom: 1px solid var\(--border\);/, `${label}: Advanced should have bottom padding and a clear lower boundary`);
+  }
+});
+
+test('settings General search filters visible and Advanced controls', () => {
+  for (const [label, settingsRel] of [
+    ['chrome', 'src/chrome/src/ui/settings.js'],
+    ['firefox', 'src/firefox/src/ui/settings.js'],
+  ]) {
+    const settings = fs.readFileSync(path.join(ROOT, settingsRel), 'utf8');
+    assert.match(settings, /const generalSearchInput = document\.getElementById\('input-general-search'\);/, `${label}: General search input should be wired`);
+    assert.match(settings, /const searchableNodes = \[item, \.\.\.Array\.from\(item\.querySelectorAll/, `${label}: General search should index the root row/card id as well as child controls`);
+    assert.match(settings, /function setGeneralSearchHidden\(item, hidden\) \{[\s\S]*?item\.hidden = hidden;[\s\S]*?item\.classList\.toggle\('general-search-hidden', hidden\);[\s\S]*?\}/, `${label}: General search should force-hide matching DOM nodes with a class`);
+    assert.match(settings, /function filterGeneralSettings\(\) \{[\s\S]*?const query = normalizeGeneralSearchText\(generalSearchInput\.value\);[\s\S]*?setGeneralSearchHidden\(item, !!query && !matches\);[\s\S]*?setGeneralSearchHidden\(advancedSettings, !!query && advancedMatches === 0\);[\s\S]*?if \(query && advancedMatches > 0\) advancedSettings\.open = true;[\s\S]*?generalSearchEmpty\.hidden = !query \|\| \(visibleMatches \+ advancedMatches\) > 0;[\s\S]*?\}/, `${label}: General search should filter rows, hide empty Advanced, and auto-open matched Advanced results`);
+    assert.match(settings, /generalSearchInput\.addEventListener\('input', filterGeneralSettings\);/, `${label}: General search should filter as the user types`);
+    assert.match(settings, /await setLocale\(languageSelect\.value\);[\s\S]*?filterGeneralSettings\(\);[\s\S]*?renderProviders\(\);/, `${label}: language changes should reapply the active General search`);
   }
 });
 
