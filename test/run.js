@@ -155,6 +155,9 @@ function allowProgress(agent, tabId, allowedActions = ['follow'], opts = {}) {
 const { bumpSemver, rewriteVersionInJsonText, rewriteVersionByAnchor, isReleaseBoundary } = await import(
   'file://' + path.join(ROOT, 'scripts/bump-version.mjs').replace(/\\/g, '/')
 );
+const { normalizeChangelogBody, buildChangelogSection, insertChangelogEntry } = await import(
+  'file://' + path.join(ROOT, 'scripts/update-changelog.mjs').replace(/\\/g, '/')
+);
 
 // providers/manager.js — pure ESM at module load (chrome.* only inside
 // methods). We import the class so we can exercise the static categoryFor()
@@ -2070,6 +2073,46 @@ test('minor and major reset lower components', () => {
 test('explicit MAJOR.MINOR.PATCH override', () => {
   assert.equal(bumpSemver('7.0.0', '7.2.3'), '7.2.3');
   assert.equal(bumpSemver('7.0.0', '10.0.0'), '10.0.0');
+});
+
+test('update-changelog: inserts newest-first release sections', () => {
+  const before = `# Changelog
+
+All notable changes to WebBrain are documented in this file.
+
+## [1.2.3] - 2026-06-01
+
+### Fixed
+- Fixed the previous release.
+`;
+  const after = insertChangelogEntry(before, {
+    version: '1.3.0',
+    date: '2026-06-28',
+    body: '### Added\n- Added a release workflow.',
+  });
+  assert.match(after, /^# Changelog[\s\S]*## \[1\.3\.0\] - 2026-06-28[\s\S]*## \[1\.2\.3\] - 2026-06-01/);
+  assert.match(after, /### Added\n- Added a release workflow\./);
+});
+
+test('update-changelog: normalizes plain notes and fenced AI output', () => {
+  assert.equal(
+    normalizeChangelogBody('Packaged the browser extension release.'),
+    '### Changed\n- Packaged the browser extension release.\n'
+  );
+  assert.equal(
+    normalizeChangelogBody('```markdown\n### Fixed\n- Fixed release packaging.\n```'),
+    '### Fixed\n- Fixed release packaging.\n'
+  );
+});
+
+test('update-changelog: rejects duplicate versions and nested release headings', () => {
+  const changelog = '## [1.3.0] - 2026-06-28\n\n### Changed\n- Existing entry.\n';
+  assert.throws(() => insertChangelogEntry(changelog, {
+    version: '1.3.0',
+    date: '2026-06-28',
+    body: '### Changed\n- Duplicate.',
+  }), /already contains/);
+  assert.throws(() => buildChangelogSection('1.4.0', '2026-06-28', '## [1.4.0] - 2026-06-28'), /must not include/);
 });
 
 test('rejects bad current version', () => {
