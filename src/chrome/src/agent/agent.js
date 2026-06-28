@@ -6259,11 +6259,11 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       try {
         const stored = await chrome.storage.local.get(['captchaSolverEnabled', 'capsolverApiKey']);
         if (!stored.captchaSolverEnabled) {
-          return { success: false, error: 'CapSolver is not enabled. Ask the user to enable it in Settings → CAPTCHA, or fall back to asking them to solve the captcha manually.' };
+          return { success: false, error: 'CapSolver is not enabled. Ask the user to enable it in Settings → General → Advanced, or fall back to asking them to solve the captcha manually.' };
         }
         const apiKey = (stored.capsolverApiKey || '').trim();
         if (!apiKey) {
-          return { success: false, error: 'CapSolver is enabled but no API key is configured. Ask the user to set one in Settings → CAPTCHA, or fall back to asking them to solve the captcha manually.' };
+          return { success: false, error: 'CapSolver is enabled but no API key is configured. Ask the user to set one in Settings → General → Advanced, or fall back to asking them to solve the captcha manually.' };
         }
 
         // Resolve the website URL — the active tab's URL is what the
