@@ -4219,8 +4219,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const keepRecent = 30;
     // Exclude the pinned original task from both summary and recent slices.
     const afterPin = originalTaskIdx >= 0 ? originalTaskIdx + 1 : 1;
-    const oldMessagesRaw = messages.slice(afterPin, -keepRecent);
-    const recentMessagesRaw = messages.slice(-keepRecent);
+    const recentStart = Math.max(afterPin, messages.length - keepRecent);
+    const oldMessagesRaw = messages.slice(afterPin, recentStart);
+    const recentMessagesRaw = messages.slice(recentStart);
     const oldMessages = oldMessagesRaw.filter(m => !this._isPinnedAgentStateMessage(m));
     const recentMessages = recentMessagesRaw.filter(m => !this._isPinnedAgentStateMessage(m));
 
@@ -4234,6 +4235,19 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // Move any leading `tool` results back into the summarized set.
     while (recentMessages.length && recentMessages[0].role === 'tool') {
       oldMessages.push(recentMessages.shift());
+    }
+    if (tooManyTokens) {
+      // Small-window runs can exceed the token budget before they have more
+      // than 30 post-task messages. In that case, keeping all 30 recent turns
+      // would leave too little `oldMessages` history to summarize and we'd send
+      // the same over-budget prompt again. Move just enough of the earliest
+      // recent turns back into the summary set to make compaction possible.
+      while (oldMessages.length < 4 && recentMessages.length) {
+        oldMessages.push(recentMessages.shift());
+        while (recentMessages.length && recentMessages[0].role === 'tool') {
+          oldMessages.push(recentMessages.shift());
+        }
+      }
     }
 
     if (oldMessages.length < 4) {

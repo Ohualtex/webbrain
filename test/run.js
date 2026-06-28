@@ -9721,6 +9721,39 @@ test('context compaction keeps the same recent turn window in chrome and firefox
   }
 });
 
+test('context compaction shrinks recent window when small-window runs exceed token budget early', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 32768, supportsVision: false }) });
+    const tabId = AgentClass === AgentCh ? 190 : 191;
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'keep working on the task' },
+    ];
+    for (let i = 0; i < 15; i++) {
+      messages.push({ role: 'assistant', content: `step ${i} ${'x'.repeat(2990)}` });
+      messages.push({ role: 'user', content: `ok ${i} ${'y'.repeat(2990)}` });
+    }
+
+    const origLog = console.log;
+    console.log = () => {};
+    let result;
+    try {
+      result = await agent._manageContext(tabId, messages, () => {});
+    } finally {
+      console.log = origLog;
+    }
+
+    assert.equal(result.compacted, true, `${AgentClass.name}: over-budget small-window history should compact`);
+    assert.ok(result.summarized >= 4, `${AgentClass.name}: should summarize enough early turns`);
+    assert.notEqual(result.reason, 'over_budget_unshrinkable', `${AgentClass.name}: should not leave oversized prompt uncompactable`);
+    assert.ok(messages.some(m => /Context window was trimmed/i.test(String(m.content || ''))), `${AgentClass.name}: summary message missing`);
+    assert.ok(messages.some(m => String(m.content || '').includes('ok 14')), `${AgentClass.name}: newest user turn should remain recent`);
+
+    const h = agent.persistTimers?.get?.(tabId);
+    if (h) clearTimeout(h);
+  }
+});
+
 test('manual compactConversation reports emergency truncation as compacted', async () => {
   for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
     const agent = new AgentClass({ getActive: () => ({ contextWindow: 4000, supportsVision: false }) });
