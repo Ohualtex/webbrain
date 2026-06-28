@@ -9669,6 +9669,54 @@ test('manual compactConversation compacts before automatic thresholds', async ()
   }
 });
 
+test('context token budget uses adaptive compaction ratios', async () => {
+  const cases = [
+    [16000, 10400],
+    [32000, 20800],
+    [64000, 44800],
+    [128000, 96000],
+    [256000, 204800],
+  ];
+
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    for (const [contextWindow, expectedBudget] of cases) {
+      const agent = new AgentClass({ getActive: () => ({ contextWindow, supportsVision: false }) });
+      assert.equal(agent._contextTokenBudget(), expectedBudget, `${AgentClass.name}: wrong budget for ${contextWindow}`);
+    }
+  }
+});
+
+test('context compaction keeps the same recent turn window in chrome and firefox', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+    const tabId = AgentClass === AgentCh ? 188 : 189;
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'keep working on the task' },
+    ];
+    for (let i = 0; i < 40; i++) {
+      messages.push({ role: 'assistant', content: `step ${i}` });
+      messages.push({ role: 'user', content: `ok ${i}` });
+    }
+    agent.conversations.set(tabId, messages);
+
+    const origLog = console.log;
+    console.log = () => {};
+    try {
+      await agent.compactConversation(tabId);
+    } finally {
+      console.log = origLog;
+    }
+
+    const compacted = agent.conversations.get(tabId);
+    assert.ok(compacted.some(m => m.role === 'assistant' && m.content === 'step 25'), `${AgentClass.name}: did not keep the last 30 messages`);
+    assert.ok(compacted.some(m => m.role === 'user' && m.content === 'ok 39'), `${AgentClass.name}: lost newest user turn`);
+
+    const h = agent.persistTimers?.get?.(tabId);
+    if (h) clearTimeout(h);
+  }
+});
+
 test('manual compactConversation reports emergency truncation as compacted', async () => {
   for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
     const agent = new AgentClass({ getActive: () => ({ contextWindow: 4000, supportsVision: false }) });

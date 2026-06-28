@@ -80,10 +80,9 @@ export class Agent {
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped
     this.maxContextChars = 80000; // rough char budget (~20k tokens)
-    // Fraction of the model's context window at which we auto-compact. Once
-    // the running input-token count crosses this share of provider.contextWindow,
-    // _manageContext summarizes older turns ("Context automatically compacted")
-    // — leaving headroom for the next request plus the output budget.
+    // Default fraction of the model's context window at which we auto-compact.
+    // _contextCompactRatioForWindow tightens this for small context windows and
+    // relaxes it for very large ones.
     this.contextCompactRatio = 0.75;
     // tabId -> most recent provider-reported input (prompt) token count. Drives
     // the token-aware auto-compaction trigger; updated after each LLM response,
@@ -4837,15 +4836,22 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
 
   /**
    * Token budget at which we proactively auto-compact for the active provider:
-   * a fraction (contextCompactRatio) of the model's context window. Compacting
+   * an adaptive fraction of the model's context window. Compacting
    * here — before the provider hard-errors on overflow — keeps the run smooth
    * and lets us surface a clean "Context automatically compacted" notice rather
    * than the jarring _emergencyTrim fallback.
    */
+  _contextCompactRatioForWindow(contextWindow) {
+    if (contextWindow <= 32000) return 0.65;
+    if (contextWindow <= 64000) return 0.70;
+    if (contextWindow <= 128000) return this.contextCompactRatio;
+    return 0.80;
+  }
+
   _contextTokenBudget() {
     const provider = this.providerManager.getActive();
     const window = (provider && Number(provider.contextWindow)) || 128000;
-    return Math.floor(window * this.contextCompactRatio);
+    return Math.floor(window * this._contextCompactRatioForWindow(window));
   }
 
   // Char-equivalent billed for the single screenshot that survives image
