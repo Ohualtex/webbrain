@@ -2315,6 +2315,19 @@ async function sendMessage(extraChatParams) {
     accepted = true;
     completedSuccessfully = updatesContainSuccessfulDone(res?.updates);
 
+    // An unsupported-attachment rejection comes back as a plain error string
+    // and the turn is never recorded in history. We optimistically cleared the
+    // chips on send, so re-add them here — otherwise "switch providers and try
+    // again" is impossible without re-picking every file.
+    if (attachmentsForSend.length && currentTabId === tabId
+        && typeof res?.content === 'string'
+        && /does not support (?:image|document) attachments/.test(res.content)) {
+      const pending = getPendingAttachmentsForTab(tabId);
+      pending.unshift(...attachmentsForSend.filter(att => !pending.includes(att)));
+      renderAttachmentPreviews();
+      syncSendButtonState();
+    }
+
     if (renderToCurrentTab && currentTabId === tabId && abortRequested) {
       // Agent was stopped — show what we got so far
       const textEl = assistantEl?.querySelector('.message-text');
@@ -3523,7 +3536,7 @@ stopBtn.addEventListener('click', async () => {
 const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
 let speechRecognition = null;
 let isListening = false;
-let micBaseText = '';
+let micInterimText = ''; // the interim transcript tail we last appended to the input
 let voiceInputSettingEnabled = true; // mirrors storage 'voiceInputEnabled', on by default
 let micDisabledReason = null; // null | 'unsupported' | 'settings'
 
@@ -3543,34 +3556,67 @@ function stopListening() {
   isListening = false;
   micBtn?.classList.remove('listening');
   updateMicButtonState();
-  try { speechRecognition?.stop(); } catch { /* ignore */ }
+  // Detach handlers before stop(): the engine can fire a trailing
+  // onresult/onend *after* stop() for buffered audio. Left attached, that
+  // late onresult would repaint the input (resurrecting just-sent text), and
+  // a stale onend would clobber the state of a freshly-started session.
+  const recognition = speechRecognition;
+  speechRecognition = null;
+  micInterimText = '';
+  if (recognition) {
+    recognition.onresult = null;
+    recognition.onerror = null;
+    recognition.onend = null;
+    try { recognition.stop(); } catch { /* ignore */ }
+  }
 }
 
 function startListening() {
   if (!SpeechRecognitionImpl || !inputEl) return;
-  speechRecognition = new SpeechRecognitionImpl();
-  speechRecognition.lang = navigator.language || 'en-US';
-  speechRecognition.continuous = true;
-  speechRecognition.interimResults = true;
+  const recognition = new SpeechRecognitionImpl();
+  speechRecognition = recognition;
+  recognition.lang = navigator.language || 'en-US';
+  recognition.continuous = true;
+  recognition.interimResults = true;
+  micInterimText = '';
 
-  micBaseText = inputEl.value;
-  const sep = micBaseText && !/\s$/.test(micBaseText) ? ' ' : '';
-  let finalTranscript = '';
-
-  speechRecognition.onresult = (e) => {
+  // Append transcripts to whatever is currently in the box, replacing only
+  // the interim tail we ourselves appended. This preserves text the user
+  // types by hand during dictation instead of overwriting it.
+  recognition.onresult = (e) => {
+    if (!isListening || speechRecognition !== recognition) return;
+    // Strip our previous interim tail only if it's still the suffix — a
+    // manual edit after it means the user took over, so leave it alone.
+    if (micInterimText && inputEl.value.endsWith(micInterimText)) {
+      inputEl.value = inputEl.value.slice(0, inputEl.value.length - micInterimText.length);
+    }
     let interimTranscript = '';
+    let finalTranscript = '';
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const transcript = e.results[i][0].transcript;
       if (e.results[i].isFinal) finalTranscript += transcript;
       else interimTranscript += transcript;
     }
-    inputEl.value = micBaseText + sep + finalTranscript + interimTranscript;
+    if (finalTranscript) {
+      const sep = inputEl.value && !/\s$/.test(inputEl.value) ? ' ' : '';
+      inputEl.value += sep + finalTranscript;
+    }
+    if (interimTranscript) {
+      const sep = inputEl.value && !/\s$/.test(inputEl.value) ? ' ' : '';
+      micInterimText = sep + interimTranscript;
+      inputEl.value += micInterimText;
+    } else {
+      micInterimText = '';
+    }
     handleInput();
   };
 
-  speechRecognition.onerror = () => stopListening();
-  speechRecognition.onend = () => {
+  recognition.onerror = () => stopListening();
+  recognition.onend = () => {
+    if (speechRecognition !== recognition) return; // superseded by a newer session
     isListening = false;
+    speechRecognition = null;
+    micInterimText = '';
     micBtn?.classList.remove('listening');
     updateMicButtonState();
   };
@@ -3578,7 +3624,7 @@ function startListening() {
   isListening = true;
   micBtn?.classList.add('listening');
   updateMicButtonState();
-  speechRecognition.start();
+  recognition.start();
 }
 
 if (micBtn) {
