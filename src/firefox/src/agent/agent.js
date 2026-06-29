@@ -6119,20 +6119,64 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * @param {function} onUpdate - callback(type, data) for streaming updates
    * @returns {Promise<string>} final text response
    */
-  async processMessage(tabId, userMessage, onUpdate = () => {}, mode = 'ask') {
+  async processMessage(tabId, userMessage, onUpdate = () => {}, mode = 'ask', attachments = []) {
     if (this._runningTabs.has(tabId)) {
       throw new Error('An agent run is already in progress for this tab.');
     }
     this._runningTabs.add(tabId);
     try {
-      return await this._processMessageInner(tabId, userMessage, onUpdate, mode);
+      return await this._processMessageInner(tabId, userMessage, onUpdate, mode, attachments);
     } finally {
       this.currentCostState.delete(tabId);
       this._runningTabs.delete(tabId);
     }
   }
 
-  async _processMessageInner(tabId, userMessage, onUpdate, mode) {
+  /**
+   * Merge user-picked file attachments (issue #220 — the "+" button) into the
+   * first user message of a turn. Images need provider.supportsVision; PDFs
+   * need provider.supportsDocuments (Anthropic-only today). Mirrors the
+   * existing _attachImage/_attachDocument content-block shapes already used
+   * for tool-result attachments elsewhere in this file (see _executeToolBatch).
+   * Returns { ok: true } on success (enriched.content mutated in place) or
+   * { ok: false, error } if any attachment isn't supported by the active
+   * provider — the caller surfaces `error` as the turn's plain-text response,
+   * without ever pushing the message to the conversation.
+   */
+  _applyAttachments(enriched, attachments, provider) {
+    const blocks = [];
+    for (const att of attachments) {
+      if (att.kind === 'image') {
+        if (!provider?.supportsVision) {
+          return {
+            ok: false,
+            error: `The active provider (${provider?.name || 'unknown'}) does not support image attachments. Switch to a vision-capable model (e.g. Claude 3+, GPT-4o) or remove the attached image and try again.`,
+          };
+        }
+        blocks.push({ type: 'image_url', image_url: { url: att.dataUrl } });
+      } else if (att.kind === 'document') {
+        if (!provider?.supportsDocuments) {
+          return {
+            ok: false,
+            error: `The active provider (${provider?.name || 'unknown'}) does not support document attachments. Document attachments currently require an Anthropic Claude model. Remove the attached file or switch providers and try again.`,
+          };
+        }
+        blocks.push({
+          type: 'document',
+          source: { type: 'base64', media_type: 'application/pdf', data: String(att.dataUrl || '').split(',')[1] || '' },
+          ...(att.name ? { title: att.name } : {}),
+        });
+      }
+    }
+    if (blocks.length) {
+      enriched.content = typeof enriched.content === 'string'
+        ? [{ type: 'text', text: enriched.content }, ...blocks]
+        : [...enriched.content, ...blocks];
+    }
+    return { ok: true };
+  }
+
+  async _processMessageInner(tabId, userMessage, onUpdate, mode, attachments = []) {
     const messages = this.getConversation(tabId, mode);
     const costState = this._newCostRunState();
     this.currentCostState.set(tabId, costState);
@@ -6154,6 +6198,16 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     let runId = null;
     let finalResponse = '';
     let _traceStatus = 'done';
+
+    // Validate attachments BEFORE the planner gate / trace start: an
+    // unsupported attachment is a plain "tell the user" response, not an
+    // agent run, and the message must never be pushed to history this way.
+    if (attachments && attachments.length) {
+      const attachResult = this._applyAttachments(enriched, attachments, provider);
+      if (!attachResult.ok) {
+        return (finalResponse = attachResult.error);
+      }
+    }
 
     // Everything that can throw — trace start, planner gate, run setup, and the
     // agent loop — runs inside this try so the finally always ends the trace

@@ -24,6 +24,13 @@ export default {
   'sp.btn.send': 'Send',
   'sp.btn.stop.title': 'Stop agent',
   'sp.btn.stop.label': 'Stop',
+  'sp.btn.attach': 'Attach file',
+  'sp.btn.mic': 'Voice input',
+  'sp.btn.mic_stop': 'Stop listening',
+  'sp.attach.remove': 'Remove attachment',
+  'sp.attach.too_large': '{name} is too large to attach (max 16MB).',
+  'sp.attach.unsupported_type': '{name} is not a supported attachment type — only images and PDFs are supported.',
+  'sp.attach.read_failed': 'Could not read {name}.',
 
   'sp.inspection': 'WebBrain started inspecting this page',
 
