@@ -301,6 +301,7 @@ const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('user-input');
 const inputHighlightEl = document.getElementById('input-highlight');
 const sendBtn = document.getElementById('btn-send');
+const micBtn = document.getElementById('btn-mic');
 const clearBtn = document.getElementById('btn-clear');
 const settingsBtn = document.getElementById('btn-settings');
 const verboseBtn = document.getElementById('btn-verbose');
@@ -2226,6 +2227,7 @@ function updateApiBadge() {
 }
 
 async function sendMessage(extraChatParams) {
+  stopListening();
   let text = inputEl.value.trim();
   if (!text) return;
   const tabId = currentTabId;
@@ -2274,6 +2276,7 @@ async function sendMessage(extraChatParams) {
   }
 
   let assistantEl = null;
+  const attachmentsForSend = pendingAttachments;
   if (renderToCurrentTab) {
     isProcessing = true;
     abortRequested = false;
@@ -2281,6 +2284,8 @@ async function sendMessage(extraChatParams) {
     autoResizeInput();
     syncSendButtonState();
     hideRecommendedActions();
+    pendingAttachments = [];
+    renderAttachmentPreviews();
     addMessage('user', text);
     showActivity(t('sp.activity.thinking'));
     assistantEl = addMessage('assistant', '');
@@ -2295,6 +2300,7 @@ async function sendMessage(extraChatParams) {
       text,
       mode: modeForSend,
       apiMutationsAllowed: apiMutationsAllowedForSend,
+      ...(attachmentsForSend.length ? { attachments: attachmentsForSend } : {}),
       ...extraChatParams,
     });
     accepted = true;
@@ -3498,6 +3504,176 @@ stopBtn.addEventListener('click', async () => {
   }, 3000); // safety timeout if background takes too long
 });
 
+// --- Voice input (mic dictation, issue #210) ---
+// Web Speech API: well-supported in Chrome, absent in stock Firefox (which
+// lacks window.SpeechRecognition entirely). The mic button stays visible
+// either way — a hidden button gives the user no signal as to WHY voice
+// input doesn't work. Instead it's shown grayed out with a tooltip and an
+// in-chat message on click explaining the reason: unsupported browser, or
+// disabled via the "Voice input" toggle in Settings.
+const SpeechRecognitionImpl = window.SpeechRecognition || window.webkitSpeechRecognition;
+let speechRecognition = null;
+let isListening = false;
+let micBaseText = '';
+let voiceInputSettingEnabled = true; // mirrors storage 'voiceInputEnabled', on by default
+let micDisabledReason = null; // null | 'unsupported' | 'settings'
+
+function updateMicButtonState() {
+  if (!micBtn) return;
+  micDisabledReason = !SpeechRecognitionImpl ? 'unsupported'
+    : !voiceInputSettingEnabled ? 'settings'
+    : null;
+  micBtn.classList.toggle('mic-disabled', !!micDisabledReason);
+  micBtn.title = micDisabledReason === 'unsupported' ? t('sp.mic.unsupported')
+    : micDisabledReason === 'settings' ? t('sp.mic.disabled_settings')
+    : (isListening ? t('sp.btn.mic_stop') : t('sp.btn.mic'));
+}
+
+function stopListening() {
+  if (!isListening) return;
+  isListening = false;
+  micBtn?.classList.remove('listening');
+  updateMicButtonState();
+  try { speechRecognition?.stop(); } catch { /* ignore */ }
+}
+
+function startListening() {
+  if (!SpeechRecognitionImpl || !inputEl) return;
+  speechRecognition = new SpeechRecognitionImpl();
+  speechRecognition.lang = navigator.language || 'en-US';
+  speechRecognition.continuous = true;
+  speechRecognition.interimResults = true;
+
+  micBaseText = inputEl.value;
+  const sep = micBaseText && !/\s$/.test(micBaseText) ? ' ' : '';
+  let finalTranscript = '';
+
+  speechRecognition.onresult = (e) => {
+    let interimTranscript = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const transcript = e.results[i][0].transcript;
+      if (e.results[i].isFinal) finalTranscript += transcript;
+      else interimTranscript += transcript;
+    }
+    inputEl.value = micBaseText + sep + finalTranscript + interimTranscript;
+    handleInput();
+  };
+
+  speechRecognition.onerror = () => stopListening();
+  speechRecognition.onend = () => {
+    isListening = false;
+    micBtn?.classList.remove('listening');
+    updateMicButtonState();
+  };
+
+  isListening = true;
+  micBtn?.classList.add('listening');
+  updateMicButtonState();
+  speechRecognition.start();
+}
+
+if (micBtn) {
+  browser.storage.local.get('voiceInputEnabled').then((stored) => {
+    voiceInputSettingEnabled = stored?.voiceInputEnabled ?? true;
+    updateMicButtonState();
+  }).catch(() => {});
+  browser.storage.onChanged.addListener((changes) => {
+    if (changes.voiceInputEnabled) {
+      voiceInputSettingEnabled = changes.voiceInputEnabled.newValue ?? true;
+      if (!voiceInputSettingEnabled) stopListening();
+      updateMicButtonState();
+    }
+  });
+  micBtn.addEventListener('click', () => {
+    if (micDisabledReason === 'unsupported') {
+      addMessage('system', t('sp.mic.unsupported'));
+      return;
+    }
+    if (micDisabledReason === 'settings') {
+      addMessage('system', t('sp.mic.disabled_settings'));
+      return;
+    }
+    if (isListening) stopListening();
+    else startListening();
+  });
+  updateMicButtonState();
+}
+
+// --- File attachments (+ button, issue #220) ---
+// Images go through the OpenAI-style image_url content block (works with any
+// vision-capable provider, validated in agent.js against provider.supportsVision).
+// PDFs go through Anthropic's {type:'document'} block (Anthropic-only —
+// agent.js returns a clear chat error for other providers via
+// provider.supportsDocuments). Both are read client-side as data URLs and
+// sent as-is; agent.js strips the data: prefix when building the PDF block.
+const attachBtn = document.getElementById('btn-attach');
+const fileAttachInput = document.getElementById('file-attach-input');
+const attachmentPreviewList = document.getElementById('attachment-preview-list');
+const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024; // matches PDF_PASSTHROUGH_MAX_BYTES (pdf-tools.js)
+let pendingAttachments = []; // [{ kind: 'image'|'document', name, dataUrl }]
+
+function renderAttachmentPreviews() {
+  if (!attachmentPreviewList) return;
+  attachmentPreviewList.innerHTML = '';
+  attachmentPreviewList.classList.toggle('hidden', pendingAttachments.length === 0);
+  pendingAttachments.forEach((att, i) => {
+    const chip = document.createElement('div');
+    chip.className = 'attachment-chip';
+    const label = document.createElement('span');
+    label.className = 'attachment-chip-name';
+    label.textContent = att.name;
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'attachment-chip-remove';
+    removeBtn.setAttribute('aria-label', t('sp.attach.remove'));
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => {
+      pendingAttachments.splice(i, 1);
+      renderAttachmentPreviews();
+    });
+    chip.append(label, removeBtn);
+    attachmentPreviewList.appendChild(chip);
+  });
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+async function handleAttachedFiles(fileList) {
+  for (const file of Array.from(fileList || [])) {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      addMessage('system', tSystemHtml('sp.attach.too_large', { name: file.name }));
+      continue;
+    }
+    const isImage = file.type.startsWith('image/');
+    const isPdf = file.type === 'application/pdf';
+    if (!isImage && !isPdf) {
+      addMessage('system', tSystemHtml('sp.attach.unsupported_type', { name: file.name }));
+      continue;
+    }
+    try {
+      const dataUrl = await readFileAsDataUrl(file);
+      pendingAttachments.push({ kind: isImage ? 'image' : 'document', name: file.name, dataUrl });
+    } catch {
+      addMessage('system', tSystemHtml('sp.attach.read_failed', { name: file.name }));
+    }
+  }
+  renderAttachmentPreviews();
+}
+
+if (attachBtn && fileAttachInput) {
+  attachBtn.addEventListener('click', () => fileAttachInput.click());
+  fileAttachInput.addEventListener('change', () => {
+    handleAttachedFiles(fileAttachInput.files);
+    fileAttachInput.value = ''; // allow re-selecting the same file
+  });
+}
 
 // --- Event Listeners ---
 
