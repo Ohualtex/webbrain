@@ -2758,6 +2758,7 @@ test('executeHttpSkillTool uses skill manifest endpoint for supported YouTube UR
       assert.equal(calls[0].url, 'https://freeskillz.xyz/v1/youtube/transcript', `${label}: wrong provider endpoint`);
       assert.equal(calls[0].opts.method, 'POST', `${label}: wrong method`);
       assert.equal(calls[0].opts.credentials, 'omit', `${label}: provider call should not send cookies`);
+      assert.equal(calls[0].opts.redirect, 'manual', `${label}: provider redirects should be validated before following`);
       assert.deepEqual(JSON.parse(calls[0].opts.body), { url: youtubeUrl, timestamps: false, lang: 'tr' }, `${label}: wrong request body`);
     } finally {
       globalThis.fetch = originalFetch;
@@ -2771,16 +2772,26 @@ test('executeHttpSkillTool rejects blocked redirect targets before reading body'
     ['firefox', executeHttpSkillToolFx],
   ]) {
     let readBody = false;
+    const calls = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => ({
-      ok: true,
-      status: 200,
-      url: 'http://127.0.0.1/private',
-      text: async () => {
-        readBody = true;
-        return JSON.stringify({ text: 'internal data' });
-      },
-    });
+    globalThis.fetch = async (url, opts) => {
+      calls.push({ url, opts });
+      assert.equal(url, 'https://example.com/skill', `${label}: blocked redirect target should not be fetched`);
+      return {
+        ok: false,
+        status: 302,
+        url: 'https://example.com/skill',
+        headers: {
+          get(name) {
+            return String(name).toLowerCase() === 'location' ? 'http://127.0.0.1/private' : null;
+          },
+        },
+        text: async () => {
+          readBody = true;
+          return JSON.stringify({ text: 'internal data' });
+        },
+      };
+    };
     try {
       const result = await executeTool({
         name: 'read_internal',
@@ -2792,6 +2803,8 @@ test('executeHttpSkillTool rejects blocked redirect targets before reading body'
       assert.match(result.error, /redirected to blocked URL/i, `${label}: blocked redirect error missing`);
       assert.equal(result.finalUrl, 'http://127.0.0.1/private', `${label}: final redirect URL missing`);
       assert.equal(readBody, false, `${label}: blocked redirect body should not be read`);
+      assert.equal(calls.length, 1, `${label}: blocked redirect target should not be requested`);
+      assert.equal(calls[0].opts.redirect, 'manual', `${label}: redirect should not be auto-followed`);
     } finally {
       globalThis.fetch = originalFetch;
     }
