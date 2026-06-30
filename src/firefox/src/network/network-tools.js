@@ -321,6 +321,17 @@ export async function executeHttpSkillTool(tool, args = {}, ctx = {}) {
       finalUrl.searchParams.set(key, typeof value === 'string' ? value : JSON.stringify(value));
     }
   }
+  const endpointUrlCheck = validateFetchUrl(finalUrl.href, { allowLocalNetwork: getAllowLocalNetwork() });
+  if (!endpointUrlCheck.ok) {
+    return {
+      success: false,
+      provider: endpoint.hostname,
+      skillTool: tool.name || '',
+      skillName: tool.skillName || '',
+      finalUrl: finalUrl.href,
+      error: `Skill tool endpoint is blocked: ${endpointUrlCheck.error}`,
+    };
+  }
 
   try {
     let requestUrl = finalUrl.href;

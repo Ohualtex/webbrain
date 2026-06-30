@@ -2766,6 +2766,46 @@ test('executeHttpSkillTool uses skill manifest endpoint for supported YouTube UR
   }
 });
 
+test('executeHttpSkillTool rejects blocked skill endpoints before fetching', async () => {
+  for (const [label, executeTool] of [
+    ['chrome', executeHttpSkillToolCh],
+    ['firefox', executeHttpSkillToolFx],
+  ]) {
+    let calls = 0;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => {
+      calls += 1;
+      throw new Error(`${label}: blocked skill endpoint should not be fetched`);
+    };
+    try {
+      const loopback = await executeTool({
+        name: 'read_internal',
+        skillName: 'Example',
+        endpoint: 'https://127.0.0.1:8443/skill',
+        method: 'GET',
+      });
+      assert.equal(loopback.success, false, `${label}: loopback endpoint should fail`);
+      assert.match(loopback.error, /endpoint is blocked/i, `${label}: loopback endpoint error missing`);
+      assert.match(loopback.error, /loopback/i, `${label}: loopback reason missing`);
+      assert.equal(loopback.finalUrl, 'https://127.0.0.1:8443/skill', `${label}: loopback final URL missing`);
+
+      const localTld = await executeTool({
+        name: 'read_internal',
+        skillName: 'Example',
+        endpoint: 'https://router.local/skill',
+        method: 'POST',
+      });
+      assert.equal(localTld.success, false, `${label}: .local endpoint should fail`);
+      assert.match(localTld.error, /endpoint is blocked/i, `${label}: .local endpoint error missing`);
+      assert.match(localTld.error, /router\.local/i, `${label}: .local reason missing`);
+      assert.equal(localTld.finalUrl, 'https://router.local/skill', `${label}: .local final URL missing`);
+      assert.equal(calls, 0, `${label}: blocked endpoints should not reach fetch`);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+});
+
 test('executeHttpSkillTool rejects blocked redirect targets before reading body', async () => {
   for (const [label, executeTool] of [
     ['chrome', executeHttpSkillToolCh],
