@@ -968,7 +968,7 @@ export class Agent {
       attempted = true;
       let parsed = null;
       try { parsed = JSON.parse(this._unwrapUntrusted(msg.content)); } catch { /* malformed result still counts as an attempt */ }
-      succeeded = !!(parsed && typeof parsed === 'object' && (parsed.success === true || parsed.downloadId != null));
+      succeeded = !!(parsed && typeof parsed === 'object' && parsed.success === true);
     }
     return { attempted, succeeded };
   }

@@ -9868,7 +9868,7 @@ test('agent prefers download_public_media before download_social_media when avai
       {
         role: 'tool',
         tool_call_id: 'public_failed',
-        content: fallbackAgent._wrapUntrusted('download_public_media', JSON.stringify({ success: false, error: 'provider failed' })),
+        content: fallbackAgent._wrapUntrusted('download_public_media', JSON.stringify({ success: false, downloadId: 41, error: 'provider failed' })),
       },
     ];
 
@@ -10017,7 +10017,7 @@ test('agent prefers download_public_media before download_social_media when avai
       {
         role: 'tool',
         tool_call_id: 'current_public_failed',
-        content: laterFailedAgent._wrapUntrusted('download_public_media', JSON.stringify({ success: false, error: 'provider failed' })),
+        content: laterFailedAgent._wrapUntrusted('download_public_media', JSON.stringify({ success: false, downloadId: 45, error: 'provider failed' })),
       },
     ];
 
