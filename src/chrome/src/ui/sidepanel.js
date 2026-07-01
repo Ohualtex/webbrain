@@ -4228,11 +4228,15 @@ if (micBtn) {
   });
   // Re-enable button automatically if the user grants mic from browser settings.
   try {
-    const micPerm = await navigator.permissions.query({ name: 'microphone' });
-    micPerm.addEventListener('change', () => {
-      micPermissionDenied = micPerm.state === 'denied';
-      updateMicButtonState();
-    });
+    const micPermissionQuery = navigator.permissions?.query?.({ name: 'microphone' });
+    if (micPermissionQuery) {
+      micPermissionQuery.then((micPerm) => {
+        micPerm.addEventListener('change', () => {
+          micPermissionDenied = micPerm.state === 'denied';
+          updateMicButtonState();
+        });
+      }).catch(() => { /* permissions API unavailable */ });
+    }
   } catch { /* permissions API unavailable */ }
   updateMicButtonState();
 }

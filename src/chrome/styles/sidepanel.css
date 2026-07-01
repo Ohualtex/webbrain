@@ -1411,6 +1411,7 @@ body {
 #btn-mic {
   background: transparent;
   border: none;
+  color: var(--text-secondary);
   width: 32px;
   height: 32px;
   border-radius: 50%;
@@ -1420,11 +1421,6 @@ body {
   justify-content: center;
   transition: background 0.2s, color 0.2s, transform 0.1s;
   flex-shrink: 0;
-}
-
-#btn-attach,
-#btn-mic {
-  color: var(--text-primary);
 }
 
 #btn-attach:hover,

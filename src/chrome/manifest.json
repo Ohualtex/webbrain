@@ -21,8 +21,7 @@
     "privateNetworkAccess",
     "tabCapture",
     "clipboardWrite",
-    "clipboardRead",
-    "microphone"
+    "clipboardRead"
   ],
   "host_permissions": [
     "<all_urls>",
