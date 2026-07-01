@@ -3022,6 +3022,8 @@ test('executeHttpSkillTool defers cleanup while skill downloads are still runnin
 
       const providerCalls = [];
       const downloadCalls = [];
+      let downloadComplete = false;
+      let onChangedListener = null;
       const jsonResponse = (status, body) => ({
         ok: status >= 200 && status < 300,
         status,
@@ -3036,7 +3038,7 @@ test('executeHttpSkillTool defers cleanup while skill downloads are still runnin
           return jsonResponse(200, { status: 'complete' });
         }
         if (url === 'https://freeskillz.xyz/v1/media/jobs/job_pending' && opts.method === 'DELETE') {
-          throw new Error(`${label}: pending local downloads should not clean up provider jobs`);
+          return jsonResponse(204, {});
         }
         throw new Error(`unexpected provider call: ${opts.method || 'GET'} ${url}`);
       };
@@ -3051,7 +3053,21 @@ test('executeHttpSkillTool defers cleanup while skill downloads are still runnin
               cb(7201);
             },
             search(_query, cb) {
-              cb([{ id: 7201, filename: '/Users/x/Downloads/slow.mp4', state: 'in_progress', bytesReceived: 1, totalBytes: 100 }]);
+              cb([{
+                id: 7201,
+                filename: '/Users/x/Downloads/slow.mp4',
+                state: downloadComplete ? 'complete' : 'in_progress',
+                bytesReceived: downloadComplete ? 100 : 1,
+                totalBytes: 100,
+                url: 'https://freeskillz.xyz/v1/media/jobs/job_pending/file',
+                finalUrl: 'https://freeskillz.xyz/v1/media/jobs/job_pending/file',
+              }]);
+            },
+            onChanged: {
+              addListener(fn) { onChangedListener = fn; },
+              removeListener(fn) {
+                if (onChangedListener === fn) onChangedListener = null;
+              },
             },
           },
         };
@@ -3064,7 +3080,21 @@ test('executeHttpSkillTool defers cleanup while skill downloads are still runnin
               return 8201;
             },
             async search() {
-              return [{ id: 8201, filename: '/Users/x/Downloads/slow.mp4', state: 'in_progress', bytesReceived: 1, totalBytes: 100 }];
+              return [{
+                id: 8201,
+                filename: '/Users/x/Downloads/slow.mp4',
+                state: downloadComplete ? 'complete' : 'in_progress',
+                bytesReceived: downloadComplete ? 100 : 1,
+                totalBytes: 100,
+                url: 'https://freeskillz.xyz/v1/media/jobs/job_pending/file',
+                finalUrl: 'https://freeskillz.xyz/v1/media/jobs/job_pending/file',
+              }];
+            },
+            onChanged: {
+              addListener(fn) { onChangedListener = fn; },
+              removeListener(fn) {
+                if (onChangedListener === fn) onChangedListener = null;
+              },
             },
           },
         };
@@ -3074,9 +3104,11 @@ test('executeHttpSkillTool defers cleanup while skill downloads are still runnin
       assert.equal(result.success, false, `${label}: pending browser download should not report success`);
       assert.equal(result.pending, true, `${label}: pending browser download should be marked pending`);
       assert.equal(result.cleanupDeferred, true, `${label}: provider cleanup should be deferred`);
+      assert.equal(result.cleanupScheduled, true, `${label}: provider cleanup should be scheduled`);
       assert.equal(result.cleanup, null, `${label}: provider cleanup should not run while local download is pending`);
       assert.equal(result.downloadId, label === 'chrome' ? 7201 : 8201, `${label}: download id missing`);
       assert.equal(downloadCalls.length, 1, `${label}: browser download should still be started`);
+      assert.equal(typeof onChangedListener, 'function', `${label}: download completion listener should be registered`);
       assert.deepEqual(
         providerCalls.map(call => `${call.opts.method || 'GET'} ${call.url}`),
         [
@@ -3084,6 +3116,153 @@ test('executeHttpSkillTool defers cleanup while skill downloads are still runnin
           'GET https://freeskillz.xyz/v1/media/jobs/job_pending',
         ],
         `${label}: pending local download should not delete provider job`,
+      );
+
+      downloadComplete = true;
+      await onChangedListener({
+        id: label === 'chrome' ? 7201 : 8201,
+        state: { current: 'complete' },
+        finalUrl: { current: 'https://freeskillz.xyz/v1/media/jobs/job_pending/file' },
+      });
+      assert.deepEqual(
+        providerCalls.map(call => `${call.opts.method || 'GET'} ${call.url}`),
+        [
+          'POST https://freeskillz.xyz/v1/media/jobs',
+          'GET https://freeskillz.xyz/v1/media/jobs/job_pending',
+          'DELETE https://freeskillz.xyz/v1/media/jobs/job_pending',
+        ],
+        `${label}: completed local download should clean up provider job`,
+      );
+    }
+  } finally {
+    if (originalFetch === undefined) delete globalThis.fetch;
+    else globalThis.fetch = originalFetch;
+    if (originalChrome === undefined) delete globalThis.chrome;
+    else globalThis.chrome = originalChrome;
+    if (originalBrowser === undefined) delete globalThis.browser;
+    else globalThis.browser = originalBrowser;
+  }
+});
+
+test('executeHttpSkillTool rejects unsafe final URLs for skill downloads and cleans up provider jobs', async () => {
+  const originalFetch = globalThis.fetch;
+  const originalChrome = globalThis.chrome;
+  const originalBrowser = globalThis.browser;
+  try {
+    for (const [label, prefix, executeTool, normalizeSkills, buildRegistry] of [
+      ['chrome', 'src/chrome', executeHttpSkillToolCh, normalizeCustomSkillsCh, buildSkillToolRegistryCh],
+      ['firefox', 'src/firefox', executeHttpSkillToolFx, normalizeCustomSkillsFx, buildSkillToolRegistryFx],
+    ]) {
+      const skills = normalizeSkills([packagedFreeSkillzRecord(prefix)]);
+      const tool = buildRegistry(skills).get('download_public_media');
+      assert.ok(tool, `${label}: download_public_media manifest tool missing`);
+
+      const providerCalls = [];
+      const downloadCalls = [];
+      const removalCalls = [];
+      const jsonResponse = (status, body) => ({
+        ok: status >= 200 && status < 300,
+        status,
+        text: async () => JSON.stringify(body),
+      });
+      globalThis.fetch = async (url, opts = {}) => {
+        providerCalls.push({ url, opts });
+        if (url === 'https://freeskillz.xyz/v1/media/jobs' && opts.method === 'POST') {
+          return jsonResponse(200, { job_id: 'job_unsafe' });
+        }
+        if (url === 'https://freeskillz.xyz/v1/media/jobs/job_unsafe' && opts.method === 'GET') {
+          return jsonResponse(200, { status: 'complete' });
+        }
+        if (url === 'https://freeskillz.xyz/v1/media/jobs/job_unsafe' && opts.method === 'DELETE') {
+          return jsonResponse(204, {});
+        }
+        throw new Error(`unexpected provider call: ${opts.method || 'GET'} ${url}`);
+      };
+
+      if (label === 'chrome') {
+        delete globalThis.browser;
+        globalThis.chrome = {
+          runtime: { lastError: null },
+          downloads: {
+            download(opts, cb) {
+              downloadCalls.push(opts);
+              cb(7301);
+            },
+            search(_query, cb) {
+              cb([{
+                id: 7301,
+                filename: '/Users/x/Downloads/unsafe.mp4',
+                state: 'complete',
+                bytesReceived: 11,
+                totalBytes: 11,
+                url: 'https://freeskillz.xyz/v1/media/jobs/job_unsafe/file',
+                finalUrl: 'https://127.0.0.1:8443/private.mp4',
+              }]);
+            },
+            removeFile(id, cb) {
+              removalCalls.push(`removeFile:${id}`);
+              cb();
+            },
+            erase(query, cb) {
+              removalCalls.push(`erase:${query.id}`);
+              cb([query.id]);
+            },
+          },
+        };
+      } else {
+        delete globalThis.chrome;
+        globalThis.browser = {
+          downloads: {
+            async download(opts) {
+              downloadCalls.push(opts);
+              return 8301;
+            },
+            async search() {
+              return [{
+                id: 8301,
+                filename: '/Users/x/Downloads/unsafe.mp4',
+                state: 'complete',
+                bytesReceived: 11,
+                totalBytes: 11,
+                url: 'https://freeskillz.xyz/v1/media/jobs/job_unsafe/file',
+                finalUrl: 'https://127.0.0.1:8443/private.mp4',
+              }];
+            },
+            async removeFile(id) {
+              removalCalls.push(`removeFile:${id}`);
+            },
+            async erase(query) {
+              removalCalls.push(`erase:${query.id}`);
+              return [query.id];
+            },
+          },
+        };
+      }
+
+      const result = await executeTool(tool, { url: 'https://www.instagram.com/reel/abc/' });
+      assert.equal(result.success, false, `${label}: unsafe final URL should fail`);
+      assert.equal(result.blocked, true, `${label}: unsafe final URL should be marked blocked`);
+      assert.equal(result.finalUrl, 'https://127.0.0.1:8443/private.mp4', `${label}: unsafe final URL should be reported`);
+      assert.match(result.error, /blocked URL/i, `${label}: unsafe final URL error should mention blocking`);
+      assert.equal(result.cleanup?.success, true, `${label}: provider job should still be cleaned up`);
+      assert.equal(result.cleanupDeferred, undefined, `${label}: unsafe complete downloads should not defer cleanup`);
+      assert.equal(downloadCalls.length, 1, `${label}: browser download should be started once`);
+      assert.deepEqual(
+        removalCalls,
+        [
+          `removeFile:${label === 'chrome' ? 7301 : 8301}`,
+          `erase:${label === 'chrome' ? 7301 : 8301}`,
+        ],
+        `${label}: unsafe completed download should be removed from disk and history`,
+      );
+      assert.deepEqual(
+        providerCalls.map(call => `${call.opts.method || 'GET'} ${call.url}`),
+        [
+          'POST https://freeskillz.xyz/v1/media/jobs',
+          'GET https://freeskillz.xyz/v1/media/jobs/job_unsafe',
+          'DELETE https://freeskillz.xyz/v1/media/jobs/job_unsafe',
+        ],
+        `${label}: unsafe local download should still clean up provider job`,
       );
     }
   } finally {

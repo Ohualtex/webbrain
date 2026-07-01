@@ -378,12 +378,137 @@ async function cleanupSkillDownloadJob(url, endpoint, tool) {
   return { success: false, status: result.status, error: result.error };
 }
 
+const pendingSkillDownloadCleanups = new Map();
+
+function summarizeDownloadItem(item) {
+  if (!item) return null;
+  return {
+    filename: item.filename || null,
+    state: item.state,
+    error: item.error || null,
+    bytesReceived: item.bytesReceived ?? null,
+    totalBytes: item.totalBytes ?? null,
+    url: item.url || null,
+    finalUrl: item.finalUrl || item.url || null,
+  };
+}
+
+async function findDownloadItem(downloadId) {
+  try {
+    const items = await browser.downloads.search({ id: downloadId });
+    return items && items[0] ? items[0] : null;
+  } catch {
+    return null;
+  }
+}
+
+function validateSkillDownloadFinalUrl(finalUrl, expectedUrl) {
+  if (!finalUrl) return { ok: true };
+  let final;
+  let expected;
+  try {
+    final = new URL(finalUrl);
+    expected = new URL(expectedUrl);
+  } catch {
+    return { ok: false, error: 'Skill download redirected to an invalid URL.' };
+  }
+  if (final.protocol !== 'https:') {
+    return { ok: false, error: 'Skill download redirected away from HTTPS.' };
+  }
+  const urlCheck = validateFetchUrl(final.href, { allowLocalNetwork: getAllowLocalNetwork() });
+  if (!urlCheck.ok) {
+    return { ok: false, error: `Skill download redirected to blocked URL: ${urlCheck.error}` };
+  }
+  if (final.origin !== expected.origin) {
+    return { ok: false, error: `Skill download redirected outside ${expected.origin}.` };
+  }
+  return { ok: true, finalUrl: final.href };
+}
+
+function markUnsafeSkillDownload(info, expectedUrl) {
+  if (!info?.finalUrl) return info;
+  const finalUrlCheck = validateSkillDownloadFinalUrl(info.finalUrl, expectedUrl);
+  if (finalUrlCheck.ok) return info;
+  return {
+    ...info,
+    finalUrlBlocked: true,
+    finalUrlError: finalUrlCheck.error,
+  };
+}
+
+async function callBrowserDownloadAction(name, ...args) {
+  const fn = browser.downloads?.[name];
+  if (typeof fn !== 'function') return false;
+  try {
+    await fn.call(browser.downloads, ...args);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function removeUnsafeSkillDownload(downloadId, state) {
+  if (state !== 'complete') await callBrowserDownloadAction('cancel', downloadId);
+  if (state === 'complete') await callBrowserDownloadAction('removeFile', downloadId);
+  await callBrowserDownloadAction('erase', { id: downloadId });
+}
+
+function scheduleSkillDownloadCleanup(downloadId, cleanupUrl, endpoint, tool, expectedUrl) {
+  const downloads = browser.downloads;
+  if (!downloads?.onChanged?.addListener) return false;
+  const key = String(downloadId);
+  if (pendingSkillDownloadCleanups.has(key)) return true;
+
+  const finish = async (state, finalUrl) => {
+    downloads.onChanged?.removeListener?.(listener);
+    pendingSkillDownloadCleanups.delete(key);
+    try {
+      let unsafe = null;
+      if (finalUrl) {
+        const finalUrlCheck = validateSkillDownloadFinalUrl(finalUrl, expectedUrl);
+        if (!finalUrlCheck.ok) unsafe = finalUrlCheck.error;
+      }
+      if (!unsafe) {
+        const item = await findDownloadItem(downloadId);
+        const info = markUnsafeSkillDownload(summarizeDownloadItem(item), expectedUrl);
+        if (info?.finalUrlBlocked) unsafe = info.finalUrlError;
+      }
+      if (unsafe) await removeUnsafeSkillDownload(downloadId, state);
+    } catch (_) {
+      // Cleanup is still attempted even if validating/removing the local file fails.
+    }
+    try {
+      await cleanupSkillDownloadJob(cleanupUrl, endpoint, tool);
+    } catch (_) {}
+  };
+
+  const listener = (delta) => {
+    if (!delta || delta.id !== downloadId) return;
+    const state = delta.state?.current;
+    const finalUrl = delta.finalUrl?.current || delta.url?.current || '';
+    if (finalUrl) {
+      const finalUrlCheck = validateSkillDownloadFinalUrl(finalUrl, expectedUrl);
+      if (!finalUrlCheck.ok) {
+        return finish(state || 'interrupted', finalUrl);
+      }
+    }
+    if (state === 'complete' || state === 'interrupted') {
+      return finish(state, finalUrl);
+    }
+    return undefined;
+  };
+
+  pendingSkillDownloadCleanups.set(key, listener);
+  downloads.onChanged.addListener(listener);
+  return true;
+}
+
 async function downloadSkillFile(url, filename, waitMs = 60000) {
   const opts = { url, conflictAction: 'uniquify' };
   const safeName = safeDownloadFilename(filename);
   if (safeName) opts.filename = safeName;
   const downloadId = await browser.downloads.download(opts);
-  const info = await resolveDownloadInfo(downloadId, waitMs);
+  const info = await resolveDownloadInfo(downloadId, waitMs, { expectedUrl: url });
   const result = { downloadId, success: false };
   if (info) {
     if (info.filename) result.filename = info.filename;
@@ -391,7 +516,13 @@ async function downloadSkillFile(url, filename, waitMs = 60000) {
     if (info.error) result.error = info.error;
     if (info.bytesReceived != null) result.bytesReceived = info.bytesReceived;
     if (info.totalBytes != null) result.totalBytes = info.totalBytes;
-    if (info.state === 'complete') {
+    if (info.url) result.url = info.url;
+    if (info.finalUrl) result.finalUrl = info.finalUrl;
+    if (info.finalUrlBlocked) {
+      await removeUnsafeSkillDownload(downloadId, info.state);
+      result.blocked = true;
+      result.error = info.finalUrlError || 'Skill download redirected to a blocked URL.';
+    } else if (info.state === 'complete') {
       result.success = true;
     } else if (info.state === 'interrupted') {
       result.error = info.error ? `Download interrupted: ${info.error}` : 'Download interrupted before completion.';
@@ -465,9 +596,11 @@ async function executeHttpDownloadJobSkillTool(tool, payload, endpoint) {
   let cleanup = null;
   try {
     const download = await downloadSkillFile(fileEndpoint.url, payload.filename, Math.min(tool.job?.timeoutMs || 90000, 120000));
-    const downloadTerminal = download.state === 'complete' || download.state === 'interrupted';
-    const cleanupDeferred = cleanupEndpoint.ok && !downloadTerminal;
-    if (cleanupEndpoint.ok && downloadTerminal) cleanup = await cleanupSkillDownloadJob(cleanupEndpoint.url, endpoint, tool);
+    const cleanupDeferred = cleanupEndpoint.ok && download.pending === true;
+    const cleanupScheduled = cleanupDeferred
+      ? scheduleSkillDownloadCleanup(download.downloadId, cleanupEndpoint.url, endpoint, tool, fileEndpoint.url)
+      : false;
+    if (cleanupEndpoint.ok && !cleanupDeferred) cleanup = await cleanupSkillDownloadJob(cleanupEndpoint.url, endpoint, tool);
     if (!download.success) {
       return {
         success: false,
@@ -479,6 +612,7 @@ async function executeHttpDownloadJobSkillTool(tool, payload, endpoint) {
         fileUrl: fileEndpoint.url,
         cleanup,
         ...(cleanupDeferred ? { cleanupDeferred: true } : {}),
+        ...(cleanupDeferred ? { cleanupScheduled } : {}),
         ...download,
       };
     }
@@ -1543,7 +1677,7 @@ const DOWNLOAD_BATCH_MAX = 50;
 // Poll for it. Returns the resolved on-disk path + state once the download
 // reaches a terminal state, or the best-known info if it's still in progress
 // when we time out. Best-effort: never throws.
-async function resolveDownloadInfo(downloadId, timeoutMs = 15000) {
+async function resolveDownloadInfo(downloadId, timeoutMs = 15000, opts = {}) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
@@ -1555,13 +1689,9 @@ async function resolveDownloadInfo(downloadId, timeoutMs = 15000) {
     }
     const it = items && items[0];
     if (it) {
-      last = {
-        filename: it.filename || null,
-        state: it.state,
-        error: it.error || null,
-        bytesReceived: it.bytesReceived ?? null,
-        totalBytes: it.totalBytes ?? null,
-      };
+      last = summarizeDownloadItem(it);
+      if (opts.expectedUrl) last = markUnsafeSkillDownload(last, opts.expectedUrl);
+      if (last.finalUrlBlocked) return last;
       if (it.state === 'complete' || it.state === 'interrupted') return last;
     }
     await new Promise(r => setTimeout(r, 200));
