@@ -9977,6 +9977,62 @@ test('agent prefers download_public_media before download_social_media when avai
     const explicitUrlFallbackResult = JSON.parse(explicitUrlAgent._unwrapUntrusted(explicitUrlPublicMessages.at(-1).content));
     assert.equal(explicitUrlFallbackResult.completedCount, 1, `${label}: explicit URL follow-up fallback result missing`);
 
+    const latestAttemptAgent = new AgentClass({ getVisionProvider: async () => null });
+    latestAttemptAgent.setCustomSkills([packagedFreeSkillzRecord(prefix)]);
+    latestAttemptAgent._ensureGateSetting = async () => {};
+    latestAttemptAgent._skipPermissionGate = true;
+    let latestAttemptExecutedName = '';
+    latestAttemptAgent.executeTool = async (_tabId, name) => {
+      latestAttemptExecutedName = name;
+      return { success: true, completedCount: 1 };
+    };
+    const successThenExplicitFailureMessages = [
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'first_implicit_public_success',
+          function: { name: 'download_public_media', arguments: '{"kind":"video"}' },
+        }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'first_implicit_public_success',
+        content: latestAttemptAgent._wrapUntrusted('download_public_media', JSON.stringify({ success: true, downloadId: 47 })),
+      },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'second_explicit_public_failed',
+          function: { name: 'download_public_media', arguments: '{"url":"https://www.instagram.com/reel/def/","kind":"video"}' },
+        }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'second_explicit_public_failed',
+        content: latestAttemptAgent._wrapUntrusted('download_public_media', JSON.stringify({ success: false, downloadId: 48, error: 'provider failed' })),
+      },
+    ];
+
+    await latestAttemptAgent._executeToolBatch(
+      label === 'chrome' ? 4915 : 4916,
+      [{
+        id: 'social_after_latest_fail',
+        function: { name: 'download_social_media', arguments: '{"target":"video"}' },
+      }],
+      successThenExplicitFailureMessages,
+      () => {},
+      { supportsVision: false },
+      '',
+      allowedTools,
+      5,
+    );
+
+    assert.equal(latestAttemptExecutedName, 'download_social_media', `${label}: latest failed public attempt should override earlier public success`);
+    const latestAttemptFallbackResult = JSON.parse(latestAttemptAgent._unwrapUntrusted(successThenExplicitFailureMessages.at(-1).content));
+    assert.equal(latestAttemptFallbackResult.completedCount, 1, `${label}: latest failed public fallback result missing`);
+
     const nextTurnAgent = new AgentClass({ getVisionProvider: async () => null });
     nextTurnAgent.setCustomSkills([packagedFreeSkillzRecord(prefix)]);
     nextTurnAgent._ensureGateSetting = async () => {};

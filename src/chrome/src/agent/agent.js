@@ -971,11 +971,11 @@ export class Agent {
       const toolCall = toolCallById.get(msg.tool_call_id);
       if (msg?.role !== 'tool' || toolCall?.name !== 'download_public_media') continue;
       const hasExplicitUrl = typeof toolCall.args?.url === 'string' && toolCall.args.url.trim();
-      if (hasExplicitUrl) explicitAttempted = true;
-      else attempted = true;
+      explicitAttempted = !!hasExplicitUrl;
+      attempted = !hasExplicitUrl;
       let parsed = null;
       try { parsed = JSON.parse(this._unwrapUntrusted(msg.content)); } catch { /* malformed result still counts as an attempt */ }
-      if (!hasExplicitUrl) succeeded = !!(parsed && typeof parsed === 'object' && parsed.success === true);
+      succeeded = !hasExplicitUrl && !!(parsed && typeof parsed === 'object' && parsed.success === true);
     }
     return { attempted, succeeded, explicitAttempted };
   }
