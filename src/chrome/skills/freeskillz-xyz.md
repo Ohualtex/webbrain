@@ -66,7 +66,8 @@ This skill exposes `read_youtube_transcript`, `resolve_public_media`, and `downl
           "text_limit": {
             "type": "integer",
             "minimum": 1,
-            "description": "Maximum transcript text characters to return in this call. Default 6000; raise or lower as needed."
+            "maximum": 12000,
+            "description": "Maximum transcript text characters to return in this call. Default 6000; maximum 12000. For more text, continue with text_offset=next_text_offset instead of requesting a larger window."
           },
           "include_segments": {
             "type": "boolean",

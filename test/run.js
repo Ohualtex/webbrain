@@ -2795,6 +2795,7 @@ test('getToolsForMode: skill tools are exposed only when enabled skills declare 
       assert.ok(transcript.function.parameters.properties.timestamps, `${label} ${mode}: timestamps param missing`);
       assert.ok(transcript.function.parameters.properties.text_offset, `${label} ${mode}: text_offset param missing`);
       assert.ok(transcript.function.parameters.properties.text_limit, `${label} ${mode}: text_limit param missing`);
+      assert.equal(transcript.function.parameters.properties.text_limit.maximum, 12000, `${label} ${mode}: text_limit should advertise a hard page ceiling`);
       assert.ok(transcript.function.parameters.properties.include_segments, `${label} ${mode}: include_segments param missing`);
       assert.match(transcript.function.description, /Use this first/i, `${label} ${mode}: description should steer first use`);
       assert.match(transcript.function.description, /next_text_offset/i, `${label} ${mode}: description should explain transcript continuation`);
@@ -2917,15 +2918,22 @@ test('executeHttpSkillTool uses skill manifest endpoint for supported YouTube UR
         { timestamps: false, text_limit: 6000, include_segments: false, url: youtubeUrl, lang: 'tr' },
         `${label}: wrong request body`,
       );
+
+      await executeTool(tool, { url: youtubeUrl, text_limit: 999999, text_offset: -5 });
+      assert.equal(calls.length, 2, `${label}: expected second provider call`);
+      assert.deepEqual(
+        JSON.parse(calls[1].opts.body),
+        { timestamps: true, text_limit: 12000, include_segments: false, url: youtubeUrl, text_offset: 0 },
+        `${label}: declared numeric transcript args should be clamped before provider request`,
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }
   }
 });
 
-test('executeHttpSkillTool honors unlimited FreeSkillz transcript response text limit', async () => {
+test('executeHttpSkillTool clamps oversized FreeSkillz transcript window requests', async () => {
   const youtubeUrl = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-  const longText = 'x'.repeat(170_500);
   for (const [label, prefix, executeTool, normalizeSkills, buildRegistry] of [
     ['chrome', 'src/chrome', executeHttpSkillToolCh, normalizeCustomSkillsCh, buildSkillToolRegistryCh],
     ['firefox', 'src/firefox', executeHttpSkillToolFx, normalizeCustomSkillsFx, buildSkillToolRegistryFx],
@@ -2934,24 +2942,35 @@ test('executeHttpSkillTool honors unlimited FreeSkillz transcript response text 
     const tool = buildRegistry(skills).get('read_youtube_transcript');
     assert.ok(tool, `${label}: manifest tool missing`);
 
+    const calls = [];
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = async () => ({
-      ok: true,
-      status: 200,
-      text: async () => JSON.stringify({
-        video_id: 'dQw4w9WgXcQ',
-        selected_language: 'en',
-        text: longText,
-        segments: [],
-        text_length: longText.length,
-        has_more_text: false,
-      }),
-    });
+    globalThis.fetch = async (_url, opts) => {
+      const payload = JSON.parse(opts.body);
+      calls.push(payload);
+      const windowText = 'x'.repeat(payload.text_limit);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          video_id: 'dQw4w9WgXcQ',
+          selected_language: 'en',
+          text: windowText,
+          segments: [],
+          text_length: 50000,
+          text_offset: payload.text_offset || 0,
+          next_text_offset: (payload.text_offset || 0) + payload.text_limit,
+          has_more_text: true,
+        }),
+      };
+    };
     try {
-      const result = await executeTool(tool, { url: youtubeUrl });
+      const result = await executeTool(tool, { url: youtubeUrl, text_offset: 1000, text_limit: 170500 });
       assert.equal(result.success, true, `${label}: supported YouTube URL should succeed`);
-      assert.equal(result.data.text.length, longText.length, `${label}: transcript text should not be capped before agent paging`);
-      assert.equal(result.data.truncated, undefined, `${label}: unlimited transcript response should not be marked truncated`);
+      assert.equal(calls[0].text_limit, 12000, `${label}: oversized text_limit should be clamped`);
+      assert.equal(calls[0].text_offset, 1000, `${label}: valid text_offset should pass through`);
+      assert.equal(result.data.text.length, 12000, `${label}: provider should receive only one bounded transcript window`);
+      assert.equal(result.data.next_text_offset, 13000, `${label}: bounded response should preserve continuation offset`);
+      assert.equal(result.data.truncated, undefined, `${label}: bounded transcript window should not be response-limit truncated`);
     } finally {
       globalThis.fetch = originalFetch;
     }

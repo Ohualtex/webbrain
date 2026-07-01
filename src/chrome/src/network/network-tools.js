@@ -330,7 +330,23 @@ function filterArgsToDeclaredParameters(args, tool) {
   const allowed = new Set(Object.keys(properties));
   const out = {};
   for (const [key, value] of Object.entries(args || {})) {
-    if (allowed.has(key)) out[key] = value;
+    if (!allowed.has(key)) continue;
+    const schema = properties[key] || {};
+    const type = schema.type;
+    const isNumeric = type === 'number' || type === 'integer';
+    if (isNumeric && value != null && value !== '') {
+      const numeric = Number(value);
+      if (Number.isFinite(numeric)) {
+        let next = type === 'integer' ? Math.trunc(numeric) : numeric;
+        const min = Number(schema.minimum);
+        const max = Number(schema.maximum);
+        if (Number.isFinite(min)) next = Math.max(min, next);
+        if (Number.isFinite(max)) next = Math.min(max, next);
+        out[key] = next;
+        continue;
+      }
+    }
+    out[key] = value;
   }
   return out;
 }
