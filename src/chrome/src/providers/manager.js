@@ -412,23 +412,28 @@ export class ProviderManager {
    */
   static categoryFor(id, config) {
     if (config && config.category) return config.category;
+    if (config?.type === 'llamacpp') return 'local';
     if (['llamacpp', 'ollama', 'lmstudio', 'jan', 'vllm', 'sglang'].includes(id)) return 'local';
     if (ROUTER_PROVIDER_IDS.includes(id)) return 'router';
     return 'cloud';
   }
 
   _createProvider(id, config) {
-    switch (config.type) {
+    const normalizedConfig = {
+      ...config,
+      category: ProviderManager.categoryFor(id, config),
+    };
+    switch (normalizedConfig.type) {
       case 'llamacpp':
-        return new LlamaCppProvider(config);
+        return new LlamaCppProvider(normalizedConfig);
       case 'openai':
-        return new OpenAICompatibleProvider(config);
+        return new OpenAICompatibleProvider(normalizedConfig);
       case 'anthropic':
-        return new AnthropicProvider(config);
+        return new AnthropicProvider(normalizedConfig);
       case 'anthropic_oauth':
-        return new AnthropicOAuthProvider(config);
+        return new AnthropicOAuthProvider(normalizedConfig);
       default:
-        throw new Error(`Unknown provider type: ${config.type}`);
+        throw new Error(`Unknown provider type: ${normalizedConfig.type}`);
     }
   }
 
