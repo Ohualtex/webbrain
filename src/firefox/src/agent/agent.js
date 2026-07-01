@@ -890,8 +890,15 @@ export class Agent {
         }
         continue;
       }
+      if (msg?.role !== 'tool') continue;
       const toolCall = toolCallById.get(msg.tool_call_id);
-      if (msg?.role !== 'tool' || toolCall?.name !== 'download_public_media') continue;
+      if (toolCall && toolCall.name !== 'download_public_media') {
+        attempted = false;
+        succeeded = false;
+        explicitAttempted = false;
+        continue;
+      }
+      if (toolCall?.name !== 'download_public_media') continue;
       const hasExplicitUrl = typeof toolCall.args?.url === 'string' && toolCall.args.url.trim();
       explicitAttempted = !!hasExplicitUrl;
       attempted = !hasExplicitUrl;

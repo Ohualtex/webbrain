@@ -10033,6 +10033,63 @@ test('agent prefers download_public_media before download_social_media when avai
     const latestAttemptFallbackResult = JSON.parse(latestAttemptAgent._unwrapUntrusted(successThenExplicitFailureMessages.at(-1).content));
     assert.equal(latestAttemptFallbackResult.completedCount, 1, `${label}: latest failed public fallback result missing`);
 
+    const interveningToolAgent = new AgentClass({ getVisionProvider: async () => null });
+    interveningToolAgent.setCustomSkills([packagedFreeSkillzRecord(prefix)]);
+    interveningToolAgent._ensureGateSetting = async () => {};
+    interveningToolAgent._skipPermissionGate = true;
+    let interveningToolExecuted = false;
+    interveningToolAgent.executeTool = async () => {
+      interveningToolExecuted = true;
+      return { success: true, completedCount: 1 };
+    };
+    const successThenNavigationMessages = [
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'implicit_public_before_navigation',
+          function: { name: 'download_public_media', arguments: '{"kind":"video"}' },
+        }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'implicit_public_before_navigation',
+        content: interveningToolAgent._wrapUntrusted('download_public_media', JSON.stringify({ success: true, downloadId: 49 })),
+      },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{
+          id: 'navigate_after_public_success',
+          function: { name: 'navigate', arguments: '{"url":"https://www.instagram.com/reel/ghi/"}' },
+        }],
+      },
+      {
+        role: 'tool',
+        tool_call_id: 'navigate_after_public_success',
+        content: JSON.stringify({ success: true }),
+      },
+    ];
+
+    await interveningToolAgent._executeToolBatch(
+      label === 'chrome' ? 4917 : 4918,
+      [{
+        id: 'social_after_navigation',
+        function: { name: 'download_social_media', arguments: '{"target":"video"}' },
+      }],
+      successThenNavigationMessages,
+      () => {},
+      { supportsVision: false },
+      '',
+      allowedTools,
+      6,
+    );
+
+    assert.equal(interveningToolExecuted, false, `${label}: intervening tool should clear duplicate-success skip before current-tab media`);
+    const interveningRedirect = JSON.parse(successThenNavigationMessages.at(-1).content);
+    assert.equal(interveningRedirect.wrongTool, true, `${label}: current media after navigation should be redirected to public downloader first`);
+    assert.notEqual(interveningRedirect.skipped, true, `${label}: current media after navigation must not be silently skipped`);
+
     const nextTurnAgent = new AgentClass({ getVisionProvider: async () => null });
     nextTurnAgent.setCustomSkills([packagedFreeSkillzRecord(prefix)]);
     nextTurnAgent._ensureGateSetting = async () => {};
