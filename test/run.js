@@ -13431,6 +13431,7 @@ test('skill tool transcript data is trimmed as valid nested JSON', () => {
     ['firefox', AgentFx],
   ]) {
     const agent = new AgentClass({});
+    const providerNextTextOffset = 1200 + longText.length;
     const serialized = agent._limitToolResult({
       success: true,
       status: 200,
@@ -13440,6 +13441,8 @@ test('skill tool transcript data is trimmed as valid nested JSON', () => {
         video_id: 'dQw4w9WgXcQ',
         selected_language: 'en',
         text: longText,
+        next_text_offset: providerNextTextOffset,
+        has_more_text: false,
         segments,
       },
     });
@@ -13449,6 +13452,11 @@ test('skill tool transcript data is trimmed as valid nested JSON', () => {
     assert.equal(parsed.data.video_id, 'dQw4w9WgXcQ', `${label}: metadata should be preserved`);
     assert.match(parsed.data.text, /\[\.\.\.tool data text truncated\]/, `${label}: transcript text should be trimmed in data.text`);
     assert.ok(parsed.data.text.length < longText.length, `${label}: transcript text should be shortened`);
+    const deliveredTextLength = parsed.data.text.indexOf('\n[...tool data text truncated]');
+    assert.ok(deliveredTextLength > 0, `${label}: delivered text length should be measurable`);
+    assert.equal(parsed.data.next_text_offset, 1200 + deliveredTextLength, `${label}: continuation offset should point after delivered text`);
+    assert.equal(parsed.data.has_more_text, true, `${label}: local truncation should keep transcript paging active`);
+    assert.ok(parsed.data.next_text_offset < providerNextTextOffset, `${label}: provider offset should not skip locally hidden text`);
     assert.ok(parsed.data.segments.length < segments.length, `${label}: segments should be shortened`);
     assert.equal(parsed.data.segmentsTruncated, true, `${label}: segment truncation should be marked`);
     assert.equal(parsed.data.originalSegmentCount, segments.length, `${label}: original segment count should be preserved`);
