@@ -66,6 +66,8 @@ export class Agent {
     this._progressSessionCounter = 0;
     this.conversationIds = new Map(); // tabId -> stable conversationId (regenerated on clearConversation)
     this.conversationModes = new Map(); // tabId -> 'ask' | 'act'
+    this.hydratedTabs = new Set(); // tabIds we've already pulled from storage
+    this.persistTimers = new Map(); // tabId -> debounce handle
     this.abortFlags = new Map(); // tabId -> boolean
     this.currentRunId = new Map(); // tabId -> active trace runId
     this.currentCostState = new Map(); // tabId -> active cloud/router cost state
@@ -192,10 +194,62 @@ export class Agent {
     return this._runningTabs.has(tabId);
   }
 
-  async _hydrate(_tabId) {
-    // Firefox conversations are memory-only in this port; Chrome hydrates from
-    // storage.session. Keep the method so shared scheduler/scratchpad code can
-    // call it without browser-specific branching.
+  _convKey(tabId) { return `agentConv:${tabId}`; }
+
+  /**
+   * Pull a tab's conversation from storage.session into memory if we haven't
+   * already this background lifetime. Safe to call repeatedly.
+   */
+  async _hydrate(tabId) {
+    if (this.hydratedTabs.has(tabId)) return;
+    this.hydratedTabs.add(tabId);
+    if (this.conversations.has(tabId)) return;
+    try {
+      const key = this._convKey(tabId);
+      const stored = await browser.storage.session.get(key);
+      const entry = stored?.[key];
+      if (entry && Array.isArray(entry.messages) && entry.messages.length > 0) {
+        this.conversations.set(tabId, entry.messages);
+        if (entry.mode) {
+          this.conversationModes.set(tabId, entry.mode);
+          this._conversationMode = entry.mode;
+        }
+        if (entry.conversationId) {
+          this.conversationIds.set(tabId, entry.conversationId);
+        }
+        if (Array.isArray(entry.progressLedger)) {
+          this.progressLedgers.set(tabId, entry.progressLedger);
+        }
+        if (entry.progressSession && typeof entry.progressSession === 'object') {
+          this.progressSessions.set(tabId, entry.progressSession);
+        }
+      }
+    } catch (e) { /* session storage may be unavailable */ }
+  }
+
+  /**
+   * Debounced write of a tab's conversation to storage.session. Multiple
+   * rapid mutations within 300ms collapse into one write.
+   */
+  _persist(tabId) {
+    if (tabId == null) return;
+    const existing = this.persistTimers.get(tabId);
+    if (existing) clearTimeout(existing);
+    const handle = setTimeout(() => {
+      this.persistTimers.delete(tabId);
+      const messages = this.conversations.get(tabId);
+      if (!messages) return;
+      const mode = this.conversationModes.get(tabId) || 'ask';
+      const conversationId = this.conversationIds.get(tabId) || null;
+      const progressLedger = this.progressLedgers.get(tabId) || [];
+      const progressSession = this.progressSessions.get(tabId) || null;
+      try {
+        browser.storage.session.set({
+          [this._convKey(tabId)]: { mode, messages, conversationId, progressLedger, progressSession },
+        }).catch(() => {});
+      } catch (e) { /* ignore */ }
+    }, 300);
+    this.persistTimers.set(tabId, handle);
   }
 
   async getConversationId(tabId) {
@@ -1438,6 +1492,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
             content: this._wrapUntrusted(fnName, this._limitToolResult(blockedResult)),
           });
           onUpdate('warning', { message: 'Progress ledger has unresolved rows; continuing.' });
+          this._persist(tabId);
           continue;
         }
         onUpdate('tool_result', { name: fnName, result: toolResult });
@@ -1449,6 +1504,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           // are page-derived and get persisted as history for the next turn.
           content: this._wrapUntrusted(fnName, this._limitToolResult(toolResult)),
         });
+        this._persist(tabId);
         return { action: 'return', value: finalResponse };
       }
 
@@ -1566,6 +1622,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         onUpdate('text', { content: stopMessage });
         onUpdate('error', { message: 'Stuck in a loop. Stopped.' });
         this._clearLoopState(tabId);
+        this._persist(tabId);
         return { action: 'return', value: stopMessage };
       }
       if (bulkApiShortcut?.apiAllowed && bulkApiShortcut.replayRequestId && toolIndex < toolCalls.length - 1) {
@@ -1607,6 +1664,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // early return skips the post-loop flush, so emit any nav notices here
         // or the model would replay against stale URLs from the prior page.
         this._injectNavNotices(messages, navNotices, onUpdate);
+        this._persist(tabId);
         return { action: 'continue' };
       }
       if (this._shouldAutoScreenshot(fnName) && !toolResult?.error) {
@@ -1692,6 +1750,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
+    this._persist(tabId);
     return { action: 'continue' };
   }
 
@@ -2802,12 +2861,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     // transcript.
     const priorMessages = runPlanner ? messages.slice() : null;
     messages.push(enriched);
+    this._persist(tabId);
     if (!runPlanner) return { proceed: true };
 
     const historyDigest = this._buildPlannerHistoryDigest(priorMessages);
     const gate = await this._runPlannerGate(tabId, enriched, onUpdate, costState, runId, historyDigest, tabInfo, plannerMode);
     if (!gate.proceed) {
       messages.push({ role: 'assistant', content: gate.message || 'Task cancelled.' });
+      this._persist(tabId);
       return { proceed: false, message: gate.message || 'Task cancelled.', reason: gate.reason };
     }
 
@@ -2826,6 +2887,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         // by submitPlanReview in the sidepanel, so there's no plan_approved
         // agent_update to emit here (no handler consumed it).
       }
+      this._persist(tabId);
     }
     return { proceed: true };
   }
@@ -3217,9 +3279,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._lastInputTokens.delete(tabId);
     this._lastEstCharsAtReport.delete(tabId);
     this._compactCooldown.delete(tabId);
+    this.hydratedTabs.delete(tabId);
     this.apiAllowedTabs.delete(tabId);
     this.apiAllowedInjected.delete(tabId);
     this._cleanupTab(tabId, { preserveRunGuard: true });
+    const t = this.persistTimers.get(tabId);
+    if (t) { clearTimeout(t); this.persistTimers.delete(tabId); }
+    try {
+      browser.storage.session.remove(this._convKey(tabId)).catch(() => {});
+    } catch (e) { /* ignore */ }
   }
 
   _cleanupTab(tabId, { preserveRunGuard = false } = {}) {
@@ -3248,10 +3316,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   // record facts (download IDs, file paths, progress counters) that it
   // would otherwise lose when older tool results get compressed away.
   //
-  // Firefox port note: ported from chrome/agent.js. Firefox conversations
-  // are in-memory only (no chrome.storage.session persistence), so this
-  // implementation skips the post-write _persist call.
-
   _scratchpadHeader() {
     // Reframed to break "trust laundering": the scratchpad is a role:'user'
     // message (so it survives summarization and stays pinned), but it must NOT
@@ -3350,6 +3414,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       messages.splice(insertAt, 0, msg);
     }
 
+    this._persist(tabId);
     return {
       success: true,
       mode: replace ? 'replace' : 'append',
@@ -4640,6 +4705,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (this._runningTabs.has(tabId)) {
       return { compacted: false, reason: 'busy', remaining: 0 };
     }
+    await this._hydrate(tabId);
     const messages = this.conversations.get(tabId);
     if (!messages || messages.length <= 1) {
       return { compacted: false, reason: 'empty', remaining: messages?.length || 0 };
@@ -4652,6 +4718,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       this.currentCostState.get(tabId) || null,
       { force: true }
     );
+    if (result?.compacted) this._persist(tabId);
     return result || { compacted: false, reason: 'not_needed', remaining: messages.length };
   }
 
@@ -6427,6 +6494,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _processMessageInner(tabId, userMessage, onUpdate, mode) {
+    await this._hydrate(tabId);
     const messages = this.getConversation(tabId, mode);
     const costState = this._newCostRunState();
     this.currentCostState.set(tabId, costState);
@@ -6727,6 +6795,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         messages.push({ role: 'assistant', content: result.content });
         messages.push({ role: 'user', content: progressFinalBlock });
         onUpdate('warning', { message: 'Progress ledger has unresolved rows; continuing.' });
+        this._persist(tabId);
         continue;
       }
       finalResponse = result.costAllowanceMessage
@@ -6749,6 +6818,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
     }
 
+    this._persist(tabId);
     return finalResponse;
     } finally {
       this._endTraceRun(tabId, runId, _traceStatus, finalResponse);
@@ -6772,6 +6842,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
   }
 
   async _processMessageStreamInner(tabId, userMessage, onUpdate, mode) {
+    await this._hydrate(tabId);
     const messages = this.getConversation(tabId, mode);
     const costState = this._newCostRunState();
     this.currentCostState.set(tabId, costState);
@@ -6862,6 +6933,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (beforeCost) {
           messages.push({ role: 'assistant', content: beforeCost });
           onUpdate('warning', { message: beforeCost });
+          this._persist(tabId);
           return finish(beforeCost, 'cost_limit');
         }
         let costStopMessage = '';
@@ -6920,6 +6992,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (costStopMessage) {
             messages.push({ role: 'assistant', content: costStopMessage });
             onUpdate('warning', { message: costStopMessage });
+            this._persist(tabId);
             return finish(costStopMessage, 'cost_limit');
           }
           const toolCalls = Object.values(toolCallsAccumulator);
@@ -6948,6 +7021,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if ((!fullText || !fullText.trim()) && costStopMessage) {
           messages.push({ role: 'assistant', content: costStopMessage });
           onUpdate('warning', { message: costStopMessage });
+          this._persist(tabId);
           return finish(costStopMessage, 'cost_limit');
         }
         if (!fullText || !fullText.trim()) {
@@ -6969,6 +7043,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           const failMsg = '[Agent emitted no output and no tool call, even after a recovery nudge. This usually means the task exceeded the current model\'s capability or context budget. Try a stronger model, raise the step limit in settings, or break the task into smaller parts.]';
           messages.push({ role: 'assistant', content: failMsg });
           onUpdate('warning', { message: failMsg });
+          this._persist(tabId);
           return finish(failMsg, 'empty_output');
         }
         if (mode === 'act' && this._isCompressionPlaceholderResponse(fullText)) {
@@ -7001,6 +7076,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           messages.push({ role: 'assistant', content: fullText });
           messages.push({ role: 'user', content: progressFinalBlock });
           onUpdate('warning', { message: 'Progress ledger has unresolved rows; continuing.' });
+          this._persist(tabId);
           continue;
         }
         if (costStopMessage) {
@@ -7008,6 +7084,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           fullText = `${fullText}\n\n${costStopMessage}`;
         }
         messages.push({ role: 'assistant', content: fullText });
+        this._persist(tabId);
         return finish(fullText);
 
       } catch (e) {
@@ -7016,11 +7093,13 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         if (this._isContextOverflow(e.message)) {
           onUpdate('thinking', { step: steps, note: 'Context too large, trimming...' });
           this._emergencyTrim(messages);
+          this._persist(tabId);
           continue; // retry the loop with trimmed context
         }
         onUpdate('error', { message: e.message });
         const errMsg = `Error: ${e.message}`;
         messages.push({ role: 'assistant', content: errMsg });
+        this._persist(tabId);
         return finish(errMsg, 'error');
       }
     }
@@ -7031,6 +7110,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const summary = this._buildStepLimitSummary(messages, steps);
     messages.push({ role: 'assistant', content: summary });
     onUpdate('text', { content: summary });
+    this._persist(tabId);
     return finish(summary, 'max_steps');
     } finally {
       this._endTraceRun(tabId, runId, _traceStatus, finalResponse);
