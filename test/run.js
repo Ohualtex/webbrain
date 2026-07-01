@@ -3586,38 +3586,43 @@ test('chrome sidepanel drops stale async tab-chat restores', () => {
   assert.doesNotMatch(body, /persistTabChat\(currentTabId,\s*messagesEl\.innerHTML\)|captureInputDraftForTab\(currentTabId\)/, 'chrome: overlapping tab switches must not save DOM or drafts under a pending target tab');
 });
 
-test('chrome sidepanel queues target-tab updates during async tab switches', () => {
-  const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
-  assert.match(panel, /let tabSwitchTransitionId = null;/, 'chrome: tab switches should track the tab currently being restored');
-  assert.match(panel, /let queuedTabSwitchMessages = \[\];/, 'chrome: tab switches should keep target-tab messages that arrive mid-restore');
-  assert.match(panel, /function queueAgentUpdateDuringTabSwitch\(msg\) \{[\s\S]*?const tabId = msg\?\.tabId;[\s\S]*?tabSwitchTransitionId == null[\s\S]*?tabId !== tabSwitchTransitionId[\s\S]*?return false;[\s\S]*?queuedTabSwitchMessages\.push\(msg\);[\s\S]*?return true;[\s\S]*?\}/, 'chrome: target-tab messages should be queued while that tab is being restored');
-  assert.match(panel, /function drainQueuedAgentUpdatesForTab\(tabId\) \{[\s\S]*?queuedTabSwitchMessages = remaining;[\s\S]*?replay\.forEach\(\(msg\) => handleAgentUpdateMessage\(msg\)\);[\s\S]*?\}/, 'chrome: queued target-tab messages should replay through the normal agent update handler');
+test('sidepanel queues target-tab updates during async tab switches', () => {
+  for (const [label, panelRel] of [
+    ['chrome', 'src/chrome/src/ui/sidepanel.js'],
+    ['firefox', 'src/firefox/src/ui/sidepanel.js'],
+  ]) {
+    const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
+    assert.match(panel, /let tabSwitchTransitionId = null;/, `${label}: tab switches should track the tab currently being restored`);
+    assert.match(panel, /let queuedTabSwitchMessages = \[\];/, `${label}: tab switches should keep target-tab messages that arrive mid-restore`);
+    assert.match(panel, /function queueAgentUpdateDuringTabSwitch\(msg\) \{[\s\S]*?const tabId = msg\?\.tabId;[\s\S]*?tabSwitchTransitionId == null[\s\S]*?tabId !== tabSwitchTransitionId[\s\S]*?return false;[\s\S]*?queuedTabSwitchMessages\.push\(msg\);[\s\S]*?return true;[\s\S]*?\}/, `${label}: target-tab messages should be queued while that tab is being restored`);
+    assert.match(panel, /function drainQueuedAgentUpdatesForTab\(tabId\) \{[\s\S]*?queuedTabSwitchMessages = remaining;[\s\S]*?replay\.forEach\(\(msg\) => handleAgentUpdateMessage\(msg\)\);[\s\S]*?\}/, `${label}: queued target-tab messages should replay through the normal agent update handler`);
 
-  const switchMatch = panel.match(/async function switchToTab\(newTabId\) \{([\s\S]*?)\n\}/);
-  assert.ok(switchMatch, 'chrome: switchToTab body missing');
-  const body = switchMatch[1];
-  const markIdx = body.indexOf('tabSwitchTransitionId = newTabId;');
-  const flushIdx = body.indexOf('await flushRenderedTabChat();');
-  const loadIdx = body.indexOf('const html = await loadTabChat(newTabId);');
-  const clearTransitionIdx = body.indexOf('if (tabSwitchTransitionId === newTabId) tabSwitchTransitionId = null;');
-  const replayIdx = body.indexOf('drainQueuedAgentUpdatesForTab(newTabId);');
-  const consumeIdx = body.indexOf('consumePendingContextMenuPrompt()');
-  assert.notEqual(markIdx, -1, 'chrome: switchToTab should mark the target tab before any async flush can yield');
-  assert.notEqual(flushIdx, -1, 'chrome: switchToTab flush point missing');
-  assert.notEqual(loadIdx, -1, 'chrome: switchToTab restore load point missing');
-  assert.notEqual(clearTransitionIdx, -1, 'chrome: switchToTab should clear the transition marker after restore settles');
-  assert.notEqual(replayIdx, -1, 'chrome: switchToTab should replay queued target-tab messages after restore');
-  assert.notEqual(consumeIdx, -1, 'chrome: switchToTab context-menu consume point missing');
-  assert.equal(markIdx < flushIdx && flushIdx < loadIdx && loadIdx < clearTransitionIdx && clearTransitionIdx < replayIdx && replayIdx < consumeIdx, true, 'chrome: queued target-tab updates must wait until the async restore has settled');
+    const switchMatch = panel.match(/async function switchToTab\(newTabId\) \{([\s\S]*?)\n\}/);
+    assert.ok(switchMatch, `${label}: switchToTab body missing`);
+    const body = switchMatch[1];
+    const markIdx = body.indexOf('tabSwitchTransitionId = newTabId;');
+    const flushIdx = body.indexOf('await flushRenderedTabChat();');
+    const loadIdx = body.indexOf('const html = await loadTabChat(newTabId);');
+    const clearTransitionIdx = body.indexOf('if (tabSwitchTransitionId === newTabId) tabSwitchTransitionId = null;');
+    const replayIdx = body.indexOf('drainQueuedAgentUpdatesForTab(newTabId);');
+    const consumeIdx = body.indexOf('consumePendingContextMenuPrompt()');
+    assert.notEqual(markIdx, -1, `${label}: switchToTab should mark the target tab before any async flush can yield`);
+    assert.notEqual(flushIdx, -1, `${label}: switchToTab flush point missing`);
+    assert.notEqual(loadIdx, -1, `${label}: switchToTab restore load point missing`);
+    assert.notEqual(clearTransitionIdx, -1, `${label}: switchToTab should clear the transition marker after restore settles`);
+    assert.notEqual(replayIdx, -1, `${label}: switchToTab should replay queued target-tab messages after restore`);
+    assert.notEqual(consumeIdx, -1, `${label}: switchToTab context-menu consume point missing`);
+    assert.equal(markIdx < flushIdx && flushIdx < loadIdx && loadIdx < clearTransitionIdx && clearTransitionIdx < replayIdx && replayIdx < consumeIdx, true, `${label}: queued target-tab updates must wait until the async restore has settled`);
 
-  const listenerStart = panel.indexOf("if (msg.target !== 'sidepanel' || msg.action !== 'agent_update') return;");
-  assert.notEqual(listenerStart, -1, 'chrome: runtime message listener missing');
-  const listenerBody = panel.slice(listenerStart, panel.indexOf('\n});', listenerStart) + 4);
-  const queueIdx = listenerBody.indexOf('if (queueAgentUpdateDuringTabSwitch(msg)) return;');
-  const handleIdx = listenerBody.indexOf('handleAgentUpdateMessage(msg);');
-  assert.notEqual(queueIdx, -1, 'chrome: runtime listener should queue target-tab updates during async tab switching');
-  assert.notEqual(handleIdx, -1, 'chrome: runtime listener should still pass normal updates to the shared handler');
-  assert.equal(queueIdx < handleIdx, true, 'chrome: target-tab updates should be queued before scheduled-job or tab filters can drop them');
+    const listenerStart = panel.indexOf("if (msg.target !== 'sidepanel' || msg.action !== 'agent_update') return;");
+    assert.notEqual(listenerStart, -1, `${label}: runtime message listener missing`);
+    const listenerBody = panel.slice(listenerStart, panel.indexOf('\n});', listenerStart) + 4);
+    const queueIdx = listenerBody.indexOf('if (queueAgentUpdateDuringTabSwitch(msg)) return;');
+    const handleIdx = listenerBody.indexOf('handleAgentUpdateMessage(msg);');
+    assert.notEqual(queueIdx, -1, `${label}: runtime listener should queue target-tab updates during async tab switching`);
+    assert.notEqual(handleIdx, -1, `${label}: runtime listener should still pass normal updates to the shared handler`);
+    assert.equal(queueIdx < handleIdx, true, `${label}: target-tab updates should be queued before scheduled-job or tab filters can drop them`);
+  }
 });
 
 test('chrome sidepanel persists tab chat to the tab captured before debounce', () => {
@@ -3644,17 +3649,11 @@ test('sidepanel flushes completed run chat before deferred tab switches', () => 
   ]) {
     const panel = fs.readFileSync(path.join(ROOT, panelRel), 'utf8');
 
-    if (label === 'chrome') {
+    if (label === 'chrome' || label === 'firefox') {
       assert.match(
         panel,
         /async function flushRenderedTabChat\(\) \{[\s\S]*?const tabId = renderedTabId;[\s\S]*?if \(persistTimer && persistTimerTabId === tabId\) \{[\s\S]*?clearTimeout\(persistTimer\);[\s\S]*?\}[\s\S]*?await persistTabChat\(tabId, messagesEl\.innerHTML\);[\s\S]*?\}/,
-        'chrome: final flush should cancel stale debounced writes and persist the rendered tab immediately',
-      );
-    } else {
-      assert.match(
-        panel,
-        /function flushRenderedTabChat\(\) \{[\s\S]*?if \(currentTabId == null\) return;[\s\S]*?tabChats\.set\(currentTabId, messagesEl\.innerHTML\);[\s\S]*?\}/,
-        'firefox: final flush should update the currently rendered in-memory chat',
+        `${label}: final flush should cancel stale debounced writes and persist the rendered tab immediately`,
       );
     }
 
@@ -3681,8 +3680,8 @@ test('sidepanel flushes completed run chat before deferred tab switches', () => 
     assert.notEqual(scheduledStart, -1, `${label}: scheduled settlement helper missing`);
     assert.notEqual(scheduledEnd, -1, `${label}: scheduled event handler boundary missing`);
     const scheduledBody = panel.slice(scheduledStart, scheduledEnd);
-    const scheduledFlushNeedle = label === 'chrome' ? 'await flushRenderedTabChat()' : 'flushRenderedTabChat()';
-    const scheduledDrainNeedle = label === 'chrome' ? 'await drainQueuedContextMenuPromptsAfterPendingTabSwitch();' : 'drainQueuedContextMenuPromptsAfterPendingTabSwitch();';
+    const scheduledFlushNeedle = 'await flushRenderedTabChat()';
+    const scheduledDrainNeedle = 'await drainQueuedContextMenuPromptsAfterPendingTabSwitch();';
     const scheduledFlushIdx = scheduledBody.indexOf(scheduledFlushNeedle);
     const scheduledDrainIdx = scheduledBody.indexOf(scheduledDrainNeedle);
     assert.notEqual(scheduledFlushIdx, -1, `${label}: scheduled completion should flush the final transcript`);
@@ -3717,6 +3716,25 @@ test('chrome sidepanel serializes tab-chat storage writes with clears and reads'
   assert.match(clearBody, /tabChats\.delete\(tabId\);/, 'chrome: clearing tab chat should delete the cached HTML before queuing storage removal');
   assert.match(clearBody, /return enqueueTabChatOperation\(tabId, async \(numericTabId\) => \{/, 'chrome: clearing tab chat should be serialized through the queue');
   assert.match(clearBody, /return enqueueTabChatOperation\(tabId, async \(numericTabId\) => \{[\s\S]*?tabChats\.delete\(numericTabId\);[\s\S]*?chrome\.storage\.session\?\.remove\(TAB_CHAT_PREFIX \+ numericTabId\)/, 'chrome: queued clears should delete stale HTML re-cached by older queued writes before removing storage');
+});
+
+test('firefox sidepanel serializes tab-chat storage writes with clears and reads', () => {
+  const panel = fs.readFileSync(path.join(ROOT, 'src/firefox/src/ui/sidepanel.js'), 'utf8');
+  assert.match(panel, /const tabChatOperations = new Map\(\);/, 'firefox: tab-chat operations should be queued per tab');
+  assert.match(panel, /function enqueueTabChatOperation\(tabId, fn\) \{[\s\S]*?const previous = tabChatOperations\.get\(numericTabId\) \|\| Promise\.resolve\(\);[\s\S]*?tabChatOperations\.set\(numericTabId, operation\);[\s\S]*?\}/, 'firefox: tab-chat writes should be serialized behind prior operations');
+  const loadStart = panel.indexOf('async function loadTabChat(tabId) {');
+  assert.notEqual(loadStart, -1, 'firefox: loadTabChat missing');
+  const loadBody = panel.slice(loadStart, panel.indexOf('\n}\n\nfunction persistTabChat', loadStart) + 2);
+  assert.match(loadBody, /const numericTabId = Number\(tabId\);[\s\S]*?if \(!Number\.isFinite\(numericTabId\)\) return null;/, 'firefox: tab-chat restore should normalize tab ids before checking the cache');
+  assert.match(loadBody, /if \(!tabChatOperations\.has\(numericTabId\) && tabChats\.has\(numericTabId\)\) return tabChats\.get\(numericTabId\);/, 'firefox: tab-chat restore should only trust cached HTML when no queued operation can update it');
+  assert.match(loadBody, /return await enqueueTabChatOperation\(numericTabId, async \(queuedTabId\) => \{[\s\S]*?if \(tabChats\.has\(queuedTabId\)\) return tabChats\.get\(queuedTabId\);[\s\S]*?const stored = await browser\.storage\.session\.get\(key\);/, 'firefox: tab-chat restore should wait behind pending per-tab operations before reading cache or storage');
+  assert.match(panel, /return enqueueTabChatOperation\(tabId, async \(numericTabId\) => \{[\s\S]*?await browser\.storage\.session\.set\(\{ \[key\]: html \}\)\.catch\(\(\) => \{\}\);/, 'firefox: tab-chat persistence should be serialized through the queue');
+  const clearStart = panel.indexOf('function clearCachedTabChat(tabId) {');
+  assert.notEqual(clearStart, -1, 'firefox: clearCachedTabChat missing');
+  const clearBody = panel.slice(clearStart, panel.indexOf('\n}\n\n// Save current tab', clearStart) + 2);
+  assert.match(clearBody, /tabChats\.delete\(tabId\);/, 'firefox: clearing tab chat should delete the cached HTML before queuing storage removal');
+  assert.match(clearBody, /return enqueueTabChatOperation\(tabId, async \(numericTabId\) => \{/, 'firefox: clearing tab chat should be serialized through the queue');
+  assert.match(clearBody, /return enqueueTabChatOperation\(tabId, async \(numericTabId\) => \{[\s\S]*?tabChats\.delete\(numericTabId\);[\s\S]*?browser\.storage\.session\?\.remove\(TAB_CHAT_PREFIX \+ numericTabId\)/, 'firefox: queued clears should delete stale HTML re-cached by older queued writes before removing storage');
 });
 
 test('chrome sidepanel cancels stale tab-chat persistence when clearing a tab', () => {
@@ -4391,10 +4409,7 @@ test('sidepanel preserves stale residual slash-command prompts without hidden ru
     const switchStart = panel.indexOf('function switchToTab(newTabId)');
     assert.notEqual(switchStart, -1, `${label}: switchToTab missing`);
     const switchBody = panel.slice(switchStart, panel.indexOf('refreshScheduledJobs({', switchStart));
-    const captureDraftPattern = label === 'chrome'
-      ? /captureInputDraftForTab\(renderedTabId\);[\s\S]*?restoreInputDraftForTab\(newTabId\);/
-      : /captureInputDraftForTab\(currentTabId\);[\s\S]*?restoreInputDraftForTab\(newTabId\);/;
-    assert.match(switchBody, captureDraftPattern, `${label}: tab switches should capture and restore per-tab composer drafts`);
+    assert.match(switchBody, /captureInputDraftForTab\(renderedTabId\);[\s\S]*?restoreInputDraftForTab\(newTabId\);/, `${label}: tab switches should capture and restore per-tab composer drafts`);
 
     const sendMatch = panel.match(/async function sendMessage\(extraChatParams\) \{[\s\S]*?\n  return accepted;\n\}/);
     assert.ok(sendMatch, `${label}: sendMessage missing`);
