@@ -5919,7 +5919,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (Array.isArray(msg.content)) {
         let inUserAttachmentSection = false;
         const newContent = msg.content.map(block => {
-          if (this._isUserAttachmentNoticeBlock(block)) {
+          // Only user messages can carry the attachment notice — a lookalike
+          // text block echoed into a tool result or assistant message must not
+          // exempt the images that follow it from pruning.
+          if (msg.role === 'user' && this._isUserAttachmentNoticeBlock(block)) {
             inUserAttachmentSection = true;
             return block;
           }
@@ -9755,6 +9758,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (attachments && attachments.length) {
       const attachResult = this._applyAttachments(enriched, attachments, provider);
       if (!attachResult.ok) {
+        // Structured signal so the sidepanel can restore the rejected
+        // attachments + prompt without sniffing the error copy out of the
+        // final response text.
+        onUpdate('attachment_rejected', { error: attachResult.error });
         return (finalResponse = attachResult.error);
       }
     }

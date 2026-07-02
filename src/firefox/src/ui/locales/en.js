@@ -20,9 +20,10 @@ export default {
   'sp.btn.mic_stop': 'Stop listening',
   'sp.mic.unsupported': 'Voice input is not supported in this browser',
   'sp.mic.disabled_settings': 'Enable voice input in settings',
+  'sp.mic.permission_denied': 'Microphone blocked — allow microphone access for this extension in your browser\'s site permissions',
   'sp.attach.remove': 'Remove attachment',
-  'sp.attach.too_large': '{name} is too large to attach (max 16MB).',
-  'sp.attach.unsupported_type': '{name} is not a supported attachment type — only images and PDFs are supported.',
+  'sp.attach.too_large': '{name} is too large to attach (max {max}).',
+  'sp.attach.unsupported_type': '{name} is not a supported attachment type — only images, PDFs, and JSON files are supported.',
   'sp.attach.read_failed': 'Could not read {name}.',
 
   'sp.inspection': 'WebBrain started inspecting this page',

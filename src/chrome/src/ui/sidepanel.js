@@ -2567,19 +2567,24 @@ async function sendMessage(extraChatParams) {
     accepted = true;
     completedSuccessfully = updatesContainSuccessfulDone(res?.updates);
 
-    // An unsupported-attachment rejection comes back as a plain error string
-    // and the turn is never recorded in history. We optimistically cleared the
-    // chips on send, so re-add them here — otherwise "switch providers and try
-    // again" is impossible without re-picking every file.
+    // An unsupported-attachment rejection never records the turn in history;
+    // the agent signals it via a structured 'attachment_rejected' update (not
+    // by matching the error copy, which could false-positive on a genuine
+    // assistant answer). We optimistically cleared the chips on send, so
+    // re-add them here — otherwise "switch providers and try again" is
+    // impossible without re-picking every file.
     if (attachmentsForSend.length && currentTabId === tabId
-        && typeof res?.content === 'string'
-        && /does not support (?:image|document) attachments/.test(res.content)) {
+        && res?.updates?.some(u => u?.type === 'attachment_rejected')) {
       const pending = getPendingAttachmentsForTab(tabId);
       pending.unshift(...attachmentsForSend.filter(att => !pending.includes(att)));
-      inputEl.value = text;
-      saveInputDraftForTab(tabId, text);
-      autoResizeInput();
-      updateSlashCommandAutocomplete();
+      // Restore the prompt only if the user hasn't started typing a new one
+      // while the rejected turn was in flight.
+      if (!inputEl.value.trim()) {
+        inputEl.value = text;
+        saveInputDraftForTab(tabId, text);
+        autoResizeInput();
+        updateSlashCommandAutocomplete();
+      }
       renderAttachmentPreviews();
       syncSendButtonState();
     }
@@ -4331,6 +4336,10 @@ const attachBtn = document.getElementById('btn-attach');
 const fileAttachInput = document.getElementById('file-attach-input');
 const attachmentPreviewList = document.getElementById('attachment-preview-list');
 const MAX_ATTACHMENT_BYTES = 16 * 1024 * 1024; // matches PDF_PASSTHROUGH_MAX_BYTES (pdf-tools.js)
+// Text files are injected VERBATIM into the prompt as a text block (no
+// server-side processing like PDFs), so the 16MB binary cap would blow any
+// context window — cap them far lower.
+const MAX_TEXT_ATTACHMENT_BYTES = 512 * 1024;
 
 function normalizeAttachmentTabId(tabId = renderedTabId ?? currentTabId) {
   if (tabId == null || tabId === '') return null;
@@ -4442,18 +4451,21 @@ async function handleAttachedFiles(fileList, tabId = renderedTabId ?? currentTab
   updateAttachmentReadCount(numericTabId, 1);
   try {
     for (const file of files) {
-      if (file.size > MAX_ATTACHMENT_BYTES) {
-        if (normalizeAttachmentTabId() === numericTabId) {
-          addMessage('system', systemHtml(tSystemHtml('sp.attach.too_large', { name: file.name })));
-        }
-        continue;
-      }
       const isImage = file.type.startsWith('image/');
       const isPdf = file.type === 'application/pdf';
-      const isJson = file.type === 'application/json';
+      // The reported MIME type for .json files is OS-registry dependent and
+      // often empty — fall back to the extension.
+      const isJson = file.type === 'application/json' || (!isImage && !isPdf && /\.json$/i.test(file.name || ''));
       if (!isImage && !isPdf && !isJson) {
         if (normalizeAttachmentTabId() === numericTabId) {
           addMessage('system', systemHtml(tSystemHtml('sp.attach.unsupported_type', { name: file.name })));
+        }
+        continue;
+      }
+      const maxBytes = isJson ? MAX_TEXT_ATTACHMENT_BYTES : MAX_ATTACHMENT_BYTES;
+      if (file.size > maxBytes) {
+        if (normalizeAttachmentTabId() === numericTabId) {
+          addMessage('system', systemHtml(tSystemHtml('sp.attach.too_large', { name: file.name, max: isJson ? '512KB' : '16MB' })));
         }
         continue;
       }
@@ -4484,6 +4496,11 @@ async function handleAttachedFiles(fileList, tabId = renderedTabId ?? currentTab
 if (attachBtn && fileAttachInput) {
   attachBtn.addEventListener('click', () => fileAttachInput.click());
   fileAttachInput.addEventListener('change', () => {
+    // Bind to renderedTabId: while a run is in flight the user can switch
+    // tabs (currentTabId moves ahead), but the conversation on screen — the
+    // one they picked files for — is still the rendered tab's. Sends are
+    // gated while processing, and renderedTabId catches up to currentTabId
+    // before the next send, so chips and sent attachments stay consistent.
     handleAttachedFiles(fileAttachInput.files, renderedTabId ?? currentTabId);
     fileAttachInput.value = ''; // allow re-selecting the same file
   });
