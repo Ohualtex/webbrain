@@ -658,6 +658,10 @@ function restoreInputDraftForTab(tabId) {
   syncSendButtonState();
 }
 
+function sameTabId(a, b) {
+  return a != null && b != null && String(a) === String(b);
+}
+
 function getQueuedComposerMessages(tabId) {
   const numericTabId = Number(tabId);
   if (!Number.isFinite(numericTabId)) return [];
@@ -672,7 +676,7 @@ function setQueuedComposerMessages(tabId, messages) {
   } else {
     queuedComposerMessagesByTab.delete(numericTabId);
   }
-  if (currentTabId === numericTabId) renderQueuedComposerMessages(numericTabId);
+  if (sameTabId(currentTabId, numericTabId)) renderQueuedComposerMessages(numericTabId);
 }
 
 function queuedComposerButton(className, action, queueId, labelKey, svgPath) {
@@ -759,7 +763,7 @@ function enqueueQueuedComposerMessage(tabId, text) {
     text: queuedText,
   });
   setQueuedComposerMessages(numericTabId, queue);
-  if (currentTabId === numericTabId) {
+  if (sameTabId(currentTabId, numericTabId)) {
     saveInputDraftForTab(numericTabId, '');
     hideSlashCommandAutocomplete();
     inputEl.value = '';
@@ -770,8 +774,9 @@ function enqueueQueuedComposerMessage(tabId, text) {
 }
 
 function editQueuedComposerMessage(tabId, queueId) {
+  if (!sameTabId(currentTabId, tabId)) return;
   const item = removeQueuedComposerMessage(tabId, queueId);
-  if (!item || currentTabId !== Number(tabId)) return;
+  if (!item) return;
   inputEl.value = item.text;
   saveInputDraftForTab(tabId, item.text);
   autoResizeInput();
@@ -779,6 +784,17 @@ function editQueuedComposerMessage(tabId, queueId) {
   syncSendButtonState();
   inputEl.focus();
   inputEl.setSelectionRange(inputEl.value.length, inputEl.value.length);
+}
+
+function editLastQueuedComposerMessageForCurrentTab() {
+  if (!inputEl || currentTabId == null) return false;
+  const atStart = inputEl.selectionStart === 0 && inputEl.selectionEnd === 0;
+  if (inputEl.value.trim() || !atStart) return false;
+  const queue = getQueuedComposerMessages(currentTabId);
+  const item = queue[queue.length - 1];
+  if (!item) return false;
+  editQueuedComposerMessage(currentTabId, item.id);
+  return true;
 }
 
 function deleteQueuedComposerMessage(tabId, queueId) {
@@ -789,7 +805,7 @@ function clearQueuedComposerMessagesForTab(tabId) {
   const numericTabId = Number(tabId);
   if (!Number.isFinite(numericTabId)) return;
   queuedComposerMessagesByTab.delete(numericTabId);
-  if (currentTabId === numericTabId) renderQueuedComposerMessages(numericTabId);
+  if (sameTabId(currentTabId, numericTabId)) renderQueuedComposerMessages(numericTabId);
 }
 
 function drainQueuedComposerMessageForCurrentTab() {
@@ -3856,6 +3872,10 @@ queuedMessagesEl?.addEventListener('click', (e) => {
 
 inputEl.addEventListener('keydown', (e) => {
   if (handleSlashCommandKeydown(e)) return;
+  if (e.key === 'ArrowUp' && editLastQueuedComposerMessageForCurrentTab()) {
+    e.preventDefault();
+    return;
+  }
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
     sendMessage();
