@@ -1916,9 +1916,8 @@ body {
 
 /* ─── Tab Recorder (v7.4) ─────────────────────────────────────────── */
 
-/* (No toolbar button — the live recording banner below carries its own
-   Stop control. Recording is started entirely via the agent's
-   `record_tab` tool.) */
+/* (No toolbar button. /record shows this Stop control; /record-full-screen
+   stays hidden and stops via double Escape or Chrome's Stop sharing UI.) */
 
 /* Live recording banner — sits below the inspection banner. Red bg so the
    user can't miss it, with a pulsing dot. */

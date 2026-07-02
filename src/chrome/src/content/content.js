@@ -8,6 +8,29 @@
   if (window.__webbrain_injected) return;
   window.__webbrain_injected = true;
 
+  const RECORDING_DOUBLE_ESCAPE_MS = 1400;
+  let recordingEscapeAt = 0;
+
+  if (window.top === window) {
+    document.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || e.repeat) return;
+      const now = Date.now();
+      if (now - recordingEscapeAt <= RECORDING_DOUBLE_ESCAPE_MS) {
+        recordingEscapeAt = 0;
+        e.preventDefault();
+        try {
+          chrome.runtime.sendMessage({
+            target: 'background',
+            action: 'stop_tab_recording',
+            reason: 'double_escape',
+          });
+        } catch { /* ignore */ }
+        return;
+      }
+      recordingEscapeAt = now;
+    }, true);
+  }
+
   /**
    * Extract readable text content from the page.
    */

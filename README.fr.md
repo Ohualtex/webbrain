@@ -190,7 +190,6 @@ Une documentation plus approfondie se trouve dans [`docs/`](docs/) : [architectu
 | `list_downloads` | Oui | Oui | -- | Lister les téléchargements récents avec statut et URL sources |
 | `read_downloaded_file` | -- | Oui | -- | Récupérer à nouveau le contenu d'un fichier téléchargé (texte ou base64) |
 | `iframe_read` / `iframe_click` / `iframe_type` | -- | Oui | -- | Lire/cliquer/saisir à l'intérieur d'iframes inter-origines |
-| `record_tab` / `stop_recording` | -- | Oui | -- | Enregistrer la vidéo+audio de l'onglet en .webm avec transcription Whisper optionnelle (Chrome uniquement) |
 | `scratchpad_write` | Oui | Oui | Oui | Épingler une note dans le contexte qui survit à la synthèse |
 | `clarify` | Oui | Oui | Oui | Mettre en pause et poser une question à l'utilisateur |
 | `verify_form` | -- | Oui | -- | Vérifier les champs du formulaire avant de soumettre |
@@ -233,6 +232,7 @@ WebBrain accepte les commandes slash en tant que premier élément d'une ligne d
 | `/reset` | Efface la conversation et tous les indicateurs par conversation |
 | `/screenshot` | Capture l'onglet visible et affiche l'image en ligne dans le chat |
 | `/record` | Démarrer l'enregistrement de l'onglet actuel |
+| `/record-full-screen` | Enregistrer un écran ou une fenêtre (Chrome uniquement) |
 | `/export` | Télécharge la conversation actuelle sous forme de fichier Markdown |
 | `/profile` | Bascule le remplissage automatique du profil sans ouvrir les Paramètres |
 | `/vision` | Bascule le mode vision (compréhension de captures d'écran) sur le fournisseur actif |
@@ -251,6 +251,7 @@ Les raccourcis du panneau latéral Chrome fonctionnent lorsque le panneau latér
 | `Ctrl+Shift+A` ou `Cmd+Shift+A` | Passer en mode Ask |
 | `Ctrl+Shift+X` ou `Cmd+Shift+X` | Passer en mode Act |
 | `Escape` | Arrêter l'exécution active, sauf s'il ne fait que fermer l'autocomplétion des commandes slash |
+| `Escape` deux fois | Arrêter un enregistrement actif depuis WebBrain ou une page du navigateur |
 
 ## Problèmes connus
 

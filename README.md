@@ -120,7 +120,7 @@ Click the gear icon or go to the extension's Options page to configure:
 - Verbose Mode — Show full tool call JSON (off by default)
 - Auto-screenshot — Provide visual context when DOM/page reads are insufficient
 - Max Agent Steps — Configurable step limit (5-200, default 60)
-- Plan before Act — Optionally generate and review a structured Act-mode plan before browser tools run (off by default)
+- Plan before Act — Optionally generate and review a structured Act-mode plan before browser tools run (try mode by default; explicit off is preserved)
 
 **Skills:**
 - FreeSkillz.xyz ships enabled by default and exposes `read_youtube_transcript`, `resolve_public_media`, and `download_public_media` through its skill manifest; remove it from Settings → Skills if you do not want those tools available.
@@ -215,7 +215,6 @@ Deeper docs live in [`docs/`](docs/): [architecture](docs/architecture.md), [sit
 | `list_downloads` | Yes | Yes | -- | List recent downloads with status and source URLs |
 | `read_downloaded_file` | -- | Yes | -- | Re-fetch a downloaded file's content (text or base64) |
 | `iframe_read` / `iframe_click` / `iframe_type` | -- | Yes | -- | Read/click/type inside cross-origin iframes |
-| `record_tab` / `stop_recording` | -- | Yes | -- | Record tab video+audio into .webm with optional Whisper transcription (Chrome only) |
 | `scratchpad_write` | Yes | Yes | Yes | Pin a note in context that survives summarization |
 | `clarify` | Yes | Yes | Yes | Pause and ask the user a question |
 | `verify_form` | -- | Yes | -- | Verify form fields before submitting |
@@ -266,6 +265,7 @@ WebBrain accepts slash commands as the first thing on a line in the input box. T
 | `/screenshot` | Capture the visible tab and display the image inline in chat |
 | `/full-page-screenshot` | Capture the full scrollable page and display it inline in chat (Chrome only) |
 | `/record` | Start recording the current tab |
+| `/record-full-screen` | Record a screen or window with Chrome's picker (Chrome only) |
 | `/export` | Download the current conversation as a Markdown file |
 | `/profile` | Toggle profile auto-fill on/off without opening Settings |
 | `/vision` | Toggle vision mode (screenshot understanding) on the active provider |
@@ -284,6 +284,7 @@ Chrome side panel shortcuts work when the WebBrain side panel has focus.
 | `Ctrl+Shift+A` or `Cmd+Shift+A` | Switch to Ask mode |
 | `Ctrl+Shift+X` or `Cmd+Shift+X` | Switch to Act mode |
 | `Escape` | Stop the active run, unless it is only dismissing slash-command autocomplete |
+| `Escape` twice | Stop an active recording from WebBrain or browser pages |
 
 ## Known Issues
 

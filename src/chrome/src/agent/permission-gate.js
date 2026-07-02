@@ -29,7 +29,6 @@ export const Capability = {
   NETWORK: 'network_write',      // fetch_url / research_url with a write method
   DOWNLOAD: 'download',          // download_* tools
   UPLOAD: 'upload',              // upload_file (selects a local file)
-  RECORD: 'record',              // record_tab (captures the tab + microphone)
   WINDOW: 'window',              // resize_window (changes browser window bounds)
   SCHEDULE: 'schedule',          // schedule_resume / schedule_task persistent future work
 };
@@ -43,7 +42,6 @@ export const CAPABILITY_LABEL = {
   [Capability.NETWORK]: 'make a network request to',
   [Capability.DOWNLOAD]: 'download files from',
   [Capability.UPLOAD]: 'upload a file to',
-  [Capability.RECORD]: 'record the tab (and microphone) on',
   [Capability.WINDOW]: 'resize the browser window for',
   [Capability.SCHEDULE]: 'schedule future work for',
 };
@@ -139,7 +137,6 @@ const TOOL_CAPABILITY = {
   iframe_type: Capability.TYPE,
   execute_js: Capability.EXECUTE_JS,
   upload_file: Capability.UPLOAD,
-  record_tab: Capability.RECORD,
   resize_window: Capability.WINDOW,
   download_file: Capability.DOWNLOAD,
   download_files: Capability.DOWNLOAD,

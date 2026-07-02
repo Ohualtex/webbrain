@@ -153,8 +153,8 @@ export function buildRecommendedActions(pageInfo = {}, options = {}) {
     addUnique(actions, {
       id: 'record-meeting',
       label: 'Record this meeting',
-      prompt: 'Record this meeting and transcribe it when the recording stops.',
-      mode: 'act',
+      prompt: '/record',
+      mode: 'ask',
     });
   }
 

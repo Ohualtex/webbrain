@@ -231,7 +231,7 @@ function normalizePlanBeforeActMode(stored = {}) {
   }
   if (stored.planBeforeAct === true) return 'strict';
   if (stored.planBeforeAct === false) return 'off';
-  return 'off';
+  return 'try';
 }
 
 function applyPlanBeforeActMode(mode) {

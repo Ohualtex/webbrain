@@ -1,6 +1,6 @@
 # WebBrain Firefox Extension — Architecture
 
-> Version 19.3.2 · Manifest V2 · Background Page
+> Version 20.0.0 · Manifest V2 · Background Page
 
 ## How Firefox Differs from Chrome
 
@@ -275,7 +275,7 @@ Legacy tier (kept for compatibility with older prompts and for non-AX flows):
 | `verify_form` | Reads form field values + viewport screenshot before submit |
 | `done` | Signal completion |
 
-Chrome-only (absent in Firefox): `full_page_screenshot`, `shadow_dom_query` (CDP shadow-pierce variant), `upload_file` (CDP-driven file input), `record_tab`, `stop_recording`.
+Chrome-only (absent in Firefox): `full_page_screenshot`, `shadow_dom_query` (CDP shadow-pierce variant), `upload_file` (CDP-driven file input), and slash-driven tab/screen recording.
 
 ### Click — content script implementation
 

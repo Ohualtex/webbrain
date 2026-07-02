@@ -1,11 +1,9 @@
 /**
  * Service-worker-side recorder orchestration.
  *
- * Two callers share this:
- *   • background.js's runtime.onMessage routes — for the sidepanel's
- *     button-driven flow.
- *   • agent.js's executor — for the prompt-driven `record_tab` /
- *     `stop_recording` tools the agent can call.
+ * Two user-driven flows share this:
+ *   • `/record` — current-tab capture via chrome.tabCapture.
+ *   • `/record-full-screen` — screen/window capture via chrome.desktopCapture.
  *
  * Without this shared module, the two paths would either duplicate the
  * orchestration or have to round-trip messages through each other. Both
@@ -13,9 +11,13 @@
  *
  * Exports
  *   • getRecordingState()        — current state snapshot (read-only)
+ *   • prepareRecordingHost()     — boots the offscreen recorder host before
+ *     Chrome's screen/window picker returns a short-lived stream id.
  *   • startTabRecording(tabId, options) — gets tabCapture streamId,
  *     boots the offscreen recorder, persists state, broadcasts a
  *     `recording_update` event:'started' to sidepanels.
+ *   • startDisplayRecording(streamId, options) — consumes a desktopCapture
+ *     stream id and records it with the same stop/download path.
  *   • stopTabRecording()         — halts the offscreen recorder, saves
  *     the .webm to Downloads, broadcasts event:'stopped', kicks off
  *     transcription if it was requested.
@@ -74,6 +76,15 @@ function broadcast(event, payload = {}) {
       ...payload,
     }).catch(() => {});
   } catch {}
+}
+
+export async function prepareRecordingHost() {
+  try {
+    await ensureOffscreen();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `offscreen setup failed: ${e.message}` };
+  }
 }
 
 // Probe the offscreen recorder for its live state. The return value is a
@@ -198,6 +209,7 @@ export async function startTabRecording(tabId, options = {}) {
       streamId,
       tabId,
       options: {
+        source: 'tab',
         video: options.video !== false,
         mic: options.mic !== false,
         mimeType: options.mimeType || null,
@@ -212,6 +224,7 @@ export async function startTabRecording(tabId, options = {}) {
 
   recordingState = {
     active: true,
+    source: 'tab',
     tabId,
     startedAt: Date.now(),
     mimeType: recResult.mimeType,
@@ -219,6 +232,66 @@ export async function startTabRecording(tabId, options = {}) {
     hasMic: recResult.hasMic,
     micError: recResult.micError || null,
     transcribeAfter: !!options.transcribeAfter,
+    showBanner: options.showBanner !== false,
+  };
+  saveRecordingState();
+  broadcast('started', { state: recordingState });
+
+  return { ok: true, state: recordingState };
+}
+
+export async function startDisplayRecording(streamId, options = {}) {
+  await ensureRecordingStateLoaded();
+  if (recordingState.active) {
+    const cleared = await reconcileStaleRecordingState({ finalizeInactiveSession: true });
+    if (cleared) return startDisplayRecording(streamId, options);
+    return {
+      ok: false,
+      error: `A recording is already in progress on tab ${recordingState.tabId || 'another source'}.`,
+    };
+  }
+  if (!streamId) return { ok: false, error: 'No screen/window stream ID supplied.' };
+
+  try {
+    await ensureOffscreen();
+  } catch (e) {
+    return { ok: false, error: `offscreen setup failed: ${e.message}` };
+  }
+
+  let recResult;
+  try {
+    recResult = await chrome.runtime.sendMessage({
+      type: 'recorder-start',
+      streamId,
+      tabId: options.tabId || null,
+      options: {
+        source: 'display',
+        video: options.video !== false,
+        audio: options.audio !== false,
+        mic: options.mic !== false,
+        mimeType: options.mimeType || null,
+      },
+    });
+  } catch (e) {
+    return { ok: false, error: `recorder-start dispatch failed: ${e.message}` };
+  }
+  if (!recResult?.ok) {
+    return { ok: false, error: recResult?.error || 'recorder failed to start' };
+  }
+
+  recordingState = {
+    active: true,
+    source: 'display',
+    tabId: options.tabId || null,
+    startedAt: Date.now(),
+    mimeType: recResult.mimeType,
+    hasVideo: recResult.hasVideo,
+    hasAudio: recResult.hasAudio,
+    hasMic: recResult.hasMic,
+    micError: recResult.micError || null,
+    captureAudioError: recResult.captureAudioError || null,
+    transcribeAfter: !!options.transcribeAfter,
+    showBanner: options.showBanner === true,
   };
   saveRecordingState();
   broadcast('started', { state: recordingState });

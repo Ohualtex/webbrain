@@ -25,11 +25,7 @@ import {
 } from './pdf-tools.js';
 import * as trace from '../trace/recorder.js';
 import { solveCaptcha, detectCaptcha, injectToken } from './captcha-solver.js';
-import {
-  startTabRecording as recorderStart,
-  stopTabRecording as recorderStop,
-  getRecordingStateFresh as recorderStateFresh,
-} from '../recorder/host.js';
+import { getRecordingStateFresh as recorderStateFresh } from '../recorder/host.js';
 import { Capability, CAPABILITY_LABEL, capabilitiesFor, requiredHosts, frameHostMatches, isNetworkMutation, PermissionManager, UNTRUSTED_CONTENT_TOOLS } from './permission-gate.js';
 import {
   buildPlannerMessages,
@@ -149,11 +145,11 @@ export class Agent {
     // asking the user. The agent reads the key from chrome.storage.local
     // at call time so rotating the key doesn't require a restart.
     this.captchaSolverEnabled = false;
-    // Pre-execution planner (Settings → Plan before Act). Default off; "try"
+    // Pre-execution planner (Settings → Plan before Act). Default "try";
     // attempts a read-only planning LLM call but continues without a pinned
     // plan if planning itself fails. "strict" fails closed.
-    this.planBeforeActMode = 'off';
-    this.planBeforeAct = false; // legacy boolean mirror for older call sites/tests
+    this.planBeforeActMode = 'try';
+    this.planBeforeAct = true; // legacy boolean mirror for older call sites/tests
     this._pendingPlans = new Map(); // tabId → (planId → { resolve, ts })
     // Stale click detection: per-tab last clicked element identity.
     this._lastCdpClickIdent = new Map(); // tabId -> string
@@ -1460,26 +1456,21 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       const rec = await recorderStateFresh();
       const recActive = !!(rec && rec.active);
-      // Did this conversation ever start a recording? Check structured
-      // tool_calls AND text content. Once context compaction runs, the
-      // structured record_tab turn is collapsed into a "- record_tab → ..."
-      // summary line (the tool name survives via toolNameById), so a
-      // tool_calls-only scan would miss long conversations and skip the
-      // correction exactly when stale memory is most likely to mislead.
+      // Did this conversation discuss recording? If so, remind the model that
+      // recording is user-driven through slash commands instead of tools.
       const refersToRecording = (m) => {
-        if (m.role === 'assistant' && Array.isArray(m.tool_calls) &&
-            m.tool_calls.some((tc) => tc?.function?.name === 'record_tab')) return true;
         const c = m.content;
-        if (typeof c === 'string') return c.includes('record_tab');
-        if (Array.isArray(c)) return c.some((b) => typeof b?.text === 'string' && b.text.includes('record_tab'));
+        if (typeof c === 'string') return /\b(record|recording|kaydet|kayıt)\b/i.test(c);
+        if (Array.isArray(c)) return c.some((b) => typeof b?.text === 'string' && /\b(record|recording|kaydet|kayıt)\b/i.test(b.text));
         return false;
       };
       const startedRecording = messages.some(refersToRecording);
       if (recActive) {
         const since = rec.startedAt ? ` (started ${new Date(rec.startedAt).toISOString()})` : '';
-        contextLine += `[Recording status: a tab recording is currently ACTIVE${since}. Call stop_recording to end it; do not start another.]\n\n`;
+        const kind = rec.source === 'display' ? 'screen/window' : 'tab';
+        contextLine += `[Recording status: a ${kind} recording is currently ACTIVE${since}. Recording has no model-callable tools. If the user asks to stop it, tell them to press Escape twice in WebBrain/browser surfaces or use Chrome's Stop sharing control. Do not start another recording.]\n\n`;
       } else if (startedRecording) {
-        contextLine += `[Recording status: no recording is currently active. Any earlier "recording started" in this conversation has since been stopped (for example via the sidebar Stop button). It is safe to start a new recording if the user asks.]\n\n`;
+        contextLine += `[Recording status: no recording is currently active. Recording is user-driven only: tell the user to type /record for current-tab capture or /record-full-screen for screen/window capture.]\n\n`;
       }
     } catch (e) { /* recorder state unavailable — skip the status note */ }
 
@@ -4372,8 +4363,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         }
       } else if (name === 'download_resource_from_page') {
         this._pinDownloadId(tabId, result.downloadId);
-      } else if (name === 'stop_recording') {
-        this._pinDownloadId(tabId, result.downloadId);
       } else if (name === 'download_social_media') {
         const n = Number(result.completedCount || 0);
         if (n > 0) this._autoScratchpadNote(tabId, `[auto] download_social_media saved ${n} file(s) — find their ids/paths via list_downloads.`);
@@ -6877,63 +6866,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } catch (e) {
         return { success: false, error: `solve_captcha failed: ${e.message}` };
       }
-    }
-
-    // ─── Tab Recorder (v7.4) ──────────────────────────────────────────
-    // Prompt-driven counterparts to the sidepanel's button. Both wrap the
-    // shared orchestration in src/recorder/host.js so user-UI and agent-
-    // tool paths can't drift.
-    if (name === 'record_tab') {
-      const opts = {
-        video: args?.video !== false,
-        mic: args?.mic !== false,
-        transcribeAfter: !!args?.transcribe,
-      };
-      const r = await recorderStart(tabId, opts);
-      if (!r.ok) return { success: false, error: r.error };
-      const s = r.state;
-      return {
-        success: true,
-        state: s,
-        microphone: {
-          requested: opts.mic,
-          included: !!s.hasMic,
-          error: s.micError || null,
-        },
-        note: `Recording started at ${new Date(s.startedAt).toISOString()}.` +
-              (s.hasMic ? '' : ' (Microphone unavailable — recording tab audio only.)') +
-              ' Tell the user the red banner at the top of the sidebar shows the live timer and a Stop button; call `stop_recording` when they ask you to stop, or just let them click Stop themselves.',
-      };
-    }
-    if (name === 'stop_recording') {
-      const r = await recorderStop();
-      if (!r.ok) return { success: false, error: r.error };
-      // The stop may not have produced a file. recorderStop() force-clears a
-      // stuck/orphaned recording (service worker suspended, offscreen session
-      // evicted) and reports it with `cleared`, and reports a no-op stop with
-      // `alreadyStopped`. In neither case is there a filename — don't claim a
-      // phantom "saved as undefined".
-      if (r.alreadyStopped) {
-        return { success: true, note: 'No recording was active; nothing to stop.' };
-      }
-      if (r.cleared) {
-        return {
-          success: true,
-          cleared: true,
-          note: `The recording could not be finalized, so no file was saved (${r.warning || 'the recorder was no longer running'}). The stuck recording state has been cleared.`,
-        };
-      }
-      return {
-        success: true,
-        filename: r.filename,
-        downloadId: r.downloadId,
-        sizeBytes: r.sizeBytes,
-        durationMs: r.durationMs,
-        transcribeAfter: r.transcribeAfter,
-        note: r.transcribeAfter
-          ? `Recording saved as ${r.filename}. Whisper transcription is running in the background; the user will see "Transcript saved" in the sidebar when it finishes.`
-          : `Recording saved as ${r.filename}.`,
-      };
     }
 
     // ─── PDF reader ───────────────────────────────────────────────────

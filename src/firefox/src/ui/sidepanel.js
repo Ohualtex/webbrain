@@ -2468,6 +2468,12 @@ async function parseSlashCommands(text, tabId = currentTabId) {
     return '';
   }
 
+  // /record-full-screen — not supported in Firefox
+  if (/^\/record-full-screen(?:\s|$)/i.test(text)) {
+    addMessage('system', systemHtml(tSystemHtml('sp.record.error', { error: 'Full-screen recording is not supported in Firefox.' })));
+    return '';
+  }
+
   // /record — not supported in Firefox
   if (/^\/record(?:\s|$)/i.test(text)) {
     addMessage('system', systemHtml(tSystemHtml('sp.record.error', { error: 'Tab recording is not supported in Firefox.' })));

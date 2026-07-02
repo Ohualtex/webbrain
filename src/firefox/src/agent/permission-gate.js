@@ -30,8 +30,8 @@ export const Capability = {
   DOWNLOAD: 'download',          // download_* tools
   WINDOW: 'window',              // resize_window (changes browser window bounds)
   SCHEDULE: 'schedule',          // schedule_resume / schedule_task persistent future work
-  // NOTE: no UPLOAD / RECORD here — upload_file and record_tab are Chrome-only
-  // (CDP file injection / tabCapture+OffscreenDocument). Firefox's AGENT_TOOLS
+  // NOTE: no UPLOAD here — upload_file is Chrome-only
+  // (CDP file injection). Firefox's AGENT_TOOLS
   // does not implement them, so there is nothing to gate.
 };
 

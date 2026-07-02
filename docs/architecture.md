@@ -124,7 +124,7 @@ _enrichUserMessageWithCurrentPage(tabId, messages, userMessage)
 
 ### Step 4: Plan-before-Act Gate
 
-When `planBeforeAct` is enabled and the run is in Act mode, the agent calls the active provider once before the tool loop with `planner.js`'s structured JSON prompt. The feature is off by default. The planner sees the user task, sanitized URL/title, and a short recent-history digest; page context is wrapped as untrusted data and image blocks are dropped.
+When `planBeforeAct` is enabled and the run is in Act mode, the agent calls the active provider once before the tool loop with `planner.js`'s structured JSON prompt. Unset storage defaults to try mode; explicit off remains off. The planner sees the user task, sanitized URL/title, and a short recent-history digest; page context is wrapped as untrusted data and image blocks are dropped.
 
 If the planner returns valid JSON, the side panel receives `agent_update: plan_review` and renders an editable review card. Approval pins the approved plan into the scratchpad so it survives context compaction. Rejection, timeout, invalid JSON after retry, or user abort stops the run before any browser tools execute. Scheduled runs can set `autoApprovePlanReview` and pin the plan without showing the card.
 
@@ -176,7 +176,6 @@ while (steps < maxSteps) {
 | `done` | agent.js — captures verification screenshot + page state probe | Service worker + CDP |
 | `clarify` | agent.js — pauses for user input | Service worker |
 | `solve_captcha` | captcha-solver.js | Service worker + CapSolver API |
-| `record_tab`, `stop_recording` | recorder/host.js | Service worker + offscreen doc |
 | `read_pdf` | pdf-tools.js | Service worker |
 | `scratchpad_write` | agent.js — in-memory pinned note | Service worker |
 
@@ -254,7 +253,7 @@ Background relays these via `chrome.runtime.sendMessage` to the side panel, whic
 
 ### Plan before Act (`planner.js`)
 
-The optional Act-mode planning gate runs before the first browser tool call when enabled; it is off by default. The planner prompt requires a single JSON object with summary, concrete steps, memory strategy, scheduling hint, risks, and `mode: "act"`. `normalizePlan()` bounds and sanitizes each field; `formatPlanMarkdown()` renders the side-panel review card; `formatPlanScratchpad()` pins the approved or edited plan as an `[Approved plan]` scratchpad entry.
+The optional Act-mode planning gate runs before the first browser tool call when enabled; unset storage defaults to try mode while explicit off remains off. The planner prompt requires a single JSON object with summary, concrete steps, memory strategy, scheduling hint, risks, and `mode: "act"`. `normalizePlan()` bounds and sanitizes each field; `formatPlanMarkdown()` renders the side-panel review card; `formatPlanScratchpad()` pins the approved or edited plan as an `[Approved plan]` scratchpad entry.
 
 Planner calls are traced with `phase: "planner"` when trace recording is enabled. They also use the cost allowance guard, abort checks, a JSON-repair retry, and Qwen/DeepSeek no-think handling before the run is allowed to continue.
 
@@ -398,7 +397,7 @@ MV3 service workers can die between turns. Conversations are persisted to `chrom
 | Shadow DOM piercing | CDP for closed roots | Open roots only |
 | Localhost CORS | Offscreen proxy fallback | Server must set CORS headers |
 | API shortcut observer | `chrome.webRequest` URL/method buffer | `browser.webRequest` URL/method buffer |
-| Tab recording | `chrome.tabCapture` + offscreen | Not available |
+| Slash-driven tab/screen recording | `chrome.tabCapture` / `chrome.desktopCapture` + offscreen | Not available |
 | Side panel | `sidePanel` API (MV3) | `sidebar_action` (MV2) |
 | File upload | CDP-powered | Manual dispatch |
 
@@ -418,9 +417,9 @@ src/
 │       ├── cdp/      # CDP client (Chrome only)
 │       ├── content/  # accessibility-tree.js, content.js, ...
 │       ├── network/  # network-tools.js
-│       ├── offscreen/# Fetch proxy + tab recorder (Chrome only)
+│       ├── offscreen/# Fetch proxy + slash-driven recorder (Chrome only)
 │       ├── providers/# BaseLLMProvider + implementations
-│       ├── recorder/ # Tab recording orchestration
+│       ├── recorder/ # Recording orchestration
 │       ├── trace/    # IndexedDB recorder
 │       └── ui/       # sidepanel, settings, traces, i18n
 ├── firefox/          # Firefox build (MV2)

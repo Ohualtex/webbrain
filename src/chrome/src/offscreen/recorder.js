@@ -64,7 +64,13 @@
     if (session) {
       throw new Error('A recording is already in progress.');
     }
-    const { video = true, mic = true, mimeType: requestedMime } = options || {};
+    const {
+      source = 'tab',
+      video = true,
+      audio = true,
+      mic = true,
+      mimeType: requestedMime,
+    } = options || {};
 
     // Pick a MediaRecorder mimeType the browser actually supports. VP9 is
     // best quality-per-byte; VP8 is the wide-compat fallback. Audio-only
@@ -86,35 +92,46 @@
       throw new Error('No supported MediaRecorder mimeType found.');
     }
 
-    // 1. Tab stream — chrome.tabCapture exposes the active tab as a
+    // 1. Capture stream — chrome.tabCapture exposes the active tab as a
     // MediaStream when we pass the streamId we got from
-    // chrome.tabCapture.getMediaStreamId() on the service-worker side.
+    // chrome.tabCapture.getMediaStreamId() on the service-worker side. For
+    // `/record-full-screen`, chrome.desktopCapture gives us a desktop stream id
+    // that uses chromeMediaSource:'desktop' instead.
     //
     // Note: even if `video:false` was requested, we still pull video from
     // tabCapture and discard the track below — tabCapture's audio path
     // requires you to ask for the full stream, you can't request audio
     // alone via this API.
-    const tabConstraints = {
-      audio: {
+    const chromeMediaSource = source === 'display' ? 'desktop' : 'tab';
+    const captureConstraints = {
+      audio: audio === false ? false : {
         mandatory: {
-          chromeMediaSource: 'tab',
+          chromeMediaSource,
           chromeMediaSourceId: streamId,
         },
       },
       video: {
         mandatory: {
-          chromeMediaSource: 'tab',
+          chromeMediaSource,
           chromeMediaSourceId: streamId,
         },
       },
     };
-    let tabStream;
+    let captureStream;
+    let captureAudioError = null;
     try {
-      tabStream = await navigator.mediaDevices.getUserMedia(tabConstraints);
+      captureStream = await navigator.mediaDevices.getUserMedia(captureConstraints);
     } catch (e) {
-      throw new Error(`Failed to capture tab: ${e.message || e}`);
+      if (source !== 'display' || captureConstraints.audio === false) {
+        throw new Error(`Failed to capture ${source === 'display' ? 'screen/window' : 'tab'}: ${e.message || e}`);
+      }
+      captureAudioError = e.message || String(e);
+      captureStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: captureConstraints.video,
+      });
     }
-    log('tab stream acquired', tabStream.getTracks().map(t => `${t.kind}:${t.label || 'unnamed'}`));
+    log(`${source} stream acquired`, captureStream.getTracks().map(t => `${t.kind}:${t.label || 'unnamed'}`));
 
     // 2. Mic stream — best-effort. If the user has not granted mic
     // permission, fall through with mic disabled instead of failing the
@@ -131,10 +148,9 @@
       }
     }
 
-    // 3. Web Audio mixer. Combine tab audio + mic into one node, AND
-    // re-pipe it to the speaker so the user can still hear the call.
-    // Without the passthrough, tabCapture mutes the tab and the user
-    // can't follow the conversation — a known footgun.
+    // 3. Web Audio mixer. Combine captured audio + mic into one node. For tab
+    // capture, re-pipe captured audio to the speaker so the user can still hear
+    // the call; desktop/window capture does not need that passthrough.
     // Everything from here through the MediaRecorder construction can throw
     // (AudioContext under autoplay policy, createMediaStreamSource, or the
     // MediaRecorder constructor on an unsupported config). `session` isn't set
@@ -147,11 +163,16 @@
       audioContext = new AudioContext();
       const mixDest = audioContext.createMediaStreamDestination();
 
-      const tabAudioSource = audioContext.createMediaStreamSource(
-        new MediaStream(tabStream.getAudioTracks())
-      );
-      tabAudioSource.connect(mixDest);          // into the recording
-      tabAudioSource.connect(audioContext.destination); // out to user's speaker
+      const capturedAudioTracks = captureStream.getAudioTracks();
+      if (capturedAudioTracks.length) {
+        const capturedAudioSource = audioContext.createMediaStreamSource(
+          new MediaStream(capturedAudioTracks)
+        );
+        capturedAudioSource.connect(mixDest); // into the recording
+        if (source === 'tab') {
+          capturedAudioSource.connect(audioContext.destination);
+        }
+      }
 
       if (micStream) {
         const micSource = audioContext.createMediaStreamSource(micStream);
@@ -161,7 +182,7 @@
       // 4. Build the final stream the recorder consumes.
       const finalStream = new MediaStream();
       if (video) {
-        for (const t of tabStream.getVideoTracks()) finalStream.addTrack(t);
+        for (const t of captureStream.getVideoTracks()) finalStream.addTrack(t);
       }
       for (const t of mixDest.stream.getAudioTracks()) finalStream.addTrack(t);
 
@@ -174,7 +195,7 @@
         videoBitsPerSecond: 2_500_000,
       });
     } catch (e) {
-      try { for (const t of tabStream.getTracks()) t.stop(); } catch {}
+      try { for (const t of captureStream.getTracks()) t.stop(); } catch {}
       if (micStream) { try { for (const t of micStream.getTracks()) t.stop(); } catch {} }
       if (audioContext) { try { audioContext.close(); } catch {} }
       throw new Error(`Failed to start recorder: ${e.message || e}`);
@@ -190,13 +211,16 @@
 
     session = {
       tabId,
+      source,
       mimeType: chosenMime,
       hasVideo: video,
+      hasAudio: captureStream.getAudioTracks().length > 0,
       hasMic: !!micStream,
       micError,
+      captureAudioError,
       startedAt: Date.now(),
       recorder,
-      tabStream,
+      captureStream,
       micStream,
       audioContext,
       chunks,
@@ -204,12 +228,12 @@
       get bytes() { return bytes; },
     };
 
-    // Cleanup if the underlying tab stream goes away (tab closed, user
-    // revoked capture, etc.). We can't notify the service worker
+    // Cleanup if the underlying capture stream goes away (tab/window closed,
+    // user revoked capture, etc.). We can't notify the service worker
     // synchronously, but it can poll recorder-state.
-    for (const t of tabStream.getTracks()) {
+    for (const t of captureStream.getTracks()) {
       t.addEventListener('ended', () => {
-        log('tab track ended unexpectedly:', t.kind);
+        log(`${source} track ended unexpectedly:`, t.kind);
         if (session && session.recorder.state !== 'inactive') {
           try { session.recorder.stop(); } catch {}
         }
@@ -217,13 +241,15 @@
     }
 
     recorder.start(2000); // 2s timeslices → ondataavailable every 2s
-    log('recorder started', { mimeType: chosenMime, video, mic: !!micStream });
+    log('recorder started', { source, mimeType: chosenMime, video, mic: !!micStream });
     return {
       ok: true,
       mimeType: chosenMime,
       hasVideo: video,
+      hasAudio: captureStream.getAudioTracks().length > 0,
       hasMic: !!micStream,
       micError,
+      captureAudioError,
     };
   }
 
@@ -233,12 +259,15 @@
       recording: session.recorder.state === 'recording',
       paused: session.recorder.state === 'paused',
       stopping: !!session.stopping,
+      source: session.source,
       tabId: session.tabId,
       startedAt: session.startedAt,
       mimeType: session.mimeType,
       hasVideo: session.hasVideo,
+      hasAudio: session.hasAudio,
       hasMic: session.hasMic,
       micError: session.micError,
+      captureAudioError: session.captureAudioError,
       bytes: session.bytes,
     };
   }
@@ -313,7 +342,7 @@
   }
 
   async function releaseSession(s) {
-    try { for (const t of s.tabStream?.getTracks?.() || []) t.stop(); } catch {}
+    try { for (const t of s.captureStream?.getTracks?.() || []) t.stop(); } catch {}
     try { for (const t of s.micStream?.getTracks?.() || []) t.stop(); } catch {}
     try {
       if (s.audioContext && s.audioContext.state !== 'closed') await s.audioContext.close();

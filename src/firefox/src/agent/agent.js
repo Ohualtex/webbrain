@@ -113,11 +113,11 @@ export class Agent {
     // model to try `solve_captcha` once before falling back to asking
     // the user. The API key is read at call time from browser.storage.
     this.captchaSolverEnabled = false;
-    // Pre-execution planner (Settings → Plan before Act). Default off; "try"
+    // Pre-execution planner (Settings → Plan before Act). Default "try";
     // attempts a read-only planning LLM call but continues without a pinned
     // plan if planning itself fails. "strict" fails closed.
-    this.planBeforeActMode = 'off';
-    this.planBeforeAct = false; // legacy boolean mirror for older call sites/tests
+    this.planBeforeActMode = 'try';
+    this.planBeforeAct = true; // legacy boolean mirror for older call sites/tests
     this._pendingPlans = new Map();
     // Strict secret-handling mode — see chrome/agent.js for rationale.
     // Default off; user opts in via Settings → "Strict secret handling".
@@ -3604,7 +3604,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * core download tools and download skill tools are covered uniformly, and so
    * social media — which exposes no per-file id — degrades to a list_downloads
    * pointer instead of an invented id.
-   * Best-effort. (Tab recording is Chrome-only, so no stop_recording branch.)
+   * Best-effort.
    */
   _pinDownloadHandles(tabId, name, result) {
     try {

@@ -190,7 +190,6 @@ web/
 | `list_downloads` | 是 | 是 | -- | 列出最近的下载，含状态与来源 URL |
 | `read_downloaded_file` | -- | 是 | -- | 重新获取已下载文件的内容（文本或 base64） |
 | `iframe_read` / `iframe_click` / `iframe_type` | -- | 是 | -- | 读取/点击/输入跨域 iframe 内部 |
-| `record_tab` / `stop_recording` | -- | 是 | -- | 将标签页视频+音频录制为 .webm，可选 Whisper 转写（仅 Chrome） |
 | `scratchpad_write` | 是 | 是 | 是 | 在上下文中固定一条在汇总后仍保留的笔记 |
 | `clarify` | 是 | 是 | 是 | 暂停并向用户提问 |
 | `verify_form` | -- | 是 | -- | 提交前验证表单字段 |
@@ -233,6 +232,7 @@ WebBrain 接受作为输入框某行开头的斜杠命令。在面板内输入 `
 | `/reset` | 清除对话与所有按对话的标志 |
 | `/screenshot` | 捕获可见标签页并在聊天中内联显示图像 |
 | `/record` | 开始录制当前标签页 |
+| `/record-full-screen` | 录制屏幕或窗口（仅 Chrome） |
 | `/export` | 将当前对话下载为 Markdown 文件 |
 | `/profile` | 无需打开设置即可切换资料自动填充开/关 |
 | `/vision` | 在当前提供商上切换视觉模式（截图理解） |
@@ -251,6 +251,7 @@ Chrome 侧边面板快捷键在 WebBrain 侧边面板获得焦点时生效。
 | `Ctrl+Shift+A` 或 `Cmd+Shift+A` | 切换到 Ask 模式 |
 | `Ctrl+Shift+X` 或 `Cmd+Shift+X` | 切换到 Act 模式 |
 | `Escape` | 停止当前运行，除非它只是关闭斜杠命令自动补全 |
+| `Escape` 两次 | 从 WebBrain 或浏览器页面停止当前录制 |
 
 ## 已知问题
 

@@ -22,7 +22,9 @@ import { buildContextMenuPrompt, createContextMenuStorage } from './context-menu
 // (ensureOffscreen + transcribeAudio used to be imported here; both are
 // now consumed inside src/recorder/host.js, which background.js calls into.)
 import {
+  prepareRecordingHost,
   startTabRecording,
+  startDisplayRecording,
   stopTabRecording,
   getRecordingStateFresh,
   setProviderManager as setRecorderProviderManager,
@@ -232,7 +234,7 @@ function normalizePlanBeforeActMode(stored = {}) {
   }
   if (stored.planBeforeAct === true) return 'strict';
   if (stored.planBeforeAct === false) return 'off';
-  return 'off';
+  return 'try';
 }
 
 function applyPlanBeforeActMode(mode) {
@@ -910,6 +912,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleMessage(msg, sender) {
+  if (msg.action === 'prepare_recording_host') {
+    return await prepareRecordingHost();
+  }
+  if (msg.action === 'start_tab_recording') {
+    const tabId = msg.tabId || sender.tab?.id;
+    return await startTabRecording(tabId, msg.options || {});
+  }
+  if (msg.action === 'start_display_recording') {
+    return await startDisplayRecording(msg.streamId, {
+      ...(msg.options || {}),
+      tabId: msg.tabId || sender.tab?.id || null,
+    });
+  }
+  if (msg.action === 'stop_tab_recording') {
+    return await stopTabRecording();
+  }
+  if (msg.action === 'get_recording_state') {
+    return { ok: true, state: await getRecordingStateFresh() };
+  }
+
   // Ensure providers are loaded
   if (providerManager.providers.size === 0) {
     await providerManager.load();
@@ -1236,21 +1258,6 @@ async function handleMessage(msg, sender) {
         return { ok: false, error: e.message };
       }
     }
-    // ── Tab Recorder routes (v7.4) ────────────────────────────────
-    // Thin wrappers around src/recorder/host.js. Same module is also
-    // imported by agent.js so the prompt-driven `record_tab` and
-    // `stop_recording` tools share the exact same orchestration.
-    case 'start_tab_recording': {
-      const tabId = msg.tabId || sender.tab?.id;
-      return await startTabRecording(tabId, msg.options || {});
-    }
-    case 'stop_tab_recording': {
-      return await stopTabRecording();
-    }
-    case 'get_recording_state': {
-      return { ok: true, state: await getRecordingStateFresh() };
-    }
-
     case 'capture_full_page_screenshot': {
       const tabId = msg.tabId || sender.tab?.id;
       return await agent.captureFullPageScreenshotForUser(tabId);

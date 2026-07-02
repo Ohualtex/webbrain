@@ -163,7 +163,7 @@ Firefox has no CDP (`debugger` permission), so:
 - No full-page screenshots
 - No shadow DOM piercing for closed roots
 - No offscreen document (CORS must be handled by LLM servers)
-- No tab recording (`record_tab` — Chrome's `recorder/` is absent)
+- No slash-driven tab/screen recording (Chrome's capture APIs and `recorder/` are absent)
 - No duplicate-submit guard (the timestamp Map is declared but unwired)
 
 Everything else — the permission gate, untrusted-content wrapping, credential

@@ -855,7 +855,7 @@ export const ASK_ONLY_TOOLS = [
  * tool calls extracted from raw LLM output.
  */
 export const AGENT_TOOL_NAMES = new Set(AGENT_TOOLS.map(t => t.function.name));
-export const RETIRED_AGENT_TOOL_NAMES = new Set(['screenshot', 'full_page_screenshot']);
+export const RETIRED_AGENT_TOOL_NAMES = new Set(['screenshot', 'full_page_screenshot', 'record_tab', 'stop_recording']);
 export const RESERVED_AGENT_TOOL_NAMES = new Set([...AGENT_TOOL_NAMES, ...RETIRED_AGENT_TOOL_NAMES]);
 
 /**
@@ -980,6 +980,7 @@ RULES:
 11. You cannot schedule, sleep, set timers, or check back later in compact mode. If something must wait for an external event, call done({summary:"..."}) with the current state and ask the user to re-invoke you.
 12. When the task is complete, call done({summary:"..."}). Verify success first.
 13. If the user wants a page image inserted into chat, tell them to type \`/screenshot\` for the visible viewport.
+14. Recording is not supported in the Firefox build. Do not call or invent recording tools.
 
 TOOLS - use only these:
 - get_accessibility_tree: Read the page. Returns roles, names, and ref_ids. Use filter:"visible" by default.
@@ -1029,6 +1030,9 @@ You can read and analyze the current web page, but you CANNOT click, type, navig
 
 CHAT IMAGES:
 - If the user wants a page image inserted into chat, tell them to type \`/screenshot\` for the visible viewport.
+
+RECORDING:
+- Recording is not supported in the Firefox build. Do not call or invent recording tools.
 
 Available tools:
 - read_page: Read the current page content (title, URL, text, links, forms)
@@ -1122,6 +1126,9 @@ Available tools:
 CHAT IMAGES:
 - If the user wants a page image inserted into chat, tell them to type \`/screenshot\` for the visible viewport.
 
+RECORDING:
+- Recording is not supported in the Firefox build. Do not call or invent recording tools.
+
 SHADOW DOM FALLBACK: If the accessibility tree is missing expected form fields or buttons (common on Stripe, Salesforce, Shopify, and other Web Component-heavy pages), the page likely uses shadow DOM. Try \`get_interactive_elements\` which pierces open shadow roots, or \`get_shadow_dom\` for targeted reads. Do not keep re-reading the tree — those elements will never appear in it.
 
 IMPORTANT — Current Page Priority:
@@ -1155,7 +1162,7 @@ SCRATCHPAD — use this for long tasks:
   (b) Whenever you finalize a plan — "Plan: (1) download all pages (DONE), (2) read each, (3) regex <tr> rows, (4) emit CSV."
   (c) When you finish a chunk of iterative work — "Processed pages 1-10. Next: 11."
   (d) When you discover a non-obvious fact you'll need later — "API endpoint /api/investors 404s, use HTML scrape."
-  (e) Downloads are pinned for you AUTOMATICALLY: every \`download_files\`, \`download_resource_from_page\`, \`stop_recording\`, \`download_social_media\`, and download skill success appends a \`[auto] Downloaded … (downloadId N)\` line to this pad. You do NOT pin them by hand. The note carries the downloadId, not the full path — that's deliberate: to re-read it pass \`read_downloaded_file({downloadId: N})\`. Never re-type a path from memory, and never re-download to "get the path back" — scan the \`[auto]\` lines for the id.
+  (e) Downloads are pinned for you AUTOMATICALLY: every \`download_files\`, \`download_resource_from_page\`, \`download_social_media\`, and download skill success appends a \`[auto] Downloaded … (downloadId N)\` line to this pad. You do NOT pin them by hand. The note carries the downloadId, not the full path — that's deliberate: to re-read it pass \`read_downloaded_file({downloadId: N})\`. Never re-type a path from memory, and never re-download to "get the path back" — scan the \`[auto]\` lines for the id.
 - Keep entries SHORT and FACTUAL. One line per fact. The pad is visible on every future turn — scan it before picking your next action, especially if you're about to restart something.
 - Don't use the scratchpad for short tasks (< 5 tool calls) or for prose reasoning. It's working memory, not a journal.
 
@@ -1268,7 +1275,7 @@ LISTINGS & PAGINATION — read this:
  * the common cases).
  *
  * NOTE: this is the Firefox build, whose AGENT_TOOLS does NOT implement
- * upload_file, record_tab, or stop_recording (Chrome-only). They are
+ * upload_file or other Chrome-only recording/CDP affordances. They are
  * deliberately absent here so mid neither advertises nor steers toward tools
  * Firefox can't execute. Keep this list in sync with AGENT_TOOLS, not with the
  * Chrome mid set.
@@ -1324,6 +1331,9 @@ TOOLS — use only these:
 
 CHAT IMAGES:
 - If the user wants a page image inserted into chat, tell them to type \`/screenshot\` for the visible viewport.
+
+RECORDING:
+- Recording is not supported in the Firefox build. Do not call or invent recording tools.
 
 DEFAULT LOOP:
 1. get_accessibility_tree({filter:"visible"}) — see what's on screen; note the ref_ids you need.

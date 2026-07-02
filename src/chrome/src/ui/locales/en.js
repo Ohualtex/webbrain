@@ -13,6 +13,7 @@ export default {
   'sp.record.banner_label': 'Recording',
   'sp.record.error': 'Recording error: {error}',
   'sp.record.mic_unavailable': 'Microphone unavailable: {error}. Recording started with tab audio and video only.',
+  'sp.record.full_screen_started_html': 'Screen/window recording started. Press <code>Escape</code> twice in WebBrain or a browser page to stop, or use Chrome\'s Stop sharing control.',
   'sp.record.saved': 'Saved {filename} to Downloads.',
   'sp.record.transcribing': 'Transcribing audio with Whisper…',
   'sp.record.transcribed': 'Transcript saved: {filename}',
@@ -71,6 +72,7 @@ export default {
   'sp.slash.reset': 'Clear this conversation',
   'sp.slash.screenshot': 'Capture the current tab',
   'sp.slash.full_page_screenshot': 'Capture the full page',
+  'sp.slash.record_full_screen': 'Record a screen or window',
   'sp.slash.record': 'Start recording the current tab',
   'sp.slash.export': 'Download this conversation as Markdown',
   'sp.slash.profile': 'Toggle profile auto-fill',
@@ -184,7 +186,6 @@ export default {
   'sp.perm.verb.network_write': 'make a network request to',
   'sp.perm.verb.download': 'download files from',
   'sp.perm.verb.upload': 'upload a file to',
-  'sp.perm.verb.record': 'record the tab (and microphone) on',
   'sp.perm.verb.schedule': 'schedule future work for',
 
   'sp.step.details': 'details',
@@ -194,7 +195,7 @@ export default {
   'sp.api.enabled_html': '🔓 <strong>API mutations enabled</strong> for this conversation. The agent may now use POST/PUT/PATCH/DELETE via fetch_url and execute_js when it judges API to be more reliable than UI for a step. UI-first remains the default. This flag clears when you reset the conversation.',
   'sp.api.badge_html': '<span>🔓 API mutations allowed</span>',
 
-  'sp.help_html': '<strong>Slash Commands</strong><br><code>/help</code> — Show this list<br><code>/schedule</code> — Create a scheduled task<br><code>/list-schedules</code> — Show scheduled tasks<br><code>/show-scratchpad</code> — Show current scratchpad<br><code>/edit-scratchpad &lt;text&gt;</code> — Append text to the current scratchpad<br><code>/clear-scratchpad</code> — Clear the current scratchpad<br><code>/allow-api</code> — Allow API mutations for this conversation<br><code>/compact</code> — Compact this conversation context<br><code>/verbose</code> — Toggle verbose/compact tool display<br><code>/reset</code> — Clear conversation<br><code>/screenshot</code> — Capture current tab<br><code>/full-page-screenshot</code> — Capture the full page (Chrome only)<br><code>/record</code> — Start recording the current tab<br><code>/export</code> — Download conversation as Markdown<br><code>/profile</code> — Toggle profile auto-fill<br><code>/vision</code> — Toggle vision mode on active provider<br><br><strong>Keyboard Shortcuts</strong><br><code>Ctrl/Cmd+/</code> — Focus the input<br><code>Ctrl/Cmd+Shift+A</code> — Switch to Ask mode<br><code>Ctrl/Cmd+Shift+X</code> — Switch to Act mode<br><code>Escape</code> — Stop the active run',
+  'sp.help_html': '<strong>Slash Commands</strong><br><code>/help</code> — Show this list<br><code>/schedule</code> — Create a scheduled task<br><code>/list-schedules</code> — Show scheduled tasks<br><code>/show-scratchpad</code> — Show current scratchpad<br><code>/edit-scratchpad &lt;text&gt;</code> — Append text to the current scratchpad<br><code>/clear-scratchpad</code> — Clear the current scratchpad<br><code>/allow-api</code> — Allow API mutations for this conversation<br><code>/compact</code> — Compact this conversation context<br><code>/verbose</code> — Toggle verbose/compact tool display<br><code>/reset</code> — Clear conversation<br><code>/screenshot</code> — Capture current tab<br><code>/full-page-screenshot</code> — Capture the full page (Chrome only)<br><code>/record</code> — Start recording the current tab<br><code>/record-full-screen</code> — Record a screen or window (Chrome only)<br><code>/export</code> — Download conversation as Markdown<br><code>/profile</code> — Toggle profile auto-fill<br><code>/vision</code> — Toggle vision mode on active provider<br><br><strong>Keyboard Shortcuts</strong><br><code>Ctrl/Cmd+/</code> — Focus the input<br><code>Ctrl/Cmd+Shift+A</code> — Switch to Ask mode<br><code>Ctrl/Cmd+Shift+X</code> — Switch to Act mode<br><code>Escape</code> — Stop the active run<br><code>Escape</code> twice — Stop an active recording',
   'sp.slash.busy_only_oob': 'Messages are queued while WebBrain is busy. Only /help, /show-scratchpad, /list-schedules, /screenshot, /export, and /verbose can run immediately as slash commands.',
   'sp.compact.nothing_to_compact': 'Nothing to compact yet — there is not enough older context.',
   'sp.compact.busy': 'Cannot compact while a run is in progress — wait for it to finish.',

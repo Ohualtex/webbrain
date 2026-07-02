@@ -19,7 +19,7 @@ import {
 
 // Version shown in the subtitle. Kept here so it only needs one update per
 // release; the subtitle string itself is translated.
-const EXT_VERSION = '19.3.2';
+const EXT_VERSION = '20.0.0';
 
 const providersContainer = document.getElementById('providers');
 const displaySettings = document.getElementById('display-settings');
@@ -223,7 +223,7 @@ function normalizePlanBeforeActMode(stored = {}) {
   if (PLAN_BEFORE_ACT_MODES.has(stored.planBeforeActMode)) return stored.planBeforeActMode;
   if (stored.planBeforeAct === true) return 'strict';
   if (stored.planBeforeAct === false) return 'off';
-  return 'off';
+  return 'try';
 }
 
 function normalizeCostAmount(value, fallback = DEFAULT_COST_ALLOWANCE_USD) {
