@@ -238,8 +238,14 @@
       audioContext,
       chunks,
       stopping: false,
+      stopPromise: null,
+      stopEventObserved: false,
       get bytes() { return bytes; },
     };
+    const activeSession = session;
+    recorder.addEventListener('stop', () => {
+      activeSession.stopEventObserved = true;
+    });
 
     // Cleanup if the underlying capture stream goes away (tab/window closed,
     // user revoked capture, Chrome's Stop sharing control, etc.). We can't
@@ -250,12 +256,8 @@
         if (!s || s.captureEndedCleanupStarted) return;
         s.captureEndedCleanupStarted = true;
         log(`${source} track ended unexpectedly:`, t.kind);
-        if (s.recorder.state !== 'inactive') {
-          try { s.recorder.stop(); } catch {}
-        }
-        notifyCaptureEnded(s);
-        releaseSession(s).catch((e) => {
-          log('capture-ended cleanup failed:', e?.message || e);
+        finalizeCaptureEnded(s).catch((e) => {
+          log('capture-ended finalize failed:', e?.message || e);
         });
       });
     }
@@ -335,13 +337,16 @@
   }
 
   function waitForRecorderStop(s) {
-    if (!s?.recorder || s.recorder.state === 'inactive') return Promise.resolve();
-    return new Promise((resolve) => {
+    if (!s?.recorder) return Promise.resolve();
+    if (s.stopPromise) return s.stopPromise;
+    if (s.recorder.state === 'inactive' && s.stopEventObserved) return Promise.resolve();
+    s.stopPromise = new Promise((resolve) => {
       let done = false;
       let timeout = null;
       const finish = () => {
         if (done) return;
         done = true;
+        s.stopEventObserved = true;
         if (timeout) clearTimeout(timeout);
         try { s.recorder.removeEventListener('stop', finish); } catch {}
         resolve();
@@ -359,6 +364,7 @@
         finish();
       }
     });
+    return s.stopPromise;
   }
 
   async function releaseSession(s) {
@@ -388,6 +394,13 @@
     } catch (e) {
       log('capture-ended finalize notify failed:', e?.message || e);
     }
+  }
+
+  async function finalizeCaptureEnded(s) {
+    s.stopping = true;
+    await waitForRecorderStop(s);
+    notifyCaptureEnded(s);
+    await releaseSession(s);
   }
 
   // ─── runtime.onMessage router ─────────────────────────────────────
