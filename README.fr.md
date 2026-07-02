@@ -232,7 +232,7 @@ WebBrain accepte les commandes slash en tant que premier élément d'une ligne d
 | `/reset` | Efface la conversation et tous les indicateurs par conversation |
 | `/screenshot` | Capture l'onglet visible et affiche l'image en ligne dans le chat |
 | `/record` | Démarrer l'enregistrement de l'onglet actuel |
-| `/record-full-screen` | Enregistrer un écran ou une fenêtre (Chrome uniquement) |
+| `/record-full-screen` | Enregistrer un écran ou une fenêtre (Chrome uniquement); ajoutez `--transcribe` pour un transcript |
 | `/export` | Télécharge la conversation actuelle sous forme de fichier Markdown |
 | `/profile` | Bascule le remplissage automatique du profil sans ouvrir les Paramètres |
 | `/vision` | Bascule le mode vision (compréhension de captures d'écran) sur le fournisseur actif |

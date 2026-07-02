@@ -2533,17 +2533,25 @@ async function parseSlashCommands(text, tabId = currentTabId) {
   }
 
   // /record-full-screen — start a screen/window recording without LLM involvement
-  if (/^\/record-full-screen(?:\s|$)/i.test(text)) {
-    await startFullScreenRecording(tabId);
+  const mRecordFullScreen = text.match(/^\/record-full-screen(?:\s|$)/i);
+  if (mRecordFullScreen) {
+    await startFullScreenRecording(tabId, parseRecordingSlashOptions(text, mRecordFullScreen));
     return '';
   }
 
   // /record — start recording the current tab without LLM involvement
-  if (/^\/record(?:\s|$)/i.test(text)) {
+  const mRecord = text.match(/^\/record(?:\s|$)/i);
+  if (mRecord) {
+    const recordOptions = parseRecordingSlashOptions(text, mRecord);
     try {
       const res = await sendToBackground('start_tab_recording', {
         tabId,
-        options: { video: true, mic: true, showBanner: true },
+        options: {
+          video: true,
+          mic: true,
+          showBanner: true,
+          transcribeAfter: recordOptions.transcribeAfter,
+        },
       });
       if (currentTabId !== tabId) return '';
       if (!res?.ok) {
@@ -2644,44 +2652,28 @@ async function parseSlashCommands(text, tabId = currentTabId) {
   return text;
 }
 
-function chooseDesktopMediaForRecording() {
-  return new Promise((resolve, reject) => {
-    if (!chrome.desktopCapture?.chooseDesktopMedia) {
-      reject(new Error('Full-screen recording requires Chrome desktopCapture support.'));
-      return;
-    }
-    chrome.desktopCapture.chooseDesktopMedia(['screen', 'window', 'audio'], (streamId, options) => {
-      const err = chrome.runtime.lastError;
-      if (err) {
-        reject(new Error(err.message));
-        return;
-      }
-      if (!streamId) {
-        resolve(null);
-        return;
-      }
-      resolve({ streamId, options: options || {} });
-    });
-  });
+function parseRecordingSlashOptions(text, commandMatch) {
+  const args = text.slice(commandMatch?.[0]?.length || 0);
+  return {
+    transcribeAfter: /(?:^|\s)--transcribe(?:\s|$)/i.test(args),
+  };
 }
 
-async function startFullScreenRecording(tabId = currentTabId) {
+async function startFullScreenRecording(tabId = currentTabId, recordOptions = {}) {
   try {
     const prep = await sendToBackground('prepare_recording_host');
     if (!prep?.ok) {
       addMessage('system', systemHtml(tSystemHtml('sp.record.error', { error: prep?.error || 'unknown' })));
       return;
     }
-    const selected = await chooseDesktopMediaForRecording();
-    if (!selected?.streamId) return;
     const res = await sendToBackground('start_display_recording', {
       tabId,
-      streamId: selected.streamId,
       options: {
         video: true,
         audio: true,
         mic: true,
         showBanner: false,
+        transcribeAfter: !!recordOptions.transcribeAfter,
       },
     });
     if (currentTabId !== tabId) return;
@@ -2879,7 +2871,7 @@ async function sendMessage(extraChatParams) {
 // State: idle ↔ recording. Slash commands flip the panel into recording mode
 // via background broadcasts. `/record` shows the banner Stop button;
 // `/record-full-screen` stays visually quiet and relies on double Escape or
-// Chrome's Stop sharing control. The watchdog timer is driven off
+// Chrome's Stop sharing control. The visible banner timer is driven off
 // recordingState.startedAt (received from background), so it survives remount.
 
 let recordingTimerInterval = null;
@@ -2887,13 +2879,7 @@ let recordingStartedAt = null;
 let recordingActive = false;
 let recordingShowsBanner = false;
 let recordingEscapeArmedUntil = 0;
-// Safety cap: auto-stop a recording that has run this long, so a forgotten or
-// orphaned recording can't tick on forever (and pile up memory in the
-// offscreen recorder). Enforced from the 1s recording watchdog below, even
-// when `/record-full-screen` hides the live banner.
-const MAX_RECORDING_MS = 2 * 60 * 60 * 1000; // 2 hours
 const RECORDING_DOUBLE_ESCAPE_MS = 1400;
-let recordingAutoStopTriggered = false;
 
 function formatRecordTimer(ms) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -2903,7 +2889,7 @@ function formatRecordTimer(ms) {
 }
 
 function shouldShowRecordingBanner(state) {
-  return state?.showBanner !== false && state?.source !== 'display';
+  return state?.showBanner !== false;
 }
 
 function setRecordingUI(active, state = null) {
@@ -2912,18 +2898,12 @@ function setRecordingUI(active, state = null) {
   recordingEscapeArmedUntil = 0;
   if (recordingBanner) recordingBanner.classList.toggle('hidden', !recordingShowsBanner);
   if (active) {
-    recordingAutoStopTriggered = false;
     if (!recordingTimerInterval) {
       recordingTimerInterval = setInterval(() => {
         if (recordingStartedAt) {
           const elapsed = Date.now() - recordingStartedAt;
           if (recordingShowsBanner && recordingTimerEl) {
             recordingTimerEl.textContent = formatRecordTimer(elapsed);
-          }
-          if (elapsed >= MAX_RECORDING_MS && !recordingAutoStopTriggered) {
-            // Hit the safety cap — stop the runaway recording.
-            recordingAutoStopTriggered = true;
-            stopRecording();
           }
         }
       }, 1000);
@@ -2940,7 +2920,6 @@ function setRecordingUI(active, state = null) {
     }
     if (recordingTimerEl) recordingTimerEl.textContent = '00:00';
     recordingStartedAt = null;
-    recordingAutoStopTriggered = false;
     recordingActive = false;
     recordingShowsBanner = false;
     recordingEscapeArmedUntil = 0;
@@ -4237,7 +4216,7 @@ function sendToBackground(action, data = {}) {
 // --- Keyboard shortcuts ---
 
 function handleRecordingEscapeKey(e) {
-  if (e.key !== 'Escape' || !recordingActive) return false;
+  if (e.key !== 'Escape' || !recordingActive || !e.isTrusted) return false;
   e.preventDefault();
   e.stopPropagation();
   const now = Date.now();
@@ -4253,11 +4232,23 @@ function handleRecordingEscapeKey(e) {
 async function handleGlobalKeydown(e) {
   if (e.defaultPrevented) return;
 
-  if (handleRecordingEscapeKey(e)) return;
-
   // Don't steal shortcuts from other input elements (e.g. schedule form fields)
   const tag = e.target?.tagName;
-  if (e.target !== inputEl && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT')) return;
+  const isOtherFormField = e.target !== inputEl && (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT');
+
+  if (e.key === 'Escape') {
+    const slashMenuOpen = !!slashCommandMenuEl && !slashCommandMenuEl.classList.contains('hidden');
+    if (slashMenuOpen) return;
+    if (isProcessing) {
+      e.preventDefault();
+      abortRun();
+      return;
+    }
+    if (isOtherFormField) return;
+    if (handleRecordingEscapeKey(e)) return;
+  }
+
+  if (isOtherFormField) return;
 
   const mod = e.ctrlKey || e.metaKey;
 
@@ -4279,12 +4270,6 @@ async function handleGlobalKeydown(e) {
     e.preventDefault();
     await ensureActMode();
     return;
-  }
-  // Escape: abort running agent (only when slash menu is not open)
-  if (e.key === 'Escape' && isProcessing &&
-      slashCommandMenuEl?.classList.contains('hidden')) {
-    e.preventDefault();
-    abortRun();
   }
 }
 

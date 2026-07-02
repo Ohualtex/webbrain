@@ -158,12 +158,13 @@ content instead of trusted instructions.
 
 Recording is user-driven from slash commands, not model-callable tools. `/record`
 captures the active tab's video + audio + (optionally) microphone into a single
-webm file and shows the red side-panel banner/timer. `/record-full-screen` uses
-Chrome's screen/window picker through `desktopCapture`, records without showing
-the WebBrain recording banner, and can be stopped by double Escape on WebBrain
-or browser pages. Chrome's picker decides what can be captured: the user must
-choose the browser window or whole screen if they want the WebBrain panel in the
-video.
+webm file and shows the red side-panel banner/timer. Add `--transcribe` to
+`/record` or `/record-full-screen` to run Whisper transcription after stop.
+`/record-full-screen` opens Chrome's screen/window picker from the offscreen
+recorder context through `desktopCapture`, records without showing the WebBrain
+recording banner, and can be stopped by double Escape on WebBrain or browser
+pages. Chrome's picker decides what can be captured: the user must choose the
+browser window or whole screen if they want the WebBrain panel in the video.
 
 ### Flow
 
@@ -176,14 +177,15 @@ background.js
       └─ offscreen recorder-start {source:'tab', streamId, options}
 
 sidepanel.js  [/record-full-screen]
-      │ prepare_recording_host → chrome.desktopCapture.chooseDesktopMedia()
-      │ runtime.sendMessage {action:'start_display_recording', streamId, options}
+      │ prepare_recording_host
+      │ runtime.sendMessage {action:'start_display_recording', options}
       ▼
 background.js
-      └─ offscreen recorder-start {source:'display', streamId, options}
+      └─ offscreen recorder-start {source:'display', options}
                       │
                       ▼
 offscreen/recorder.js
+      ├─ chrome.desktopCapture.chooseDesktopMedia(['screen','window','audio'])
       ├─ navigator.mediaDevices.getUserMedia(chromeMediaSource:'tab'|'desktop', streamId)
       ├─ navigator.mediaDevices.getUserMedia({audio:true})       (mic, best-effort)
       ├─ AudioContext:
@@ -209,6 +211,10 @@ sidepanel listens for recording_update broadcast events:
    transcribing   → "Transcribing audio with Whisper…"
    transcribed    → "Transcript saved" + Summarize button (Phase 3)
 ```
+
+The 2-hour safety cap lives in `recorder/host.js` as a service-worker timeout
+plus a `chrome.alarms` watchdog, so hidden display recordings remain bounded
+after the side panel closes.
 
 ### Audio passthrough — the gotcha
 

@@ -7,11 +7,12 @@ This changelog was generated from the repository Git history and release tags. V
 ## [20.0.0] - 2026-07-03
 
 ### Added
-- Added Chrome-only `/record-full-screen` as a slash-only screen/window recording flow that uses Chrome's picker and records without the live WebBrain recording banner.
-- Added double-Escape recording stop handling on Chrome WebBrain/browser surfaces, with hidden recordings still covered by the 2-hour safety cap.
+- Added Chrome-only `/record-full-screen` as a slash-only screen/window recording flow that uses Chrome's picker from the offscreen recorder context and records without the live WebBrain recording banner.
+- Added double-Escape recording stop handling on Chrome WebBrain/browser surfaces, with hidden recordings covered by a background-owned 2-hour safety cap.
+- Added `--transcribe` for `/record` and `/record-full-screen` so user-driven recordings can still save a Whisper transcript after stop.
 
 ### Changed
-- Removed model-callable `record_tab` and `stop_recording`; recording is now user-driven through `/record`, `/record-full-screen`, browser stop controls, or double Escape.
+- Removed model-callable `record_tab` and `stop_recording`; recording is now user-driven through `/record`, `/record-full-screen`, optional `--transcribe`, browser stop controls, or double Escape.
 - Reserved retired recording tool names in Chrome and Firefox so custom skills cannot reintroduce them, and updated agent prompts to point users to slash commands instead of tools.
 - Changed Plan before Act to default unset storage to `try` while preserving explicit `off`.
 - Updated release metadata, Settings subtitle versions, Chrome / Firefox manifests, package versions, and browser architecture docs for 20.0.0.

@@ -912,36 +912,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 async function handleMessage(msg, sender) {
-  if (msg.action === 'prepare_recording_host') {
-    return await prepareRecordingHost();
+  const lightweightAction = msg.action === 'get_recording_state';
+  if (!lightweightAction) {
+    // Ensure providers are loaded
+    if (providerManager.providers.size === 0) {
+      await providerManager.load();
+    }
+    // Agent toggles and prompt add-ons hydrate once at SW boot — await those
+    // promises so the first chat can't race ahead of hydration, without a
+    // storage round-trip on every message.
+    await Promise.all([planBeforeActReady, customSkillsReady]);
   }
-  if (msg.action === 'start_tab_recording') {
-    const tabId = msg.tabId || sender.tab?.id;
-    return await startTabRecording(tabId, msg.options || {});
-  }
-  if (msg.action === 'start_display_recording') {
-    return await startDisplayRecording(msg.streamId, {
-      ...(msg.options || {}),
-      tabId: msg.tabId || sender.tab?.id || null,
-    });
-  }
-  if (msg.action === 'stop_tab_recording') {
-    return await stopTabRecording();
-  }
-  if (msg.action === 'get_recording_state') {
-    return { ok: true, state: await getRecordingStateFresh() };
-  }
-
-  // Ensure providers are loaded
-  if (providerManager.providers.size === 0) {
-    await providerManager.load();
-  }
-  // Agent toggles and prompt add-ons hydrate once at SW boot — await those
-  // promises so the first chat can't race ahead of hydration, without a
-  // storage round-trip on every message.
-  await Promise.all([planBeforeActReady, customSkillsReady]);
 
   switch (msg.action) {
+    case 'prepare_recording_host':
+      return await prepareRecordingHost();
+    case 'start_tab_recording': {
+      const tabId = msg.tabId || sender.tab?.id;
+      return await startTabRecording(tabId, msg.options || {});
+    }
+    case 'start_display_recording': {
+      return await startDisplayRecording({
+        ...(msg.options || {}),
+        streamId: msg.streamId || null,
+        tabId: msg.tabId || sender.tab?.id || null,
+      });
+    }
+    case 'stop_tab_recording':
+      return await stopTabRecording();
+    case 'get_recording_state':
+      return { ok: true, state: await getRecordingStateFresh() };
+
     // --- Chat / Agent ---
     case 'chat': {
       const tabId = msg.tabId || sender.tab?.id;

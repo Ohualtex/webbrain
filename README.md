@@ -264,8 +264,8 @@ WebBrain accepts slash commands as the first thing on a line in the input box. T
 | `/reset` | Clear the conversation and all per-conversation flags |
 | `/screenshot` | Capture the visible tab and display the image inline in chat |
 | `/full-page-screenshot` | Capture the full scrollable page and display it inline in chat (Chrome only) |
-| `/record` | Start recording the current tab |
-| `/record-full-screen` | Record a screen or window with Chrome's picker (Chrome only) |
+| `/record` | Start recording the current tab; add `--transcribe` to save a Whisper transcript after stop |
+| `/record-full-screen` | Record a screen or window with Chrome's picker (Chrome only); add `--transcribe` for a transcript |
 | `/export` | Download the current conversation as a Markdown file |
 | `/profile` | Toggle profile auto-fill on/off without opening Settings |
 | `/vision` | Toggle vision mode (screenshot understanding) on the active provider |

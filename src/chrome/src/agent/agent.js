@@ -1456,15 +1456,23 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     try {
       const rec = await recorderStateFresh();
       const recActive = !!(rec && rec.active);
-      // Did this conversation discuss recording? If so, remind the model that
-      // recording is user-driven through slash commands instead of tools.
-      const refersToRecording = (m) => {
+      const hasRecordingStartSignal = (m) => {
+        if (Array.isArray(m.tool_calls) && m.tool_calls.some((tc) => tc?.function?.name === 'record_tab')) return true;
+        const blocks = [];
         const c = m.content;
-        if (typeof c === 'string') return /\b(record|recording|kaydet|kayıt)\b/i.test(c);
-        if (Array.isArray(c)) return c.some((b) => typeof b?.text === 'string' && /\b(record|recording|kaydet|kayıt)\b/i.test(b.text));
-        return false;
+        if (typeof c === 'string') blocks.push(c);
+        else if (Array.isArray(c)) {
+          for (const b of c) {
+            if (typeof b?.text === 'string') blocks.push(b.text);
+          }
+        }
+        return blocks.some((text) =>
+          /^\s*\/record(?:-full-screen)?(?:\s|$)/im.test(text) ||
+          /\brecord_tab\b/i.test(text) ||
+          /\bRecording started\b/i.test(text)
+        );
       };
-      const startedRecording = messages.some(refersToRecording);
+      const startedRecording = messages.some(hasRecordingStartSignal);
       if (recActive) {
         const since = rec.startedAt ? ` (started ${new Date(rec.startedAt).toISOString()})` : '';
         const kind = rec.source === 'display' ? 'screen/window' : 'tab';

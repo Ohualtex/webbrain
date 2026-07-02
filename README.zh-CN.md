@@ -232,7 +232,7 @@ WebBrain 接受作为输入框某行开头的斜杠命令。在面板内输入 `
 | `/reset` | 清除对话与所有按对话的标志 |
 | `/screenshot` | 捕获可见标签页并在聊天中内联显示图像 |
 | `/record` | 开始录制当前标签页 |
-| `/record-full-screen` | 录制屏幕或窗口（仅 Chrome） |
+| `/record-full-screen` | 录制屏幕或窗口（仅 Chrome）；添加 `--transcribe` 可在停止后保存转录 |
 | `/export` | 将当前对话下载为 Markdown 文件 |
 | `/profile` | 无需打开设置即可切换资料自动填充开/关 |
 | `/vision` | 在当前提供商上切换视觉模式（截图理解） |

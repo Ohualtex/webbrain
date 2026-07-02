@@ -4841,19 +4841,20 @@ test('chrome /record-full-screen is slash-only, Chrome-only, and hidden from the
   const recordIdx = panel.indexOf("// /record — start recording");
   assert.ok(fullScreenIdx >= 0 && recordIdx >= 0 && fullScreenIdx < recordIdx, 'chrome: /record-full-screen parser must run before /record');
   const fullScreenBody = panel.slice(fullScreenIdx, recordIdx);
-  const chooserStart = panel.indexOf('function chooseDesktopMediaForRecording');
-  const chooserBody = panel.slice(chooserStart, panel.indexOf('async function startFullScreenRecording', chooserStart));
   const helperStart = panel.indexOf('async function startFullScreenRecording');
   const helperBody = panel.slice(helperStart, panel.indexOf('function updateApiBadge', helperStart));
-  assert.match(fullScreenBody, /startFullScreenRecording\(tabId\)/, 'chrome: parser should route /record-full-screen through helper');
-  assert.match(helperBody, /prepare_recording_host/, 'chrome: full-screen route should prepare offscreen before opening picker');
-  assert.match(chooserBody, /chrome\.desktopCapture\.chooseDesktopMedia\(\['screen', 'window', 'audio'\]/, 'chrome: full-screen route should use Chrome screen/window picker');
+  assert.match(fullScreenBody, /startFullScreenRecording\(tabId/, 'chrome: parser should route /record-full-screen through helper');
+  assert.match(helperBody, /prepare_recording_host/, 'chrome: full-screen route should prepare offscreen before recording');
   assert.match(helperBody, /start_display_recording[\s\S]*?showBanner:\s*false/, 'chrome: full-screen route should start hidden display recording');
-  assert.match(panel, /function shouldShowRecordingBanner\(state\)[\s\S]*?state\?\.showBanner !== false && state\?\.source !== 'display'/, 'chrome: display recordings should not show the banner');
+  assert.doesNotMatch(helperBody, /streamId/, 'chrome: sidepanel must not ferry a desktopCapture stream id to the recorder');
+  assert.match(panel, /function shouldShowRecordingBanner\(state\)[\s\S]*?state\?\.showBanner !== false/, 'chrome: banner visibility should be state-driven');
+  assert.match(panel, /parseRecordingSlashOptions[\s\S]*?--transcribe/, 'chrome: recording slash commands should support transcript opt-in');
 
   assert.match(background, /prepare_recording_host[\s\S]*?start_display_recording/, 'chrome: background should keep recorder routes for slash commands');
-  assert.match(host, /export async function startDisplayRecording\(streamId/, 'chrome: recorder host should expose display recording for slash command routing');
-  assert.match(offscreen, /source === 'display' \? 'desktop' : 'tab'/, 'chrome: offscreen recorder should consume desktopCapture stream ids');
+  assert.match(host, /export async function startDisplayRecording\(options = \{\}/, 'chrome: recorder host should expose display recording for slash command routing');
+  assert.match(host, /function scheduleRecordingSafetyWatchdog[\s\S]*?chrome\.alarms\?\.create/, 'chrome: hidden recordings should have a background-owned safety cap');
+  assert.match(offscreen, /function chooseDesktopMediaSource\(\)[\s\S]*?chrome\.desktopCapture\.chooseDesktopMedia\(\['screen', 'window', 'audio'\]/, 'chrome: offscreen recorder should open the screen/window picker itself');
+  assert.match(offscreen, /context-bound and cannot be ferried from the side panel/, 'chrome: display capture should document same-context stream id consumption');
 
   const firefoxSlashList = firefoxPanel.slice(firefoxPanel.indexOf('const SLASH_COMMANDS = ['), firefoxPanel.indexOf('const OUT_OF_BAND_SLASH_COMMANDS'));
   assert.doesNotMatch(firefoxSlashList, /\/record-full-screen/, 'firefox: autocomplete should not advertise /record-full-screen');
@@ -5484,23 +5485,29 @@ test('chrome sidepanel Escape abort honors slash autocomplete dismissal', () => 
   const abortCall = panel.indexOf('abortRun();', globalHandlerStart);
   assert.notEqual(globalHandlerStart, -1, 'chrome: global keydown handler missing');
   assert.notEqual(defaultPreventedGuard, -1, 'chrome: global keydown handler should honor consumed key events');
-  assert.notEqual(recordingEscapeCall, -1, 'chrome: global keydown handler should route recording Escape first');
+  assert.notEqual(recordingEscapeCall, -1, 'chrome: global keydown handler should route recording Escape after higher-priority Escape handlers');
   assert.notEqual(abortCall, -1, 'chrome: Escape abort shortcut missing');
   assert.equal(defaultPreventedGuard < abortCall, true, 'chrome: consumed slash-menu Escape should not reach abortRun');
-  assert.equal(recordingEscapeCall < abortCall, true, 'chrome: recording double-Escape should take precedence over run abort');
+  assert.equal(abortCall < recordingEscapeCall, true, 'chrome: agent-run Escape abort should take precedence over recording stop');
 });
 
 test('chrome double Escape stops active recordings from sidepanel and content pages', () => {
   const panel = fs.readFileSync(path.join(ROOT, 'src/chrome/src/ui/sidepanel.js'), 'utf8');
   const content = fs.readFileSync(path.join(ROOT, 'src/chrome/src/content/content.js'), 'utf8');
+  const host = fs.readFileSync(path.join(ROOT, 'src/chrome/src/recorder/host.js'), 'utf8');
 
   assert.match(panel, /const RECORDING_DOUBLE_ESCAPE_MS = 1400;/, 'chrome: sidepanel should define a double-Escape window');
-  assert.match(panel, /function handleRecordingEscapeKey\(e\)[\s\S]*?recordingActive[\s\S]*?recordingEscapeArmedUntil[\s\S]*?stopRecording\(\)/, 'chrome: sidepanel should arm then stop recording on double Escape');
+  assert.match(panel, /function handleRecordingEscapeKey\(e\)[\s\S]*?recordingActive[\s\S]*?!e\.isTrusted[\s\S]*?recordingEscapeArmedUntil[\s\S]*?stopRecording\(\)/, 'chrome: sidepanel should arm then stop recording on trusted double Escape');
   assert.match(panel, /document\.addEventListener\('keydown', handleGlobalKeydown, true\)/, 'chrome: sidepanel Escape routing should run in capture phase');
-  assert.match(panel, /setInterval\(\(\) => \{[\s\S]*?elapsed >= MAX_RECORDING_MS[\s\S]*?stopRecording\(\)/, 'chrome: recording safety cap should run even when the banner is hidden');
+  assert.match(host, /export const MAX_RECORDING_MS = 2 \* 60 \* 60 \* 1000/, 'chrome: recorder host should own the recording safety cap');
+  assert.match(host, /function scheduleRecordingSafetyWatchdog[\s\S]*?setTimeout[\s\S]*?chrome\.alarms\?\.create/, 'chrome: recording safety cap should survive hidden sidepanel recordings');
 
   assert.match(content, /const RECORDING_DOUBLE_ESCAPE_MS = 1400;/, 'chrome: content script should define a double-Escape window');
-  assert.match(content, /if \(window\.top === window\) \{[\s\S]*?document\.addEventListener\('keydown', \(e\) => \{[\s\S]*?stop_tab_recording[\s\S]*?reason: 'double_escape'[\s\S]*?\}, true\);[\s\S]*?\}/, 'chrome: top-level content pages should send stop_tab_recording on double Escape');
+  assert.match(content, /let recordingActive = false;/, 'chrome: content script should track live recording state');
+  assert.match(content, /action: 'get_recording_state'[\s\S]*?setRecordingActive\(!!res\?\.state\?\.active\)/, 'chrome: content script should hydrate recording state from background');
+  assert.match(content, /msg\?\.target !== 'content' \|\| msg\.action !== 'recording_state'[\s\S]*?setRecordingActive\(!!msg\.active\)/, 'chrome: content script should accept recording state broadcasts');
+  assert.match(content, /if \(!recordingActive \|\| !e\.isTrusted\)[\s\S]*?return;/, 'chrome: content pages should only consume trusted Escape while recording is active');
+  assert.match(content, /stop_tab_recording[\s\S]*?reason: 'double_escape'/, 'chrome: top-level content pages should send stop_tab_recording on active trusted double Escape');
 });
 
 test('chrome sidepanel shortcuts are documented in help and README', () => {
@@ -6428,7 +6435,7 @@ test('sidepanel scopes async tab commands to the original tab', () => {
       assert.match(recordBody, /sendToBackground\('start_tab_recording', \{[\s\S]*?tabId,[\s\S]*?\}\);[\s\S]*?if \(currentTabId !== tabId\) return '';/, `${label}: /record should not render recording status into a different tab`);
       assert.match(recordBody, /showBanner:\s*true/, `${label}: /record should keep the visible recording banner`);
       const fullScreenBody = panel.slice(fullScreenRecordIdx, recordIdx);
-      assert.match(fullScreenBody, /startFullScreenRecording\(tabId\)/, `${label}: /record-full-screen should use the initiating tab id`);
+      assert.match(fullScreenBody, /startFullScreenRecording\(tabId/, `${label}: /record-full-screen should use the initiating tab id`);
     }
 
     const profileIdx = panel.indexOf('// /profile');
@@ -11486,6 +11493,16 @@ test('Agent enrich: no recording status note when the conversation never recorde
     { role: 'assistant', content: 'hi' },
   ];
   const enriched = await agent._enrichUserMessageWithCurrentPage(999, messages, 'summarize this page');
+  assert.doesNotMatch(enriched.content, /Recording status/i);
+});
+
+test('Agent enrich: ordinary record words do not trigger recording status correction', async () => {
+  const agent = new AgentCh({});
+  const messages = [
+    { role: 'user', content: 'Summarize these medical records and the world record history.' },
+    { role: 'assistant', content: 'The page discusses kayıt forms, not browser recording.' },
+  ];
+  const enriched = await agent._enrichUserMessageWithCurrentPage(999, messages, 'continue');
   assert.doesNotMatch(enriched.content, /Recording status/i);
 });
 

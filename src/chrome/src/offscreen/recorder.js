@@ -6,11 +6,12 @@
  * the MediaRecorder for the duration of a recording. Driven by
  * runtime.onMessage from background.js:
  *
- *   {type:'recorder-start', streamId, tabId, options:{video, mic, mimeType}}
- *     ↳ acquires tab stream via getUserMedia(chromeMediaSource:'tab'),
- *       optionally acquires mic, wires Web Audio so the user can still
- *       HEAR the tab while it's being recorded (tabCapture mutes the
- *       tab by default), starts MediaRecorder, replies {ok:true}.
+ *   {type:'recorder-start', streamId, tabId, options:{source, video, mic, mimeType}}
+ *     ↳ acquires tab stream via getUserMedia(chromeMediaSource:'tab'), or
+ *       prompts for a display/window stream in this same offscreen context,
+ *       optionally acquires mic, wires Web Audio so the user can still HEAR
+ *       the tab while it's being recorded (tabCapture mutes the tab by
+ *       default), starts MediaRecorder, replies {ok:true}.
  *
  *   {type:'recorder-stop'}
  *     ↳ flushes MediaRecorder, converts the accumulated chunks to a
@@ -40,6 +41,27 @@
     console.log('[recorder]', ts(), ...args);
   }
 
+  function chooseDesktopMediaSource() {
+    return new Promise((resolve, reject) => {
+      if (!chrome.desktopCapture?.chooseDesktopMedia) {
+        reject(new Error('Full-screen recording requires Chrome desktopCapture support.'));
+        return;
+      }
+      chrome.desktopCapture.chooseDesktopMedia(['screen', 'window', 'audio'], (streamId) => {
+        const err = chrome.runtime.lastError;
+        if (err) {
+          reject(new Error(err.message));
+          return;
+        }
+        if (!streamId) {
+          reject(new Error('Screen/window selection cancelled.'));
+          return;
+        }
+        resolve(streamId);
+      });
+    });
+  }
+
   // Convert a Blob → data URL string we can hand back via runtime.sendMessage.
   // (URL.createObjectURL would also work but the URL is tied to this
   // offscreen doc's lifetime; a data URL survives a doc reload.)
@@ -52,7 +74,8 @@
     });
   }
 
-  async function start({ streamId, tabId, options }) {
+  async function start(message) {
+    let { streamId, tabId, options } = message || {};
     if (session) {
       const state = session.recorder?.state || '';
       if (state === 'inactive') {
@@ -95,13 +118,17 @@
     // 1. Capture stream — chrome.tabCapture exposes the active tab as a
     // MediaStream when we pass the streamId we got from
     // chrome.tabCapture.getMediaStreamId() on the service-worker side. For
-    // `/record-full-screen`, chrome.desktopCapture gives us a desktop stream id
-    // that uses chromeMediaSource:'desktop' instead.
+    // `/record-full-screen`, the offscreen document asks Chrome's picker for a
+    // desktop stream id here and consumes it here; desktopCapture stream IDs are
+    // context-bound and cannot be ferried from the side panel to this recorder.
     //
     // Note: even if `video:false` was requested, we still pull video from
     // tabCapture and discard the track below — tabCapture's audio path
     // requires you to ask for the full stream, you can't request audio
     // alone via this API.
+    if (source === 'display' && !streamId) {
+      streamId = await chooseDesktopMediaSource();
+    }
     const chromeMediaSource = source === 'display' ? 'desktop' : 'tab';
     const captureConstraints = {
       audio: audio === false ? false : {
@@ -125,11 +152,16 @@
       if (source !== 'display' || captureConstraints.audio === false) {
         throw new Error(`Failed to capture ${source === 'display' ? 'screen/window' : 'tab'}: ${e.message || e}`);
       }
-      captureAudioError = e.message || String(e);
-      captureStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: captureConstraints.video,
-      });
+      const firstError = e.message || String(e);
+      try {
+        captureStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: captureConstraints.video,
+        });
+        captureAudioError = firstError;
+      } catch {
+        throw new Error(`Failed to capture screen/window: ${firstError}`);
+      }
     }
     log(`${source} stream acquired`, captureStream.getTracks().map(t => `${t.kind}:${t.label || 'unnamed'}`));
 

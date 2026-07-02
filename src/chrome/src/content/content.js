@@ -10,10 +10,34 @@
 
   const RECORDING_DOUBLE_ESCAPE_MS = 1400;
   let recordingEscapeAt = 0;
+  let recordingActive = false;
+
+  function setRecordingActive(active) {
+    recordingActive = !!active;
+    if (!recordingActive) recordingEscapeAt = 0;
+  }
 
   if (window.top === window) {
+    try {
+      chrome.runtime.sendMessage(
+        { target: 'background', action: 'get_recording_state' },
+        (res) => {
+          if (!chrome.runtime.lastError) setRecordingActive(!!res?.state?.active);
+        }
+      );
+    } catch { /* ignore */ }
+
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.target !== 'content' || msg.action !== 'recording_state') return;
+      setRecordingActive(!!msg.active);
+    });
+
     document.addEventListener('keydown', (e) => {
       if (e.key !== 'Escape' || e.repeat) return;
+      if (!recordingActive || !e.isTrusted) {
+        recordingEscapeAt = 0;
+        return;
+      }
       const now = Date.now();
       if (now - recordingEscapeAt <= RECORDING_DOUBLE_ESCAPE_MS) {
         recordingEscapeAt = 0;
@@ -25,6 +49,7 @@
             reason: 'double_escape',
           });
         } catch { /* ignore */ }
+        setRecordingActive(false);
         return;
       }
       recordingEscapeAt = now;
