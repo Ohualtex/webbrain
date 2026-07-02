@@ -5931,7 +5931,7 @@ test('settings provider save and test status updates are DOM-safe', () => {
     const loadBody = settings.slice(loadStart, settings.indexOf('\n}\n\nfunction setProviderTestResult', loadStart) + 2);
     assert.match(
       loadBody,
-      /try \{[\s\S]*?await saveProvider\(id, \{ showFlash: false \}\);[\s\S]*?\} catch \(e\) \{[\s\S]*?setProviderLoadModelsStatus\(id, e\.message, 'var\(--danger, #c33\)'\);[\s\S]*?return;[\s\S]*?\}/,
+      /try \{[\s\S]*?await saveProvider\(id, \{ showFlash: false \}\);[\s\S]*?\} catch \(e\) \{[\s\S]*?setProviderLoadModelsStatus\(id, providerModelLoadErrorMessage\(e\.message\), 'var\(--danger, #c33\)'\);[\s\S]*?return;[\s\S]*?\}/,
       `${label}: model loading should stop and report if the pre-save fails`,
     );
   }
@@ -6064,12 +6064,17 @@ test('settings async test controls surface rejected background results', () => {
     const loadBody = settings.slice(loadStart, settings.indexOf('\n}\n\nfunction setProviderTestResult', loadStart) + 2);
     assert.match(
       loadBody,
-      /let datalistEl = document\.getElementById\(`models-\$\{id\}`\);[\s\S]*?setProviderLoadModelsStatus\(id, t\('st\.providers\.loading'\)\);[\s\S]*?try \{[\s\S]*?res = await sendToBackground\('list_provider_models', \{ providerId: id \}\);[\s\S]*?\} catch \(e\) \{[\s\S]*?setProviderLoadModelsStatus\(id, e\.message, 'var\(--danger, #c33\)'\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?datalistEl = document\.getElementById\(`models-\$\{id\}`\);[\s\S]*?if \(!datalistEl\) return;[\s\S]*?setProviderLoadModelsStatus\(id, res\?\.error \|\| 'Failed to load models', 'var\(--danger, #c33\)'\);/,
+      /let datalistEl = document\.getElementById\(`models-\$\{id\}`\);[\s\S]*?await saveProvider\(id, \{ showFlash: false \}\);[\s\S]*?\} catch \(e\) \{[\s\S]*?setProviderLoadModelsStatus\(id, providerModelLoadErrorMessage\(e\.message\), 'var\(--danger, #c33\)'\);[\s\S]*?return;[\s\S]*?setProviderLoadModelsStatus\(id, t\('st\.providers\.loading'\)\);[\s\S]*?try \{[\s\S]*?res = await sendToBackground\('list_provider_models', \{ providerId: id \}\);[\s\S]*?\} catch \(e\) \{[\s\S]*?setProviderLoadModelsStatus\(id, providerModelLoadErrorMessage\(e\.message\), 'var\(--danger, #c33\)'\);[\s\S]*?return;[\s\S]*?\}[\s\S]*?datalistEl = document\.getElementById\(`models-\$\{id\}`\);[\s\S]*?if \(!datalistEl\) return;[\s\S]*?setProviderLoadModelsStatus\(id, providerModelLoadErrorMessage\(res\), 'var\(--danger, #c33\)'\);/,
       `${label}: model loading should report rejected background results and avoid stale datalist writes`,
     );
     assert.match(
       settings,
-      /function clearProviderLoadedModels\(id\) \{[\s\S]*?loadedMenuEl\.innerHTML = '';[\s\S]*?loadedMenuEl\.style\.display = 'none';[\s\S]*?if \(datalistEl\) datalistEl\.innerHTML = '';[\s\S]*?\}/,
+      /function providerModelLoadErrorMessage\(resultOrError\) \{[\s\S]*?resultOrError\?\.errorKey[\s\S]*?t\(resultOrError\.errorKey\)[\s\S]*?\^HTTP\\s\+404\\b[\s\S]*?<!doctype\\s\+html\|<html\[\\s>\]\|file not found[\s\S]*?t\('ob\.tokens\.none_status'\)[\s\S]*?\}/,
+      `${label}: HTML 404 model-list failures should be shown as a concise local-server status`,
+    );
+    assert.match(
+      settings,
+      /function clearProviderLoadedModels\(id\) \{[\s\S]*?loadedDialogEl\.querySelector\('\.loaded-model-options'\);[\s\S]*?optionsEl\.innerHTML = '';[\s\S]*?closeLoadedModelDialog\(loadedDialogEl\);[\s\S]*?if \(datalistEl\) datalistEl\.innerHTML = '';[\s\S]*?\}/,
       `${label}: model loading should have a helper that clears stale loaded-model choices`,
     );
     assert.match(
@@ -6079,18 +6084,18 @@ test('settings async test controls surface rejected background results', () => {
     );
     assert.match(
       settings,
-      /const loadedModelsMenuHTML = canLoadModels[\s\S]*class="loaded-model-menu" data-loaded-models-for="\$\{id\}"[\s\S]*\$\{loadedModelsMenuHTML\}/,
-      `${label}: local model loading should render a temporary loaded-model menu`,
+      /const loadedModelsDialogHTML = canLoadModels[\s\S]*<dialog class="loaded-model-dialog" data-loaded-models-for="\$\{id\}"[\s\S]*class="loaded-model-options"[\s\S]*\$\{loadedModelsDialogHTML\}/,
+      `${label}: local model loading should render a loaded-model dialog`,
     );
     assert.doesNotMatch(
       settings,
-      /loaded-model-select|loadedModelsSelectHTML/,
-      `${label}: local model loading should not render a second select control`,
+      /loaded-model-select|loadedModelsSelectHTML|loaded-model-menu|loadedModelsMenuHTML/,
+      `${label}: local model loading should not render a second select control or inline menu`,
     );
     assert.match(
       loadBody,
-      /const loadedMenuEl = document\.querySelector\(`\.loaded-model-menu\[data-loaded-models-for="\$\{id\}"\]`\);[\s\S]*?loadedMenuEl\.innerHTML = res\.models[\s\S]*?class="loaded-model-option"[\s\S]*?loadedMenuEl\.style\.display = res\.models\.length \? '' : 'none';/,
-      `${label}: loaded models should populate a temporary menu without replacing the current model text`,
+      /const loadedDialogEl = document\.querySelector\(`\.loaded-model-dialog\[data-loaded-models-for="\$\{id\}"\]`\);[\s\S]*?const optionsEl = loadedDialogEl\.querySelector\('\.loaded-model-options'\);[\s\S]*?optionsEl\.innerHTML = res\.models[\s\S]*?class="loaded-model-option"[\s\S]*?if \(res\.models\.length\) openLoadedModelDialog\(loadedDialogEl\);/,
+      `${label}: loaded models should populate and open a dialog without replacing the current model text`,
     );
     assert.doesNotMatch(
       loadBody,
@@ -6099,7 +6104,7 @@ test('settings async test controls surface rejected background results', () => {
     );
     assert.match(
       settings,
-      /document\.querySelectorAll\('\.loaded-model-menu'\)\.forEach\(menu => \{[\s\S]*?menu\.addEventListener\('click', \(event\) => \{[\s\S]*?event\.target\.closest\('\.loaded-model-option'\);[\s\S]*?const providerId = menu\.dataset\.loadedModelsFor;[\s\S]*?input\.value = option\.dataset\.model \|\| '';[\s\S]*?menu\.style\.display = 'none';[\s\S]*?\}\);[\s\S]*?\}\);/,
+      /document\.querySelectorAll\('\.loaded-model-dialog'\)\.forEach\(dialog => \{[\s\S]*?dialog\.addEventListener\('click', \(event\) => \{[\s\S]*?event\.target === dialog[\s\S]*?closeLoadedModelDialog\(dialog\);[\s\S]*?event\.target\.closest\('\.loaded-model-option'\);[\s\S]*?const providerId = dialog\.dataset\.loadedModelsFor;[\s\S]*?input\.value = option\.dataset\.model \|\| '';[\s\S]*?closeLoadedModelDialog\(dialog\);[\s\S]*?\}\);[\s\S]*?\}\);/,
       `${label}: choosing a loaded model should write it back to the provider model input`,
     );
     const localeDir = path.join(ROOT, label === 'chrome' ? 'src/chrome/src/ui/locales' : 'src/firefox/src/ui/locales');
@@ -9110,6 +9115,43 @@ test('listProviderModels does not persist stale base URL repairs', async () => {
     else globalThis.chrome = originalChrome;
     if (originalBrowser === undefined) delete globalThis.browser;
     else globalThis.browser = originalBrowser;
+  }
+});
+
+test('listProviderModels normalizes HTML 404 model-list failures', async () => {
+  const originalFetch = globalThis.fetch;
+  const html404 = `<!DOCTYPE HTML>
+<html lang="en">
+<head><title>Error response</title></head>
+<body><h1>Error response</h1><p>Error code: 404</p><p>Message: File not found.</p></body>
+</html>`;
+
+  try {
+    for (const [label, PM] of [
+      ['chrome', ProviderManagerCh],
+      ['firefox', ProviderManagerFx],
+    ]) {
+      globalThis.fetch = async () => new Response(html404, {
+        status: 404,
+        statusText: 'File not found',
+        headers: { 'Content-Type': 'text/html' },
+      });
+
+      const mgr = new PM();
+      const config = {
+        ...mgr._defaultConfigs().vllm,
+        baseUrl: 'http://127.0.0.1:8000',
+      };
+      mgr.providers.set('vllm', mgr._createProvider('vllm', config));
+
+      const result = await mgr.listProviderModels('vllm');
+      assert.equal(result.ok, false, `${label}: HTML 404 should fail`);
+      assert.equal(result.errorKey, 'ob.tokens.none_status', `${label}: HTML 404 should carry a localizable error key`);
+      assert.equal(result.error, 'No local model server was detected.', `${label}: HTML 404 should use concise fallback text`);
+      assert.doesNotMatch(result.error, /<!DOCTYPE|<html|File not found/, `${label}: HTML body should not leak into the UI error`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
 

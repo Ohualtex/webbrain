@@ -1367,11 +1367,19 @@ function renderProviders() {
         const canLoadModels = localModelProviders.includes(id) && field.key === 'model';
         const listAttr = canLoadModels ? `list="models-${id}"` : '';
         const datalistHTML = canLoadModels ? `<datalist id="models-${id}"></datalist>` : '';
-        const loadedModelsMenuHTML = canLoadModels
-          ? `<div class="loaded-model-menu" data-loaded-models-for="${id}" role="listbox"
-                  aria-label="${escapeHtml(t('st.providers.select_loaded_model'))}"
-                  style="display:none;margin-top:6px;max-height:180px;overflow:auto;
-                         border:1px solid var(--border);border-radius:6px;background:var(--bg3);"></div>`
+        const loadedModelsDialogHTML = canLoadModels
+          ? `<dialog class="loaded-model-dialog" data-loaded-models-for="${id}"
+                     aria-labelledby="loaded-model-dialog-title-${id}">
+              <div class="loaded-model-dialog-panel">
+                <div class="loaded-model-dialog-header">
+                  <h3 id="loaded-model-dialog-title-${id}">${escapeHtml(t('st.providers.select_loaded_model'))}</h3>
+                  <button type="button" class="loaded-model-dialog-close"
+                          aria-label="${escapeHtml(t('sp.schedule_form.cancel'))}">&times;</button>
+                </div>
+                <div class="loaded-model-options" role="listbox"
+                     aria-label="${escapeHtml(t('st.providers.select_loaded_model'))}"></div>
+              </div>
+            </dialog>`
           : '';
         const loadBtnHTML = canLoadModels
           ? `<button type="button" class="btn-secondary btn-load-models" data-provider="${id}"
@@ -1392,7 +1400,7 @@ function renderProviders() {
                    value="${escapeHtml(value)}" placeholder="${escapeHtml(placeholder)}">
             ${datalistHTML}
             ${loadBtnHTML}
-            ${loadedModelsMenuHTML}
+            ${loadedModelsDialogHTML}
           </div>
         `;
       }
@@ -1478,15 +1486,19 @@ function renderProviders() {
       }
     });
   });
-  document.querySelectorAll('.loaded-model-menu').forEach(menu => {
-    menu.addEventListener('click', (event) => {
+  document.querySelectorAll('.loaded-model-dialog').forEach(dialog => {
+    dialog.addEventListener('click', (event) => {
+      if (event.target === dialog || event.target.closest('.loaded-model-dialog-close')) {
+        closeLoadedModelDialog(dialog);
+        return;
+      }
       const option = event.target.closest('.loaded-model-option');
       if (!option) return;
-      const providerId = menu.dataset.loadedModelsFor;
+      const providerId = dialog.dataset.loadedModelsFor;
       const input = document.querySelector(`input[data-provider="${providerId}"][data-key="model"]`);
       if (!input) return;
       input.value = option.dataset.model || '';
-      menu.style.display = 'none';
+      closeLoadedModelDialog(dialog);
     });
   });
   // OAuth-Claude-specific bindings. These only fire if the OAuth card is
@@ -1710,6 +1722,15 @@ function setProviderLoadModelsStatus(id, message, color = 'var(--text2)') {
   return statusEl;
 }
 
+function providerModelLoadErrorMessage(resultOrError) {
+  if (resultOrError?.errorKey) return t(resultOrError.errorKey);
+  const message = String(typeof resultOrError === 'string' ? resultOrError : resultOrError?.error || '').trim();
+  if (/^HTTP\s+404\b/i.test(message) && /<!doctype\s+html|<html[\s>]|file not found/i.test(message)) {
+    return t('ob.tokens.none_status');
+  }
+  return message || 'Failed to load models';
+}
+
 function applyProviderBaseUrl(id, baseUrl) {
   if (!baseUrl) return;
   if (providersData[id]) providersData[id].baseUrl = baseUrl;
@@ -1717,11 +1738,24 @@ function applyProviderBaseUrl(id, baseUrl) {
   if (input && input.value !== baseUrl) input.value = baseUrl;
 }
 
+function closeLoadedModelDialog(dialog) {
+  if (!dialog) return;
+  if (typeof dialog.close === 'function') dialog.close();
+  else dialog.removeAttribute('open');
+}
+
+function openLoadedModelDialog(dialog) {
+  if (!dialog) return;
+  if (typeof dialog.showModal === 'function') dialog.showModal();
+  else dialog.setAttribute('open', '');
+}
+
 function clearProviderLoadedModels(id) {
-  const loadedMenuEl = document.querySelector(`.loaded-model-menu[data-loaded-models-for="${id}"]`);
-  if (loadedMenuEl) {
-    loadedMenuEl.innerHTML = '';
-    loadedMenuEl.style.display = 'none';
+  const loadedDialogEl = document.querySelector(`.loaded-model-dialog[data-loaded-models-for="${id}"]`);
+  if (loadedDialogEl) {
+    const optionsEl = loadedDialogEl.querySelector('.loaded-model-options');
+    if (optionsEl) optionsEl.innerHTML = '';
+    closeLoadedModelDialog(loadedDialogEl);
   }
   const datalistEl = document.getElementById(`models-${id}`);
   if (datalistEl) datalistEl.innerHTML = '';
@@ -1736,7 +1770,7 @@ async function loadProviderModels(id) {
   try {
     await saveProvider(id, { showFlash: false });
   } catch (e) {
-    setProviderLoadModelsStatus(id, e.message, 'var(--danger, #c33)');
+    setProviderLoadModelsStatus(id, providerModelLoadErrorMessage(e.message), 'var(--danger, #c33)');
     return;
   }
 
@@ -1745,7 +1779,7 @@ async function loadProviderModels(id) {
   try {
     res = await sendToBackground('list_provider_models', { providerId: id });
   } catch (e) {
-    setProviderLoadModelsStatus(id, e.message, 'var(--danger, #c33)');
+    setProviderLoadModelsStatus(id, providerModelLoadErrorMessage(e.message), 'var(--danger, #c33)');
     return;
   }
 
@@ -1753,19 +1787,22 @@ async function loadProviderModels(id) {
   if (!datalistEl) return;
   if (res?.ok) {
     applyProviderBaseUrl(id, res.baseUrl);
-    const loadedMenuEl = document.querySelector(`.loaded-model-menu[data-loaded-models-for="${id}"]`);
+    const loadedDialogEl = document.querySelector(`.loaded-model-dialog[data-loaded-models-for="${id}"]`);
     datalistEl.innerHTML = res.models
       .map((m) => `<option value="${escapeHtml(m)}"></option>`)
       .join('');
-    if (loadedMenuEl) {
-      loadedMenuEl.innerHTML = res.models
-        .map((m) => `<button type="button" class="loaded-model-option" role="option" data-model="${escapeHtml(m)}" style="display:block;width:100%;padding:7px 10px;border:0;border-bottom:1px solid var(--border);background:transparent;color:var(--text);font:inherit;text-align:left;overflow-wrap:anywhere;cursor:pointer;">${escapeHtml(m)}</button>`)
-        .join('');
-      loadedMenuEl.style.display = res.models.length ? '' : 'none';
+    if (loadedDialogEl) {
+      const optionsEl = loadedDialogEl.querySelector('.loaded-model-options');
+      if (optionsEl) {
+        optionsEl.innerHTML = res.models
+          .map((m) => `<button type="button" class="loaded-model-option" role="option" data-model="${escapeHtml(m)}">${escapeHtml(m)}</button>`)
+          .join('');
+      }
+      if (res.models.length) openLoadedModelDialog(loadedDialogEl);
     }
     setProviderLoadModelsStatus(id, t('st.providers.models_loaded', { count: res.models.length }));
   } else {
-    setProviderLoadModelsStatus(id, res?.error || 'Failed to load models', 'var(--danger, #c33)');
+    setProviderLoadModelsStatus(id, providerModelLoadErrorMessage(res), 'var(--danger, #c33)');
   }
 }
 
