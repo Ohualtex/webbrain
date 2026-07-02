@@ -9418,6 +9418,11 @@ test('ProviderManager load ignores unsupported stored provider configs', async (
             category: 'cloud',
             apiKey: `${label}-groq-key`,
           },
+          webbrain_cloud: {
+            type: 'openai',
+            contextWindow: 256000,
+            apiKey: `${label}-cloud-key`,
+          },
           custom_proxy: {
             type: 'openai',
             category: 'router',
@@ -9467,6 +9472,8 @@ test('ProviderManager load ignores unsupported stored provider configs', async (
       assert.equal(mgr.providers.get('cloudflare')?.config.accountId, '0123456789abcdef0123456789abcdef', `${label}: Cloudflare account ID should survive migration`);
       assert.equal(mgr.providers.get('nvidia')?.config.apiKey, `${label}-nvidia-key`, `${label}: Nvidia API key should survive migration`);
       assert.equal(mgr.providers.get('groq')?.config.apiKey, `${label}-groq-key`, `${label}: Groq API key should survive migration`);
+      assert.equal(mgr.providers.get('webbrain_cloud')?.config.contextWindow, 1000000, `${label}: legacy WebBrain Cloud context window should migrate`);
+      assert.equal(mgr.providers.get('webbrain_cloud')?.config.apiKey, `${label}-cloud-key`, `${label}: WebBrain Cloud API key should survive migration`);
       assert.equal(mgr.providers.get('custom_proxy')?.config.type, 'openai', `${label}: supported custom provider should load`);
       assert.equal(mgr.providers.get('custom_proxy')?.config.model, 'custom-model', `${label}: custom provider config should survive`);
     }
@@ -9556,6 +9563,14 @@ test('_defaultConfigs: new cloud providers present and disabled by default', () 
       assert.ok(defaults[id].baseUrl, `${PM.name}: ${id} missing baseUrl`);
       assert.ok(defaults[id].model, `${PM.name}: ${id} missing default model`);
     }
+  }
+});
+
+test('_defaultConfigs: WebBrain Cloud has a 1M context window by default', () => {
+  for (const PM of [ProviderManagerCh, ProviderManagerFx]) {
+    const defaults = new PM()._defaultConfigs();
+    assert.equal(defaults.webbrain_cloud.contextWindow, 1000000, `${PM.name}: WebBrain Cloud context window should be 1M`);
+    assert.equal(defaults.webbrain_cloud.enabled, true, `${PM.name}: WebBrain Cloud should stay enabled by default`);
   }
 });
 
@@ -13591,24 +13606,54 @@ test('manual compactConversation compacts before automatic thresholds', async ()
   }
 });
 
-test('context token budget uses adaptive compaction ratios', async () => {
+test('context soft budgets scale with adaptive provider token budgets', async () => {
   const cases = [
-    [16000, 10400],
-    [32000, 20800],
-    [32768, 21299],
-    [64000, 44800],
-    [65536, 45875],
-    [128000, 96000],
-    [131072, 98304],
-    [256000, 204800],
-    [262144, 209715],
+    [16000, 10400, 80000, 50],
+    [32000, 20800, 83200, 52],
+    [32768, 21299, 85196, 53],
+    [64000, 44800, 179200, 112],
+    [65536, 45875, 183500, 114],
+    [128000, 96000, 384000, 240],
+    [131072, 98304, 393216, 245],
+    [256000, 204800, 819200, 512],
+    [262144, 209715, 838860, 524],
+    [1000000, 800000, 3200000, 2000],
   ];
 
   for (const AgentClass of [AgentCh, AgentFx]) {
-    for (const [contextWindow, expectedBudget] of cases) {
+    for (const [contextWindow, expectedBudget, expectedCharBudget, expectedMessageBudget] of cases) {
       const agent = new AgentClass({ getActive: () => ({ contextWindow, supportsVision: false }) });
-      assert.equal(agent._contextTokenBudget(), expectedBudget, `${AgentClass.name}: wrong budget for ${contextWindow}`);
+      const tokenBudget = agent._contextTokenBudget();
+      const charBudget = agent._contextCharBudget(tokenBudget);
+      assert.equal(tokenBudget, expectedBudget, `${AgentClass.name}: wrong token budget for ${contextWindow}`);
+      assert.equal(charBudget, expectedCharBudget, `${AgentClass.name}: wrong char budget for ${contextWindow}`);
+      assert.equal(agent._contextMessageBudget(charBudget), expectedMessageBudget, `${AgentClass.name}: wrong message budget for ${contextWindow}`);
     }
+  }
+});
+
+test('large context windows do not compact at the legacy 50-message or 80k-char caps', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 1000000, supportsVision: false }) });
+    const tabId = AgentClass === AgentCh ? 206 : 207;
+    const messages = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'keep working on the task' },
+    ];
+    for (let i = 0; i < 60; i++) {
+      messages.push({ role: 'assistant', content: `large-window step ${i} ${'x'.repeat(1490)}` });
+    }
+
+    assert.ok(messages.length > agent.maxContextMessages, `${AgentClass.name}: fixture should exceed legacy message cap`);
+    assert.ok(agent._estimateContextChars(messages) > agent.maxContextChars, `${AgentClass.name}: fixture should exceed legacy char cap`);
+
+    const result = await agent._manageContext(tabId, messages, () => {});
+    assert.equal(result.compacted, false, `${AgentClass.name}: large-window conversation should not compact at legacy soft caps`);
+    assert.equal(result.reason, 'not_needed', `${AgentClass.name}: large-window conversation should stay under adaptive budgets`);
+    assert.equal(messages.length, 62, `${AgentClass.name}: messages should remain untouched`);
+
+    const h = agent.persistTimers?.get?.(tabId);
+    if (h) clearTimeout(h);
   }
 });
 

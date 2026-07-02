@@ -84,10 +84,10 @@ export class Agent {
     this.currentRunId = new Map(); // tabId -> active trace runId (for recorder hooks)
     this.currentCostState = new Map(); // tabId -> active cloud/router cost state
     this.maxSteps = 130; // safety limit for autonomous loops (configurable via settings)
-    this.maxContextMessages = 50; // trim beyond this
+    this.maxContextMessages = 50; // minimum soft cap; larger provider windows scale this up
     this._debugLog = []; // ring buffer for deep verbose (LLM requests/responses)
     this._debugLogMax = 200; // max entries before oldest are dropped
-    this.maxContextChars = 80000; // rough char budget (~20k tokens)
+    this.maxContextChars = 80000; // minimum soft cap; larger provider windows scale this up
     // Default fraction of the model's context window at which we auto-compact.
     // _contextCompactRatioForWindow tightens this for small context windows and
     // relaxes it for very large ones.
@@ -5181,6 +5181,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return Math.floor(window * this._contextCompactRatioForWindow(window));
   }
 
+  _contextCharBudget(tokenBudget = this._contextTokenBudget()) {
+    return Math.max(this.maxContextChars, Math.floor(tokenBudget * 4));
+  }
+
+  _contextMessageBudget(charBudget = this._contextCharBudget()) {
+    return Math.max(
+      this.maxContextMessages,
+      Math.floor(this.maxContextMessages * (charBudget / this.maxContextChars))
+    );
+  }
+
   // Char-equivalent billed for the single screenshot that survives image
   // pruning before a request is sent. A vision image costs ~1.5k tokens
   // regardless of byte size, so counting the raw base64 (up to ~1.4 MB) would
@@ -5319,8 +5330,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
    * Manage context window — trim and summarize when conversation gets too long.
    * Keeps: system prompt, summary of old messages, recent messages.
    *
-   * Triggers on whichever fires first: message count, raw char budget, or —
-   * the token-aware "when it's due" path — the running input-token count
+   * Triggers on whichever fires first: adaptive message count, adaptive char
+   * budget, or — the token-aware "when it's due" path — the running input-token count
    * crossing contextCompactRatio of the model's context window. The token
    * trigger uses the provider's reported usage when available (most accurate,
    * since it includes the system prompt + tool schemas that never live in
@@ -5333,6 +5344,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const totalChars = this._estimateContextChars(messages);
 
     const tokenBudget = this._contextTokenBudget();
+    const charBudget = this._contextCharBudget(tokenBudget);
+    const messageBudget = this._contextMessageBudget(charBudget);
     // Estimate the size of the NEXT request. A raw chars/4 estimate omits the
     // fixed system-prompt + tool-schema overhead that the provider's reported
     // `prompt_tokens` includes; the reported count, conversely, predates any
@@ -5356,8 +5369,8 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       ? Math.max(0, lastReported - Math.ceil(lastEstChars / 4))
       : 0;
 
-    const tooManyMessages = messages.length > this.maxContextMessages;
-    const tooManyChars = totalChars > this.maxContextChars;
+    const tooManyMessages = messages.length > messageBudget;
+    const tooManyChars = totalChars > charBudget;
     const tooManyTokens = usedTokens > tokenBudget;
 
     // Hysteresis: for a couple of steps after a compaction, suppress the soft
