@@ -3,6 +3,8 @@ import { OpenAICompatibleProvider } from './openai.js';
 import { AnthropicProvider, AnthropicOAuthProvider } from './anthropic.js';
 
 const WEBBRAIN_CLOUD_PROVIDER_ID = 'webbrain_cloud';
+const WEBBRAIN_CLOUD_CONTEXT_WINDOW = 1000000;
+const WEBBRAIN_CLOUD_LEGACY_CONTEXT_WINDOW = 256000;
 const WEBBRAIN_DEVICE_GUID_KEY = 'webbrainDeviceGuid';
 const OPENROUTER_DEFAULT_MODEL = 'minimax/minimax-m3';
 const OPENROUTER_LEGACY_DEFAULT_MODEL = 'stepfun/step-3.7-flash';
@@ -81,7 +83,7 @@ export class ProviderManager {
         providerName: 'webbrain-cloud',
         baseUrl: 'https://api.webbrain.one/v1',
         model: 'webbrain-cloud 1.0',
-        contextWindow: 256000,
+        contextWindow: WEBBRAIN_CLOUD_CONTEXT_WINDOW,
         inputCostPerMillionUsd: 0.20,
         outputCostPerMillionUsd: 1.15,
         supportsStreamUsageOptions: true,
@@ -354,6 +356,12 @@ export class ProviderManager {
       migrated.webbrain_cloud = {
         ...migrated.webbrain_cloud,
         omitToolsWhenImagesPresent: false,
+      };
+    }
+    if (Number(migrated.webbrain_cloud?.contextWindow) === WEBBRAIN_CLOUD_LEGACY_CONTEXT_WINDOW) {
+      migrated.webbrain_cloud = {
+        ...migrated.webbrain_cloud,
+        contextWindow: WEBBRAIN_CLOUD_CONTEXT_WINDOW,
       };
     }
     for (const id of ROUTER_PROVIDER_IDS) {
