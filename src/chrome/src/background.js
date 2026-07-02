@@ -939,6 +939,8 @@ async function handleMessage(msg, sender) {
     }
     case 'stop_tab_recording':
       return await stopTabRecording();
+    case 'recording_capture_ended':
+      return await stopTabRecording({ reason: 'capture_ended' });
     case 'get_recording_state':
       return {
         ok: true,

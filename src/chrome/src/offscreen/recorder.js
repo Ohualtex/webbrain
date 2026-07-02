@@ -253,6 +253,7 @@
         if (s.recorder.state !== 'inactive') {
           try { s.recorder.stop(); } catch {}
         }
+        notifyCaptureEnded(s);
         releaseSession(s).catch((e) => {
           log('capture-ended cleanup failed:', e?.message || e);
         });
@@ -372,6 +373,21 @@
     try {
       if (audioContext && audioContext.state !== 'closed') await audioContext.close();
     } catch {}
+  }
+
+  function notifyCaptureEnded(s) {
+    try {
+      chrome.runtime.sendMessage({
+        target: 'background',
+        action: 'recording_capture_ended',
+        source: s.source,
+        tabId: s.tabId,
+      }).catch((e) => {
+        log('capture-ended finalize notify failed:', e?.message || e);
+      });
+    } catch (e) {
+      log('capture-ended finalize notify failed:', e?.message || e);
+    }
   }
 
   // ─── runtime.onMessage router ─────────────────────────────────────
