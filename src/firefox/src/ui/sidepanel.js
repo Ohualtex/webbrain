@@ -378,7 +378,7 @@ const BUSY_SLASH_NOTICE_COOLDOWN_MS = 3000;
 let currentTabId = null;
 let renderedTabId = null;
 let pendingTabSwitch = null; // tab the user switched to while isProcessing was true
-const pendingAttachmentsByTab = new Map(); // tabId -> [{ kind: 'image'|'document', name, dataUrl }]
+const pendingAttachmentsByTab = new Map(); // tabId -> [{ kind: 'image'|'document'|'text', name, dataUrl?, textContent? }]
 const attachmentReadCountsByTab = new Map();
 const attachmentGenerationByTab = new Map();
 let tabSwitchTransitionId = null;
@@ -3764,7 +3764,7 @@ function startListening() {
   if (!SpeechRecognitionImpl || !inputEl) return;
   const recognition = new SpeechRecognitionImpl();
   speechRecognition = recognition;
-  recognition.lang = getLocale() || navigator.language || 'en-US';
+  recognition.lang = getLocale();
   recognition.continuous = true;
   recognition.interimResults = true;
   micInterimText = '';

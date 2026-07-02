@@ -411,7 +411,7 @@ let renderedTabId = null;
 let pendingTabSwitch = null; // tab the user switched to while isProcessing was true
 let tabSwitchTransitionId = null;
 let queuedTabSwitchMessages = [];
-const pendingAttachmentsByTab = new Map(); // tabId -> [{ kind: 'image'|'document', name, dataUrl }]
+const pendingAttachmentsByTab = new Map(); // tabId -> [{ kind: 'image'|'document'|'text', name, dataUrl?, textContent? }]
 const attachmentReadCountsByTab = new Map();
 const attachmentGenerationByTab = new Map();
 let isProcessing = false;
@@ -4148,7 +4148,7 @@ function startListening() {
   if (!SpeechRecognitionImpl || !inputEl) return;
   const recognition = new SpeechRecognitionImpl();
   speechRecognition = recognition;
-  recognition.lang = getLocale() || navigator.language || 'en-US';
+  recognition.lang = getLocale();
   recognition.continuous = true;
   recognition.interimResults = true;
   micInterimText = '';

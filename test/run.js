@@ -15180,6 +15180,25 @@ test('attachments: uploaded documents are pruned for non-document providers', ()
   }
 });
 
+test('attachments: uploaded text files are injected as plain text blocks', () => {
+  for (const [label, AgentClass] of [['chrome', AgentCh], ['firefox', AgentFx]]) {
+    const agent = new AgentClass({});
+    const provider = { name: 'text-test', supportsVision: false, supportsDocuments: false };
+    const enriched = { role: 'user', content: 'analyze this config' };
+
+    const result = agent._applyAttachments(enriched, [
+      { kind: 'text', name: 'config.json', textContent: '{"key": "value"}' },
+    ], provider);
+
+    assert.equal(result.ok, true, `${label} should accept text attachments`);
+    const textBlock = enriched.content.find(block => block?.text?.includes('[Attached file: config.json]'));
+    assert.ok(textBlock, `${label} should inject a text block prefixed with the filename`);
+    assert.match(textBlock.text, /"key": "value"/, `${label} text block should contain the file content`);
+    const noticeBlock = enriched.content.find(block => block?.text?.startsWith('[UNTRUSTED USER ATTACHMENTS'));
+    assert.ok(noticeBlock, `${label} should include the untrusted attachment notice`);
+  }
+});
+
 test('sidepanel: pending attachments are tab-scoped and send-gated while loading', () => {
   for (const [label, file] of [
     ['chrome', 'src/chrome/src/ui/sidepanel.js'],
