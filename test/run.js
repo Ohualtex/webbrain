@@ -2797,6 +2797,20 @@ test('getToolsForMode: screenshot tools are not model-callable', () => {
   }
 });
 
+test('agent runtime warnings preserve injected auto-screenshot recovery guidance', () => {
+  for (const [label, agentRel] of [
+    ['chrome', 'src/chrome/src/agent/agent.js'],
+    ['firefox', 'src/firefox/src/agent/agent.js'],
+  ]) {
+    const agent = fs.readFileSync(path.join(ROOT, agentRel), 'utf8');
+    assert.match(agent, /COORDINATE CLICK WARNING:[\s\S]*latest injected auto_screenshot\/visual context/, `[${label}] coordinate-click warning should point at injected auto_screenshot visual context`);
+    assert.match(agent, /NAVIGATION OCCURRED[\s\S]*auto_screenshot\/visual context that follows this notice/, `[${label}] navigation notice should preserve auto_screenshot visual replan guidance`);
+    assert.match(agent, /injected visual context only when it explicitly says image pixels map 1:1 to click\(x,y\)/, `[${label}] normalized-coordinate warning should explain when visual pixels are safe for clicking`);
+    assert.doesNotMatch(agent, /take a fresh screenshot and look more carefully at element positions/, `[${label}] runtime warnings should not describe auto_screenshot as a callable screenshot tool`);
+    assert.doesNotMatch(agent, /inspect layout with get_accessibility_tree or inspect_element_styles/, `[${label}] coordinate warning should not drop visual recovery guidance`);
+  }
+});
+
 test('getToolsForMode: skill tools are exposed only when enabled skills declare them', () => {
   for (const [label, prefix, getTools, normalizeSkills, buildDefs, buildRegistry] of [
     ['chrome', 'src/chrome', getToolsForModeCh, normalizeCustomSkillsCh, buildSkillToolDefinitionsCh, buildSkillToolRegistryCh],

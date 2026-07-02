@@ -1653,7 +1653,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       `\n` +
       `The previous page is GONE. Any plan you had for that page no longer applies. ` +
       `DO NOT continue executing steps from the previous page's plan — those elements no longer exist. ` +
-      `STOP, re-read the page/tree, call get_interactive_elements if needed, decide whether this new page is what you wanted, ` +
+      `STOP, inspect the auto_screenshot/visual context that follows this notice if present, then re-read the page/tree and call get_interactive_elements if needed to decide whether this new page is what you wanted, ` +
       `and re-plan from scratch. If this navigation was unintended (you clicked the wrong thing), navigate back ` +
       `with \`navigate({url: "${last.before}"})\` and try a more specific click.]`;
     messages.push({ role: 'user', content: noticeText });
@@ -2038,7 +2038,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       } else if (loopCheck.kind === 'nudge' || coordCheck.kind === 'nudge') {
         effectiveKind = 'nudge';
         if (coordCheck.kind === 'nudge') {
-          nudgeWarning = `[COORDINATE CLICK WARNING: You've clicked at or near (${fnArgs.x}, ${fnArgs.y}) several times with no visible page change. The click may be missing its target. Try: (a) call get_interactive_elements to find a real selector, (b) click({text: "..."}) to target by visible text, or (c) inspect layout with get_accessibility_tree or inspect_element_styles. Try a different approach before clicking these coordinates again.]`;
+          nudgeWarning = `[COORDINATE CLICK WARNING: You've clicked at or near (${fnArgs.x}, ${fnArgs.y}) several times with no visible page change. The click may be missing its target. Try: (a) call get_interactive_elements to find a real selector, (b) click({text: "..."}) to target by visible text, or (c) inspect the latest injected auto_screenshot/visual context for element positions, then use get_accessibility_tree or inspect_element_styles to get CSS-pixel boxes. Try a different approach before clicking these coordinates again.]`;
         } else {
           nudgeWarning = loopCheck.warning;
         }
@@ -7685,7 +7685,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
           if (Number.isFinite(xn) && Number.isFinite(yn) && xn >= 0 && xn <= 1 && yn >= 0 && yn <= 1) {
             return {
               success: false,
-              error: `Coordinates (${args.x}, ${args.y}) look like normalized values (0–1 fractions of the viewport), not CSS pixels. The click tool expects CSS pixels (e.g. {x: 437, y: 156}). Prefer click_ax({ref_id}) after get_accessibility_tree or click({text: "..."}) over pixel clicks. If you must use pixels, get CSS-pixel positions from measured layout or inspect_element_styles.`,
+              error: `Coordinates (${args.x}, ${args.y}) look like normalized values (0–1 fractions of the viewport), not CSS pixels. The click tool expects CSS pixels (e.g. {x: 437, y: 156}). Prefer click_ax({ref_id}) after get_accessibility_tree or click({text: "..."}) over pixel clicks. If you must use pixels, use CSS-pixel positions from measured layout/inspect_element_styles, or from injected visual context only when it explicitly says image pixels map 1:1 to click(x,y).`,
             };
           }
         }
