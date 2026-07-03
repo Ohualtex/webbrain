@@ -5201,7 +5201,6 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       || state.remoteAccount
       || state.hasRemoteFollowPrompt
       || state.hasHomeDomainField
-      || state.hasFollowButton
       || state.hasFollowedState
       || /\b(?:mastodon|fediverse|takip et|takip ediliyor)\b/i.test(pageContent);
     if (!hasSignal) return null;

@@ -161,7 +161,7 @@ export function mastodonProgressGuard(items = [], state = {}) {
       blocked.push(item.id || item.label || '(missing id)');
       continue;
     }
-    if (status === 'processed' && !state.canMarkProcessed && (state.hasRemoteFollowPrompt || state.hasFollowButton || state.remoteAccount)) {
+    if (status === 'processed' && !state.canMarkProcessed && (state.hasRemoteFollowPrompt || state.remoteAccount)) {
       blocked.push(item.id || item.label || '(missing id)');
     }
   }

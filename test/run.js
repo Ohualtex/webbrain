@@ -818,6 +818,16 @@ test('mastodon observer detects recoverable remote-follow handoff', () => {
     });
     assert.equal(followed.canMarkProcessed, true);
     assert.equal(guard([{ id: 'alice@fosstodon.org', action: 'follow', status: 'processed' }], followed), null);
+
+    const genericFollow = analyze({
+      url: 'https://twitter.com/openai',
+      taskText: 'Follow this account.',
+      pageContent: 'button "Follow"',
+    });
+    assert.equal(genericFollow.hasFollowButton, true);
+    assert.equal(genericFollow.remoteAccount, null);
+    assert.equal(genericFollow.hasRemoteFollowPrompt, false);
+    assert.equal(guard([{ id: 'openai', action: 'follow', status: 'processed' }], genericFollow), null);
   }
 });
 
@@ -12208,6 +12218,26 @@ test('mastodon progress guard blocks false terminal updates until handoff comple
     });
     assert.equal(processed.success, true);
     assert.equal(agent.progressLedgers.get(tabId).find(row => row.id === 'alice@fosstodon.org').status, 'processed');
+  }
+});
+
+test('agent ignores generic follow buttons for Mastodon observations', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+    const tabId = 783;
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'Follow this account.' },
+    ]);
+
+    const observed = await agent._rememberMastodonObservation(tabId, 'get_accessibility_tree', {
+      success: true,
+      url: 'https://twitter.com/openai',
+      pageContent: 'button "Follow"',
+    });
+
+    assert.equal(observed, null);
+    assert.equal(agent.mastodonStates.has(tabId), false);
   }
 });
 
