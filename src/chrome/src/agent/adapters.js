@@ -58,6 +58,7 @@ const KNOWN_MASTODON_HOSTS = new Set([
   'mastodon.social',
   'mastoturk.org',
   'mstdn.social',
+  'types.pl',
 ]);
 
 // Keep direct URL matching conservative until adapters can verify page markup.

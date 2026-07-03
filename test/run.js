@@ -699,6 +699,7 @@ test('matches mastodon profile and interaction URLs on any host', () => {
     'https://mastodon.social/@Gargron',
     'https://mastoturk.org/@alice',
     'https://mstdn.social/@alice',
+    'https://types.pl/@disconcision',
     'https://mastodon.example/@alice',
     'https://mastodon.social/@Gargron/123456789012345678',
     'https://example.social/@alice@example.net',
@@ -750,8 +751,8 @@ test('matches mastodon profile and interaction URLs on any host', () => {
   assert.equal(getActiveAdapter('https://example.com/authorize_interaction'), null);
   assert.equal(getActiveAdapter('https://example.com/interact?uri=https%3A%2F%2Fexample.com%2Fnot-mastodon'), null);
   assert.equal(getActiveAdapterFx('https://example.com/interact'), null);
-  assert.equal(getActiveAdapter('https://types.pl/@discon'), null);
-  assert.equal(getActiveAdapterFx('https://types.pl/@discon'), null);
+  assert.equal(getActiveAdapter('https://example.pl/@discon'), null);
+  assert.equal(getActiveAdapterFx('https://example.pl/@discon'), null);
   assert.equal(getActiveAdapter('https://example.com/@alice'), null);
   assert.equal(getActiveAdapterFx('https://example.com/@alice'), null);
   assert.equal(getActiveAdapter('https://example.com/blog/@alice'), null);
