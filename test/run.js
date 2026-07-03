@@ -698,7 +698,14 @@ test('matches mastodon profile and interaction URLs on any host', () => {
     'https://mastoturk.org/@discon@types.pl',
     'https://mastodon.social/@Gargron',
     'https://mastoturk.org/@alice',
+    'https://fosstodon.org/@alice',
+    'https://hachyderm.io/@alice',
+    'https://honeybank.net/@alice',
+    'https://left-bank.net/@alice',
+    'https://mas.to/@alice',
+    'https://mastodon.world/@alice',
     'https://mstdn.social/@alice',
+    'https://s.qbank.de/@alice',
     'https://types.pl/@disconcision',
     'https://mastodon.example/@alice',
     'https://mastodon.social/@Gargron/123456789012345678',
@@ -780,6 +787,9 @@ test('finance adapters take precedence in order — stripe before generic', () =
   // Stripe URL should match stripe, not the generic finance pattern.
   const a = getActiveAdapter('https://dashboard.stripe.com/');
   assert.equal(a?.name, 'stripe');
+  assert.equal(getActiveAdapter('https://bank.example/dashboard')?.name, 'finance-generic');
+  assert.equal(getActiveAdapter('https://honeybank.net/@alice')?.name, 'mastodon');
+  assert.equal(getActiveAdapterFx('https://honeybank.net/@alice')?.name, 'mastodon');
 });
 
 test('GitHub Enterprise does not match github adapter (strict)', () => {
