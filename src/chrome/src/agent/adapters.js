@@ -54,13 +54,19 @@ function normalizedHostname(hostname) {
   return String(hostname || '').toLowerCase().replace(/\.$/, '');
 }
 
+const KNOWN_MASTODON_HOSTS = new Set([
+  'mastodon.social',
+  'mastoturk.org',
+  'mstdn.social',
+]);
+
 // Keep direct URL matching conservative until adapters can verify page markup.
 // Bare /@user and /users/user routes are too common on non-Mastodon sites.
 // Future work: verify candidate hosts through page/source signals, or through
 // https://instances.social/api/doc/ via a skill or known-instances list.
 function isLikelyMastodonHost(hostname) {
   const host = normalizedHostname(hostname);
-  return host === 'mastodon.social' || host.startsWith('mastodon.');
+  return KNOWN_MASTODON_HOSTS.has(host) || host.startsWith('mastodon.');
 }
 
 function isMastodonLocalProfilePath(hostname, path) {

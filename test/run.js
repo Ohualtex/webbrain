@@ -697,6 +697,8 @@ test('matches mastodon profile and interaction URLs on any host', () => {
   const urls = [
     'https://mastoturk.org/@discon@types.pl',
     'https://mastodon.social/@Gargron',
+    'https://mastoturk.org/@alice',
+    'https://mstdn.social/@alice',
     'https://mastodon.example/@alice',
     'https://mastodon.social/@Gargron/123456789012345678',
     'https://example.social/@alice@example.net',
