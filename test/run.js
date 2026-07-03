@@ -702,7 +702,7 @@ test('matches mastodon profile and interaction URLs on any host', () => {
     'https://example.social/@alice',
     'https://example.social/@alice/123456789012345678',
     'https://example.social/interact?uri=https%3A%2F%2Ftypes.pl%2F%40discon',
-    'https://example.social/authorize_interaction',
+    'https://example.social/authorize_interaction?uri=acct%3Aalice%40types.pl',
   ];
   for (const url of urls) {
     assert.equal(getActiveAdapter(url)?.name, 'mastodon', `chrome did not match ${url}`);
@@ -730,6 +730,10 @@ test('matches mastodon profile and interaction URLs on any host', () => {
   assert.equal(getActiveAdapterFx('https://threads.com/@openai'), null);
   assert.equal(getActiveAdapter('https://patreon.com/@creator'), null);
   assert.equal(getActiveAdapter('https://ko-fi.com/@creator'), null);
+  assert.equal(getActiveAdapter('https://example.com/interact'), null);
+  assert.equal(getActiveAdapter('https://example.com/authorize_interaction'), null);
+  assert.equal(getActiveAdapter('https://example.com/interact?uri=https%3A%2F%2Fexample.com%2Fnot-mastodon'), null);
+  assert.equal(getActiveAdapterFx('https://example.com/interact'), null);
   assert.equal(getActiveAdapter('https://example.com/@alice')?.name, 'mastodon');
   assert.equal(getActiveAdapter('https://example.com/blog/@alice'), null);
 });

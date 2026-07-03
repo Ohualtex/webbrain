@@ -65,6 +65,24 @@ function isNonMastodonAtProfileHost(hostname) {
   return NON_MASTODON_AT_PROFILE_HOSTS.has(host);
 }
 
+function isMastodonRemoteUri(value) {
+  const raw = String(value || '').trim();
+  if (/^acct:[A-Za-z0-9_]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/i.test(raw)) return true;
+  try {
+    const remote = new URL(raw);
+    if (remote.protocol !== 'http:' && remote.protocol !== 'https:') return false;
+    const path = safeDecodePath(remote.pathname);
+    return /^\/@[A-Za-z0-9_]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?(?:\/\d+)?\/?$/.test(path);
+  } catch (e) {
+    return false;
+  }
+}
+
+function hasMastodonInteractionSignal(url, path) {
+  return /^\/(interact|authorize_interaction)\/?$/.test(path)
+    && isMastodonRemoteUri(url.searchParams.get('uri'));
+}
+
 function isMastodonUrl(url) {
   const u = new URL(url);
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
@@ -72,7 +90,7 @@ function isMastodonUrl(url) {
   return /^\/@[A-Za-z0-9_]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:\/\d+)?\/?$/.test(path)
     || /^\/@[A-Za-z0-9_]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\/\d+\/?$/.test(path)
     || (/^\/@[A-Za-z0-9_]+\/?$/.test(path) && !isNonMastodonAtProfileHost(u.hostname))
-    || /^\/(interact|authorize_interaction)\/?$/.test(path);
+    || hasMastodonInteractionSignal(u, path);
 }
 
 const ADAPTERS = [
