@@ -1,8 +1,9 @@
 import { AGENT_TOOLS, AGENT_TOOL_NAMES, RESERVED_AGENT_TOOL_NAMES, getToolsForMode, SYSTEM_PROMPT_ASK, SYSTEM_PROMPT_ACT, SYSTEM_PROMPT_ACT_COMPACT, SYSTEM_PROMPT_ACT_MID } from './tools.js';
 import { URL_FAMILY_TOOLS, resourceBucket, bucketArgsKey } from './loop-bucket.js';
 import { isCredentialField, CREDENTIAL_NOTE_STRICT } from './credential-fields.js';
-import { detectProgressAction, formatLedgerSummary, isValidLedgerStatus, ledgerDoneBlock, progressCounts, selectLedgerRows, unresolvedLedgerRows, upsertLedgerItems } from './progress-ledger.js';
+import { detectProgressAction, formatLedgerRow, formatLedgerSummary, isValidLedgerStatus, ledgerDoneBlock, progressCounts, selectLedgerRows, unresolvedLedgerRows, upsertLedgerItems } from './progress-ledger.js';
 import { buildGithubStargazerProgressItems } from './observers/github-stargazers.js';
+import { analyzeMastodonPage, mastodonHandoffInstruction, mastodonProgressGuard } from './observers/mastodon.js';
 import { isProgressActionAllowed, isProgressIntentActive, normalizeProgressAction, normalizeProgressIntent } from './progress-intent.js';
 import { cdpClient } from '../cdp/cdp-client.js';
 import { getActiveAdapter, UNIVERSAL_PREAMBLE } from './adapters.js';
@@ -185,6 +186,7 @@ export class Agent {
     this.bulkApiMutationClicks = new Map(); // tabId -> recent correlated click entries
     this.bulkApiMutationHints = new Map(); // tabId -> hintKey -> last count warned
     this.failedBulkApiReplayShapes = new Map(); // "tabId|runId" -> Set("METHOD|requestShape")
+    this.mastodonStates = new Map(); // tabId -> latest trusted Mastodon page/handoff observation
     // Last interacted region per tab (CSS-pixel rect from click_ax / type_ax).
     // Used to draw an outline onto verification screenshots in `done` so the
     // model can see which element it last touched. Lives for the tab's
@@ -908,13 +910,64 @@ export class Agent {
   }
 
   _toolCallArgs(tc) {
-    try {
-      return typeof tc?.function?.arguments === 'string'
-        ? JSON.parse(tc.function.arguments)
-        : (tc?.function?.arguments || {});
-    } catch {
-      return {};
+    return this._parseToolCallArgs(tc).args;
+  }
+
+  _parseToolCallArgs(tc) {
+    const raw = tc?.function?.arguments;
+    if (typeof raw !== 'string') {
+      return { args: raw && typeof raw === 'object' ? raw : {}, error: null };
     }
+    try {
+      return { args: raw.trim() ? JSON.parse(raw) : {}, error: null };
+    } catch (e) {
+      return {
+        args: {},
+        error: `Invalid JSON tool arguments: ${e?.message || e}`,
+        rawPreview: raw.replace(/[\r\n\t]+/g, ' ').slice(0, 240),
+      };
+    }
+  }
+
+  _repairToolCallArgs(name, args = {}) {
+    if (name !== 'get_accessibility_tree' || !args || typeof args !== 'object' || Array.isArray(args)) {
+      return { args, repaired: false, note: '' };
+    }
+    const next = { ...args };
+    let repaired = false;
+    const filter = String(next.filter || '').trim();
+    if (filter && !/^(?:all|visible|interactive)$/i.test(filter)) {
+      const match = filter.match(/\b(all|visible|interactive)\b/i);
+      const pageMatch = filter.match(/\bpage\s*[:=]?\s*["']?(\d{1,4})\b/i);
+      if (match) {
+        next.filter = match[1].toLowerCase();
+        repaired = true;
+      }
+      if (pageMatch && next.page == null) {
+        next.page = Number(pageMatch[1]);
+        repaired = true;
+      }
+    } else if (filter) {
+      next.filter = filter.toLowerCase();
+    }
+    if (typeof next.page === 'string' && /^\d{1,4}$/.test(next.page.trim())) {
+      next.page = Number(next.page.trim());
+      repaired = true;
+    }
+    const note = repaired
+      ? '[TOOL ARGUMENT REPAIR: Repaired get_accessibility_tree arguments by separating filter/page from a malformed local-model string. Continue with explicit JSON like get_accessibility_tree({filter:"visible", page:2}).]'
+      : '';
+    return { args: next, repaired, note };
+  }
+
+  _invalidToolArgumentsResult(fnName, parsed) {
+    return {
+      success: false,
+      invalidToolArguments: true,
+      error: `${fnName || 'tool'} could not run because its arguments were not valid JSON. Re-emit the same tool call with a valid JSON object for arguments; do not assume the action happened.`,
+      detail: parsed?.error || 'invalid JSON',
+      rawPreview: parsed?.rawPreview || '',
+    };
   }
 
   _toolCallArgsWithReplayMethod(tabId, name, args) {
@@ -1756,7 +1809,29 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
         });
         continue;
       }
-      const fnArgs = this._toolCallArgsWithReplayMethod(tabId, fnName, this._toolCallArgs(tc));
+      const parsedArgs = this._parseToolCallArgs(tc);
+      if (parsedArgs.error) {
+        const result = this._invalidToolArgumentsResult(fnName, parsedArgs);
+        messages.push({
+          role: 'tool',
+          tool_call_id: tc.id,
+          content: JSON.stringify(result),
+        });
+        onUpdate('warning', { message: result.error });
+        const runId = this.currentRunId.get(tabId);
+        if (runId) {
+          trace.recordToolCall(runId, step, {
+            name: fnName,
+            args: {},
+            result,
+            latencyMs: 0,
+          });
+        }
+        continue;
+      }
+      const argRepair = this._repairToolCallArgs(fnName, parsedArgs.args);
+      const fnArgs = this._toolCallArgsWithReplayMethod(tabId, fnName, argRepair.args);
+      const argRepairNotice = argRepair.note || '';
 
       // Deterministic capability × origin permission gate (permission-gate.js).
       // Maps the tool to a capability and requires a (capability, host) grant —
@@ -1905,8 +1980,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       let progressObserved = null;
       let progressAuto = null;
       let progressWarning = '';
+      let mastodonObserved = null;
       let bulkApiShortcut = null;
       if (toolResult && typeof toolResult === 'object' && !toolResult.done) {
+        mastodonObserved = await this._rememberMastodonObservation(tabId, fnName, toolResult);
         progressObserved = await this._recordProgressObservation(tabId, fnName, toolResult);
         progressAuto = this._autoRecordProgressAction(tabId, fnName, fnArgs, toolResult);
         if (progressAuto) {
@@ -1974,7 +2051,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       // done() short-circuit — push result, persist, and bail out.
       if (toolResult && toolResult.done) {
         const progressBlock = this._shouldBlockDoneForProgress(tabId)
-          ? this._progressDoneBlock(tabId)
+          ? this._progressDoneBlock(tabId, toolResult.outcome)
           : null;
         if (progressBlock) {
           const blockedResult = {
@@ -2086,6 +2163,14 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       }
       if (progressWarning) {
         resultContent += '\n' + progressWarning;
+      }
+      if (argRepairNotice) {
+        resultContent += '\n' + argRepairNotice;
+        onUpdate('warning', { message: 'Repaired malformed tool arguments.' });
+      }
+      if (mastodonObserved?.instruction) {
+        resultContent += '\n' + mastodonObserved.instruction;
+        onUpdate('warning', { message: 'Mastodon remote-follow handoff detected.' });
       }
       if (bulkApiShortcut) {
         resultContent += '\n' + this._formatBulkApiMutationWarning(bulkApiShortcut);
@@ -4162,6 +4247,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this._lastClickProgress?.delete(tabId);
     this.progressPageScopes.delete(tabId);
     this.progressSessions.delete(tabId);
+    this.mastodonStates.delete(tabId);
     this.lastAutoScreenshotTs.delete(tabId);
     this.lastSeenAdapter.delete(tabId);
     this._lastInteractionRect.delete(tabId);
@@ -4181,6 +4267,7 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     this.progressLedgers.delete(tabId);
     this.progressPageScopes.delete(tabId);
     this.progressSessions.delete(tabId);
+    this.mastodonStates.delete(tabId);
     this.conversationModes.delete(tabId);
     this.conversationIds.delete(tabId);
     this._lastInputTokens.delete(tabId);
@@ -4674,6 +4761,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     if (typeof this._persist === 'function') this._persist(tabId);
   }
 
+  _mastodonProgressUpdateGuard(tabId, items = []) {
+    return mastodonProgressGuard(items, this.mastodonStates.get(tabId));
+  }
+
   _progressUpdate(tabId, args = {}, opts = {}) {
     const items = Array.isArray(args.items)
       ? args.items
@@ -4700,6 +4791,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       };
     }
     const canonicalItems = this._canonicalizeProgressItems(items);
+    const mastodonGuard = this._mastodonProgressUpdateGuard(tabId, canonicalItems);
+    if (mastodonGuard) {
+      return {
+        success: false,
+        blockedMastodonHandoff: mastodonGuard.blockedMastodonHandoff,
+        error: mastodonGuard.error,
+        ids: mastodonGuard.ids,
+      };
+    }
     const sessionOpts = { ...opts, sessionId: opts.sessionId || args.sessionId || args.session_id, source: opts.source || args.source || 'model' };
     const session = this._sessionForProgressUpdate(tabId, canonicalItems, sessionOpts);
     const sessionId = sessionOpts.sessionId || session?.sessionId || '';
@@ -5069,6 +5169,50 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     }
   }
 
+  _mastodonPageContentFromResult(result = {}) {
+    if (!result || typeof result !== 'object') return '';
+    const candidates = [
+      result.pageContent,
+      result.text,
+      result.beforeText,
+      result.afterText,
+      result.description,
+      result.data?.text,
+    ];
+    return candidates.map(value => (typeof value === 'string' ? value : '')).filter(Boolean).join('\n');
+  }
+
+  async _rememberMastodonObservation(tabId, name, result) {
+    if (!result || result.error || result.success === false) return null;
+    const pageContent = this._mastodonPageContentFromResult(result);
+    const resultUrl = result.url || result.pageUrl || result.currentUrl || '';
+    let url = resultUrl;
+    if (!url && ['get_accessibility_tree', 'read_page', 'click', 'click_ax', 'set_field', 'navigate'].includes(name)) {
+      try { url = await this._currentUrl(tabId); } catch {}
+    }
+    const previous = this.mastodonStates.get(tabId) || null;
+    const state = analyzeMastodonPage({
+      url,
+      pageContent,
+      taskText: this._latestTaskText(tabId) || this._originalTaskText(tabId),
+      previous,
+    });
+    const hasSignal = state.homeDomain
+      || state.remoteAccount
+      || state.hasRemoteFollowPrompt
+      || state.hasHomeDomainField
+      || state.hasFollowButton
+      || state.hasFollowedState
+      || /\b(?:mastodon|fediverse|takip et|takip ediliyor)\b/i.test(pageContent);
+    if (!hasSignal) return null;
+    this.mastodonStates.set(tabId, state);
+    const instruction = mastodonHandoffInstruction(state);
+    return {
+      ...state,
+      instruction,
+    };
+  }
+
   async _recordProgressObservation(tabId, name, result) {
     if (name !== 'get_accessibility_tree') return null;
     if (!result || result.error || result.success === false) return null;
@@ -5118,17 +5262,45 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const acted = unresolvedLedgerRows(this._currentTaskLedgerRows(tabId), { limit: 50 })
       .filter(row => String(row?.status || '').toLowerCase() === 'acted')
       .slice(0, 8);
-    if (!acted.length) return '';
-    return `[PROGRESS LEDGER WARNING: ${acted.length} acted item action(s) need result resolution. Before clicking more item-action buttons or calling done, call progress_update({items:[...]}) to mark acted id(s) processed, skipped, or failed and attach any collected fields such as email/null. Untouched pending rows can remain pending until acted.]`;
+    const repeated = unresolvedLedgerRows(this._currentTaskLedgerRows(tabId), { limit: 50 })
+      .filter(row => Number(row?.attempts || 0) > 1)
+      .slice(0, 5);
+    if (!acted.length && !repeated.length) return '';
+    const parts = [];
+    if (acted.length) {
+      parts.push(`${acted.length} acted item action(s) need result resolution. Before clicking more item-action buttons or calling done, call progress_update({items:[...]}) to mark acted id(s) processed, skipped, or failed and attach any collected fields such as email/null. Untouched pending rows can remain pending until acted.`);
+    }
+    if (repeated.length) {
+      parts.push(`${repeated.length} unresolved item(s) have been acted on more than once. Do not retry the same profile without new page evidence; reread the page or complete the pending handoff first.`);
+    }
+    return `[PROGRESS LEDGER WARNING: ${parts.join(' ')}]`;
   }
 
-  _progressDoneBlock(tabId) {
-    return ledgerDoneBlock(this._currentTaskProgressRows(tabId), { limit: 12 });
+  _progressTerminalDoneBlock(tabId, outcome = null) {
+    if (outcome === 'partial' || outcome === 'failed') return null;
+    const rows = this._currentTaskLedgerRows(tabId);
+    const terminalProblems = rows
+      .filter(row => ['skipped', 'failed'].includes(String(row?.status || '').toLowerCase()))
+      .slice(0, 12);
+    if (!terminalProblems.length) return null;
+    const counts = progressCounts(rows);
+    const examples = terminalProblems.map(formatLedgerRow).join('\n');
+    return {
+      blocked: true,
+      counts,
+      unresolved: [],
+      error: `The progress ledger has ${counts.skipped} skipped and ${counts.failed} failed row(s), so outcome:"success" is not allowed. Either finish/recover those rows, or call done with outcome:"partial" or outcome:"failed" and summarize which rows did not complete.\n${examples}`,
+    };
+  }
+
+  _progressDoneBlock(tabId, outcome = null) {
+    return ledgerDoneBlock(this._currentTaskLedgerRows(tabId), { limit: 12 })
+      || this._progressTerminalDoneBlock(tabId, outcome);
   }
 
   _shouldBlockDoneForProgress(tabId) {
     if ((this.conversationModes.get(tabId) || 'ask') !== 'act') return false;
-    return this._currentTaskProgressRows(tabId).length > 0;
+    return !!this._progressDoneBlock(tabId, 'success');
   }
 
   _emptyOutputRecoveryNudge(mode) {

@@ -14,9 +14,17 @@ function sanitizeText(value, max = 240) {
     .slice(0, max);
 }
 
-function normalizeStatus(value, fallback = 'pending') {
+export function normalizeLedgerStatus(value, fallback = 'pending') {
   const status = sanitizeText(value, 40).toLowerCase();
-  return VALID_STATUSES.has(status) ? status : fallback;
+  if (VALID_STATUSES.has(status)) return status;
+  const unwrapped = status
+    .replace(/^[\s"'`<([{\\\u300c\u300e\u201c\u2018]+/g, '')
+    .replace(/[\s"'`>)\]}\\\u300d\u300f\u201d\u2019]+$/g, '');
+  return VALID_STATUSES.has(unwrapped) ? unwrapped : fallback;
+}
+
+function normalizeStatus(value, fallback = 'pending') {
+  return normalizeLedgerStatus(value, fallback);
 }
 
 function sanitizeFieldValue(value) {
@@ -89,7 +97,7 @@ export function isTerminalLedgerStatus(status) {
 }
 
 export function isValidLedgerStatus(status) {
-  return VALID_STATUSES.has(sanitizeText(status, 40).toLowerCase());
+  return VALID_STATUSES.has(normalizeLedgerStatus(status, ''));
 }
 
 export function normalizeLedgerItem(item, opts = {}) {

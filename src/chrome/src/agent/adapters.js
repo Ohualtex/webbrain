@@ -51,7 +51,7 @@ function safeDecodePath(pathname) {
 }
 
 function normalizedHostname(hostname) {
-  return String(hostname || '').toLowerCase().replace(/\.$/, '');
+  return String(hostname || '').toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
 }
 
 const KNOWN_MASTODON_HOSTS = new Set([
@@ -15526,13 +15526,16 @@ const KNOWN_MASTODON_HOSTS = new Set([
   'zzz.frotz.net',
 ]);
 
-// Keep direct URL matching conservative until adapters can verify page markup.
-// Bare /@user and /users/user routes are too common on non-Mastodon sites.
-// Future work: verify candidate hosts through page/source signals, or through
-// https://instances.social/api/doc/ via a skill or known-instances list.
+// Keep direct URL matching conservative: bare /@user and /users/user routes are
+// only Mastodon when the host is in the generated known-instance list.
 function isLikelyMastodonHost(hostname) {
   const host = normalizedHostname(hostname);
   return KNOWN_MASTODON_HOSTS.has(host) || host.startsWith('mastodon.');
+}
+
+function isMastodonAppPath(hostname, path) {
+  return isLikelyMastodonHost(hostname)
+    && /^\/(?:home|deck|web|notifications|explore|public|public\/local|settings|lists|publish|start|get-started|get-started\/profile|getting-started)(?:\/|$)/i.test(path);
 }
 
 function isMastodonLocalProfilePath(hostname, path) {
@@ -15573,6 +15576,7 @@ function isMastodonUrl(url) {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
   const path = safeDecodePath(u.pathname);
   return isMastodonLocalProfilePath(u.hostname, path)
+    || isMastodonAppPath(u.hostname, path)
     || /^\/@[A-Za-z0-9_]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:\/\d+)?\/?$/.test(path)
     || /^\/@[A-Za-z0-9_]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\/\d+\/?$/.test(path)
     || isMastodonUsersPath(u.hostname, path)
