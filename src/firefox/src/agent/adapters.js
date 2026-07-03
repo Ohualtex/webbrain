@@ -50,25 +50,17 @@ function safeDecodePath(pathname) {
   }
 }
 
-const KNOWN_MASTODON_HOSTS = new Set([
-  'fosstodon.org',
-  'hachyderm.io',
-  'infosec.exchange',
-  'mas.to',
-  'mastodon.online',
-  'mastodon.social',
-  'mastodon.world',
-  'mastoturk.org',
-  'mstdn.social',
-  'social.vivaldi.net',
-  'techhub.social',
-  'types.pl',
-  'universeodon.com',
+// Keep bare /@user matching host-agnostic for self-hosted Mastodon, but block
+// known non-Mastodon sites that use the same top-level @profile shape.
+const NON_MASTODON_AT_PROFILE_HOSTS = new Set([
+  'ko-fi.com',
+  'patreon.com',
+  'threads.net',
 ]);
 
-function isKnownMastodonHost(hostname) {
+function isNonMastodonAtProfileHost(hostname) {
   const host = String(hostname || '').toLowerCase().replace(/^www\./, '');
-  return KNOWN_MASTODON_HOSTS.has(host) || /^mastodon[.-]/.test(host);
+  return NON_MASTODON_AT_PROFILE_HOSTS.has(host);
 }
 
 function isMastodonUrl(url) {
@@ -77,7 +69,7 @@ function isMastodonUrl(url) {
   const path = safeDecodePath(u.pathname);
   return /^\/@[A-Za-z0-9_]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:\/\d+)?\/?$/.test(path)
     || /^\/@[A-Za-z0-9_]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\/\d+\/?$/.test(path)
-    || (/^\/@[A-Za-z0-9_]+\/?$/.test(path) && isKnownMastodonHost(u.hostname))
+    || (/^\/@[A-Za-z0-9_]+\/?$/.test(path) && !isNonMastodonAtProfileHost(u.hostname))
     || /^\/(interact|authorize_interaction)\/?$/.test(path);
 }
 
