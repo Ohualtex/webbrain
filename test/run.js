@@ -701,6 +701,8 @@ test('matches mastodon profile and interaction URLs on any host', () => {
     'https://example.social/@alice@example.net',
     'https://example.social/@alice',
     'https://example.social/@alice/123456789012345678',
+    'https://mastodon.social/users/Gargron',
+    'https://mastodon.social/users/Gargron/statuses/102136949141474775',
     'https://example.social/interact?uri=https%3A%2F%2Ftypes.pl%2F%40discon',
     'https://example.social/authorize_interaction?uri=acct%3Aalice%40types.pl',
     'https://example.social/authorize_interaction?uri=https%3A%2F%2Ftypes.pl%2Fusers%2Fdiscon',

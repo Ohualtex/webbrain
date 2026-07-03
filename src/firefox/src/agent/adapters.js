@@ -95,6 +95,7 @@ function isMastodonUrl(url) {
   return /^\/@[A-Za-z0-9_]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}(?:\/\d+)?\/?$/.test(path)
     || /^\/@[A-Za-z0-9_]+(?:@[A-Za-z0-9.-]+\.[A-Za-z]{2,})?\/\d+\/?$/.test(path)
     || (/^\/@[A-Za-z0-9_]+\/?$/.test(path) && !isNonMastodonAtProfileHost(u.hostname))
+    || /^\/users\/[A-Za-z0-9_]+(?:\/statuses\/[A-Za-z0-9._:-]+)?\/?$/.test(path)
     || hasMastodonInteractionSignal(u, path);
 }
 
