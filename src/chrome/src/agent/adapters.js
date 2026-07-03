@@ -232,20 +232,6 @@ const ADAPTERS = [
 - Subscribe button is a popup form — needs an email and may require email confirmation.`,
   },
   {
-    // Mastodon is federated and self-hosted across many domains. Trigger on
-    // Mastodon-style account/status paths and interaction handoff pages.
-    name: 'mastodon',
-    category: 'general',
-    match: isMastodonUrl,
-    notes: `
-- Mastodon login is per-instance. If a remote profile asks you to sign in / continue before following, don't create an account on that remote server.
-- To follow a remote account from the user's home instance: open the remote profile/status, wait_for_stable, then use the sign-in/interaction popup to enter the home server DOMAIN ONLY (example: mastoturk.org), not a full URL or @handle.
-- After submitting the home domain, expect a redirect to the user's own instance with a remote account URL like \`https://mastoturk.org/@user@remote.example\`; wait_for_stable there, then click Follow on that home-instance page.
-- Do NOT manually synthesize the home-instance URL before this handoff. The home instance may need the remote-profile lookup/redirect to recognize the account.
-- Label variants by version/language: "Sign in to continue", "Continue on your server", "Authorize interaction", "Proceed to follow"; Turkish: Takip et=Follow, sunucu/domain=server domain.
-- If the user's Mastodon home domain is not already known from the conversation or account UI, clarify once before entering anything.`,
-  },
-  {
     // WordPress matcher is host-agnostic — self-hosted WP runs on millions
     // of domains. We trigger on the admin/login paths, which are
     // standardized across virtually every WP install.
@@ -796,6 +782,21 @@ const ADAPTERS = [
 - Stickers, GIFs, and bot commands (/) all live in popups above the message input.
 - DO NOT send a message unless the user named the recipient AND the exact message body in this conversation.
 - "Edit message" works for a window after sending (~48h); "Delete for everyone" within a shorter window — both have explicit confirms.`,
+  },
+  {
+    // Mastodon is federated and self-hosted across many domains. Keep this
+    // host-agnostic matcher after site-specific adapters so @profile paths on
+    // known sites (for example TikTok) preserve their own guidance.
+    name: 'mastodon',
+    category: 'general',
+    match: isMastodonUrl,
+    notes: `
+- Mastodon login is per-instance. If a remote profile asks you to sign in / continue before following, don't create an account on that remote server.
+- To follow a remote account from the user's home instance: open the remote profile/status, wait_for_stable, then use the sign-in/interaction popup to enter the home server DOMAIN ONLY (example: mastoturk.org), not a full URL or @handle.
+- After submitting the home domain, expect a redirect to the user's own instance with a remote account URL like \`https://mastoturk.org/@user@remote.example\`; wait_for_stable there, then click Follow on that home-instance page.
+- Do NOT manually synthesize the home-instance URL before this handoff. The home instance may need the remote-profile lookup/redirect to recognize the account.
+- Label variants by version/language: "Sign in to continue", "Continue on your server", "Authorize interaction", "Proceed to follow"; Turkish: Takip et=Follow, sunucu/domain=server domain.
+- If the user's Mastodon home domain is not already known from the conversation or account UI, clarify once before entering anything.`,
   },
 ];
 
