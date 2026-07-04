@@ -270,15 +270,6 @@ Les raccourcis du panneau latéral Chrome fonctionnent lorsque le panneau latér
 
 Consultez [CHANGELOG.md](./CHANGELOG.md) pour l'historique complet des versions. Les points forts récents incluent Plan avant Act, les outils natifs d'historique du navigateur, les indices de raccourcis API pour les clics répétés, WebBrain Cloud 1.0, les tâches planifiées, les améliorations du mode Compact et la lecture PDF native.
 
-## Feuille de route
-
-- [X] **Export/~~import~~ de conversation** — Sauvegarder ~~et charger~~ les historiques de chat (seul l'export a été ajouté, l'import n'est pas prévu)
-- [ ] **Définitions d'outils personnalisés** — Outils définis par l'utilisateur via les paramètres
-- [X] **Raccourcis clavier** — Touches de raccourci pour ouvrir le panneau, envoyer des messages, changer de mode
-- [X] **Intégration au menu contextuel** — Clic droit → « Demander à WebBrain à propos de ceci »
-- [X] **Outil de capture d'écran/vision** — Envoyer des captures d'écran à des modèles multimodaux pour la compréhension visuelle
-- [X] **Chrome Web Store / Firefox AMO** — Référencements officiels dans les boutiques
-
 ## Ajouter un nouveau fournisseur
 
 1. Créez une nouvelle classe étendant `BaseLLMProvider` dans `src/providers/`

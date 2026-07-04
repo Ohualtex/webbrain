@@ -303,15 +303,6 @@ Chrome side panel shortcuts work when the WebBrain side panel has focus.
 
 See [CHANGELOG.md](./CHANGELOG.md) for the full version history. Recent highlights include Plan before Act, native browser-history tools, repeated-click API shortcut hints, WebBrain Cloud 1.0, scheduled tasks, compact-mode improvements, and native PDF reading.
 
-## Roadmap
-
-- [X] **Conversation export/~~import~~** — Save ~~and load~~ chat histories (only export added, import not planned)
-- [X] **Custom skill tools** — User-imported skills can expose read-only HTTP and download-job tools via `webbrain-tools` manifests
-- [X] **Keyboard shortcuts** — Hotkeys for opening panel, sending messages, switching modes
-- [X] **Context menu integration** — Right-click → "Ask WebBrain about this"
-- [X] **Auto-screenshot vision context** — Send captured viewport context to multimodal models for visual understanding
-- [X] **Chrome Web Store / Firefox AMO** — Official store listings
-
 ## Adding a New Provider
 
 1. Create a new class extending `BaseLLMProvider` in `src/providers/`
