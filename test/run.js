@@ -6777,7 +6777,7 @@ test('sidepanel allows safe slash commands and queues normal messages while busy
     assert.notEqual(oobStart, -1, `${label}: out-of-band slash command set missing`);
     assert.notEqual(oobEnd, -1, `${label}: out-of-band slash command set should close`);
     const oobBlock = panel.slice(oobStart, oobEnd);
-    const allowed = ['/help', '/show-scratchpad', '/list-schedules', '/screenshot', '/export', '/verbose'];
+    const allowed = ['/help', '/check-progress', '/show-scratchpad', '/list-schedules', '/screenshot', '/export', '/verbose'];
     for (const command of allowed) {
       assert.match(
         oobBlock,
@@ -6808,7 +6808,7 @@ test('sidepanel allows safe slash commands and queues normal messages while busy
     );
     assert.match(
       locale,
-      /'sp\.slash\.busy_only_oob': 'Messages are queued while WebBrain is busy\. Only \/help, \/show-scratchpad, \/list-schedules, \/dangerously-skip-permissions, \/screenshot, \/export, and \/verbose can run immediately as slash commands\./,
+      /'sp\.slash\.busy_only_oob': 'Messages are queued while WebBrain is busy\. Only \/help, \/check-progress, \/show-scratchpad, \/list-schedules, \/dangerously-skip-permissions, \/screenshot, \/export, and \/verbose can run immediately as slash commands\./,
       `${label}: busy slash notice should explain queued messages and safe slash commands`,
     );
   }
@@ -6865,21 +6865,21 @@ test('sidepanel queued composer messages expose edit and delete controls', () =>
 
 test('sidepanel busy slash notice is updated in every locale', () => {
   const expected = {
-    en: 'Messages are queued while WebBrain is busy. Only /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, and /verbose can run immediately as slash commands.',
-    es: 'Los mensajes se ponen en cola mientras WebBrain está ocupado. Solo /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export y /verbose pueden ejecutarse de inmediato como comandos slash.',
-    fr: "Les messages sont mis en file d'attente pendant que WebBrain est occupé. Seuls /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export et /verbose peuvent s'exécuter immédiatement comme commandes slash.",
-    tr: 'WebBrain meşgulken mesajlar kuyruğa alınır. Yalnızca /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export ve /verbose slash komutları olarak hemen çalışabilir.',
-    zh: 'WebBrain 忙碌时，消息会排队。只有 /help、/show-scratchpad、/list-schedules、/dangerously-skip-permissions、/screenshot、/export 和 /verbose 可以作为斜杠命令立即运行。',
-    ru: 'Пока WebBrain занят, сообщения ставятся в очередь. Только /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export и /verbose могут запускаться сразу как slash-команды.',
-    uk: 'Поки WebBrain зайнятий, повідомлення ставляться в чергу. Лише /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export та /verbose можуть запускатися одразу як slash-команди.',
-    ar: 'تُضاف الرسائل إلى قائمة الانتظار بينما يكون WebBrain مشغولًا. يمكن فقط لـ /help و /show-scratchpad و /list-schedules و /dangerously-skip-permissions و /screenshot و /export و /verbose العمل فورًا كأوامر slash.',
-    ja: 'WebBrain がビジーの間、メッセージはキューに入ります。/help、/show-scratchpad、/list-schedules、/dangerously-skip-permissions、/screenshot、/export、/verbose だけがスラッシュコマンドとしてすぐに実行できます。',
-    ko: 'WebBrain이 사용 중일 때 메시지는 대기열에 추가됩니다. /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, /verbose만 슬래시 명령으로 즉시 실행할 수 있습니다.',
-    id: 'Pesan dimasukkan ke antrean saat WebBrain sibuk. Hanya /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, dan /verbose yang dapat langsung berjalan sebagai perintah slash.',
-    th: 'ข้อความจะถูกเข้าคิวขณะที่ WebBrain ไม่ว่าง เฉพาะ /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export และ /verbose เท่านั้นที่เรียกใช้ได้ทันทีในฐานะคำสั่ง slash',
-    ms: 'Mesej dimasukkan ke giliran semasa WebBrain sibuk. Hanya /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, dan /verbose boleh berjalan serta-merta sebagai arahan slash.',
-    tl: 'Nakapila ang mga mensahe habang abala ang WebBrain. Tanging /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, at /verbose ang maaaring tumakbo agad bilang mga slash command.',
-    pl: 'Wiadomości są kolejkowane, gdy WebBrain jest zajęty. Tylko /help, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export i /verbose mogą uruchamiać się od razu jako polecenia slash.',
+    en: 'Messages are queued while WebBrain is busy. Only /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, and /verbose can run immediately as slash commands.',
+    es: 'Los mensajes se ponen en cola mientras WebBrain está ocupado. Solo /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export y /verbose pueden ejecutarse de inmediato como comandos slash.',
+    fr: "Les messages sont mis en file d'attente pendant que WebBrain est occupé. Seuls /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export et /verbose peuvent s'exécuter immédiatement comme commandes slash.",
+    tr: 'WebBrain meşgulken mesajlar kuyruğa alınır. Yalnızca /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export ve /verbose slash komutları olarak hemen çalışabilir.',
+    zh: 'WebBrain 忙碌时，消息会排队。只有 /help、/check-progress、/show-scratchpad、/list-schedules、/dangerously-skip-permissions、/screenshot、/export 和 /verbose 可以作为斜杠命令立即运行。',
+    ru: 'Пока WebBrain занят, сообщения ставятся в очередь. Только /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export и /verbose могут запускаться сразу как slash-команды.',
+    uk: 'Поки WebBrain зайнятий, повідомлення ставляться в чергу. Лише /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export та /verbose можуть запускатися одразу як slash-команди.',
+    ar: 'تُضاف الرسائل إلى قائمة الانتظار بينما يكون WebBrain مشغولًا. يمكن فقط لـ /help و /check-progress و /show-scratchpad و /list-schedules و /dangerously-skip-permissions و /screenshot و /export و /verbose العمل فورًا كأوامر slash.',
+    ja: 'WebBrain がビジーの間、メッセージはキューに入ります。/help、/check-progress、/show-scratchpad、/list-schedules、/dangerously-skip-permissions、/screenshot、/export、/verbose だけがスラッシュコマンドとしてすぐに実行できます。',
+    ko: 'WebBrain이 사용 중일 때 메시지는 대기열에 추가됩니다. /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, /verbose만 슬래시 명령으로 즉시 실행할 수 있습니다.',
+    id: 'Pesan dimasukkan ke antrean saat WebBrain sibuk. Hanya /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, dan /verbose yang dapat langsung berjalan sebagai perintah slash.',
+    th: 'ข้อความจะถูกเข้าคิวขณะที่ WebBrain ไม่ว่าง เฉพาะ /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export และ /verbose เท่านั้นที่เรียกใช้ได้ทันทีในฐานะคำสั่ง slash',
+    ms: 'Mesej dimasukkan ke giliran semasa WebBrain sibuk. Hanya /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, dan /verbose boleh berjalan serta-merta sebagai arahan slash.',
+    tl: 'Nakapila ang mga mensahe habang abala ang WebBrain. Tanging /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export, at /verbose ang maaaring tumakbo agad bilang mga slash command.',
+    pl: 'Wiadomości są kolejkowane, gdy WebBrain jest zajęty. Tylko /help, /check-progress, /show-scratchpad, /list-schedules, /dangerously-skip-permissions, /screenshot, /export i /verbose mogą uruchamiać się od razu jako polecenia slash.',
   };
 
   for (const [label, localeDir] of [
