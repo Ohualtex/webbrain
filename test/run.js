@@ -14448,6 +14448,64 @@ test('continuation session derive after restart ignores a foreign task\'s scoped
   }
 });
 
+test('continue after an unrelated task does not revive the cached older session', async () => {
+  for (const AgentClass of [AgentCh, AgentFx]) {
+    const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });
+    const tabId = AgentClass === AgentCh ? 849 : 850;
+    agent.conversationModes.set(tabId, 'act');
+    agent.conversationIds.set(tabId, 'conv_anchored_continuation_guard');
+    agent._persist = () => {};
+    agent.conversations.set(tabId, [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: "follow 100 accounts i don't follow yet here" },
+    ]);
+    allowProgress(agent, tabId, ['follow']);
+    agent._progressUpdate(tabId, {
+      items: [{ id: 'next_real', label: 'next_real', action: 'follow', status: 'pending' }],
+    });
+    const followSession = agent.progressSessions.get(tabId);
+
+    // "continue" right after the follow task legitimately resumes it.
+    agent.conversations.get(tabId).push(
+      { role: 'assistant', content: 'Paused.' },
+      { role: 'user', content: 'continue' },
+    );
+    assert.equal(agent._currentProgressSession(tabId)?.sessionId, followSession.sessionId, `${AgentClass.name}: continue directly after the task should resume its session`);
+
+    // But "continue" after switching to an unrelated task must not.
+    agent.conversations.get(tabId).push(
+      { role: 'assistant', content: 'Paused.' },
+      { role: 'user', content: 'Check the deployment again in one minute.' },
+      { role: 'assistant', content: 'Checked.' },
+      { role: 'user', content: 'continue' },
+    );
+    assert.equal(agent._currentProgressSession(tabId), null, `${AgentClass.name}: continue after an unrelated task must not revive the older follow session`);
+
+    let scheduledPayload = null;
+    agent.setScheduler({
+      createResumeJob: async payload => {
+        scheduledPayload = payload;
+        return {
+          success: true,
+          scheduled: true,
+          jobId: 'resume_anchored_continuation_test',
+          scheduledAt: '2026-06-30T09:01:30.000Z',
+          summary: 'Resume scheduled.',
+          done: true,
+        };
+      },
+    });
+    const rawInstruction = 'Check whether the deployment has completed.';
+    const result = await agent.executeTool(tabId, 'schedule_resume', {
+      after_seconds: 60,
+      reason: 'wait for deployment',
+      resume_instruction: rawInstruction,
+    });
+    assert.equal(result.success, true, `${AgentClass.name}: schedule_resume should succeed`);
+    assert.equal(scheduledPayload?.args?.resume_instruction, rawInstruction, `${AgentClass.name}: the resume must not be rewritten around the stale follow ledger`);
+  }
+});
+
 test('currentTaskOnly progress_read does not mutate session state', async () => {
   for (const AgentClass of [AgentCh, AgentFx]) {
     const agent = new AgentClass({ getActive: () => ({ contextWindow: 128000, supportsVision: false }) });

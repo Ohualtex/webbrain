@@ -3800,8 +3800,15 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     return String(text || '').replace(/\s+/g, ' ').trim();
   }
 
+  // Bare acknowledgments carry no task identity; the anchor walk must not
+  // treat "ok" between steps as a task switch.
+  _isProgressAckText(text) {
+    return /^(?:ok(?:ay)?|yes|yep|yeah|sure|thanks|thank\s+you|great|good|nice|cool|perfect|got\s+it|sounds\s+good|alright|fine)\b[\s\S]{0,12}$/i.test(text);
+  }
+
   // Latest user task message that is NOT a continuation phrase ("continue",
-  // "keep going", ...), so one logical task keeps one anchor across pauses.
+  // "keep going", ...) or a bare acknowledgment, so one logical task keeps
+  // one anchor across pauses and confirmations.
   _progressTaskAnchorText(tabId) {
     const messages = this.conversations.get(tabId) || [];
     for (let i = messages.length - 1; i >= 1; i--) {
@@ -3811,7 +3818,9 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       if (this._isAgentInjectedUserContent(m.content)) continue;
       const text = this._stripInjectedTaskContext(this._messageText(m.content));
       if (!text) continue;
-      if (this._isProgressContinuationText(text.toLowerCase())) continue;
+      const lower = text.toLowerCase();
+      if (this._isProgressContinuationText(lower)) continue;
+      if (this._isProgressAckText(lower)) continue;
       return text;
     }
     return '';
@@ -3903,6 +3912,17 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
       : next;
     this.progressLedgers.set(tabId, merged);
     return { changed: true, blockedDowngrades };
+  }
+
+  _progressSessionMatchesAnchoredTask(tabId, session) {
+    const sessionText = this._progressTaskTextKey(session?.taskText);
+    if (!sessionText) return true;
+    // Degenerate stored text (session persisted during a continuation turn)
+    // carries no task identity to compare against; keep the old behavior.
+    if (this._isProgressContinuationText(sessionText.toLowerCase())) return true;
+    const anchor = this._progressTaskTextKey(this._progressTaskAnchorText(tabId) || this._originalTaskText(tabId));
+    if (!anchor) return true;
+    return sessionText === anchor;
   }
 
   _progressSessionMatchesTask(session, taskText, pageScope = '') {
@@ -4002,7 +4022,10 @@ Rules: no prose intro, no conclusion, no "this screenshot shows...", no layout d
     const taskText = this._latestTaskText(tabId);
     const pageScope = String(opts.pageScope || '').trim();
     if (this._currentTaskIsProgressContinuation(tabId)) {
-      return session || this._deriveProgressSessionForCurrentTask(tabId);
+      // "continue" refers to the latest non-continuation task, so a cached
+      // session from an older, different task must not be revived by it.
+      const anchored = session && this._progressSessionMatchesAnchoredTask(tabId, session) ? session : null;
+      return anchored || this._deriveProgressSessionForCurrentTask(tabId);
     }
     if (!this._progressSessionMatchesTask(session, taskText, pageScope)) return null;
     if (pageScope && !session.pageScope) {
