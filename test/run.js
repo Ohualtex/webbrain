@@ -17970,6 +17970,8 @@ test('sidepanel wires store review prompt after successful agent completion', ()
     assert.match(panel, /void maybePromptStoreReviewAfterSuccess\(\)/, `${label}: successful completion should trigger review prompt check`);
     assert.match(panel, /storeReviewSuccess:\s*currentTabId === tabId && promptEligibleCompletion/, `${label}: review prompt should count Ask completions separately from confetti success`);
     assert.match(panel, /mode !== 'ask'[\s\S]*?attachment_rejected[\s\S]*?parseSubscribeError/, `${label}: Ask completions should require a clean content response`);
+    assert.match(panel, /function setStoreReviewStarPreview\(rating\)/, `${label}: star preview helper should exist`);
+    assert.match(panel, /mouseenter', previewRating[\s\S]*?focus', previewRating[\s\S]*?mouseleave'[\s\S]*?setStoreReviewStarPreview\(storeReviewSelectedRating\)/, `${label}: star hover and focus should preview cumulative rating`);
     assert.match(panel, /getStoreUrl\(getExtensionStoreKey\(\)\)/, `${label}: store link should pick chrome vs firefox URL`);
     assert.match(locale, /'sp\.review\.rating_title'/, `${label}: review strings should be localized`);
   }

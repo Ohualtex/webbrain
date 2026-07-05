@@ -553,11 +553,18 @@ function showStoreReviewStep(step) {
   scrollToBottom();
 }
 
+function setStoreReviewStarPreview(rating) {
+  const stars = Number.isFinite(Number(rating)) ? Number(rating) : 0;
+  document.querySelectorAll('.store-review-star').forEach((btn) => {
+    btn.classList.toggle('active', Number(btn.dataset.rating) <= stars);
+  });
+}
+
 async function openStoreReviewPrompt() {
   if (!storeReviewEl || isProcessing) return;
   storeReviewSelectedRating = null;
   if (storeReviewFeedbackEl) storeReviewFeedbackEl.value = '';
-  document.querySelectorAll('.store-review-star').forEach((btn) => btn.classList.remove('active'));
+  setStoreReviewStarPreview(null);
   showStoreReviewStep('rating');
   applyDOMTranslations(storeReviewEl);
   const next = markPromptShown(storeReviewState);
@@ -577,9 +584,7 @@ async function maybePromptStoreReviewAfterSuccess() {
 
 async function handleStoreReviewRating(rating) {
   storeReviewSelectedRating = rating;
-  document.querySelectorAll('.store-review-star').forEach((btn) => {
-    btn.classList.toggle('active', Number(btn.dataset.rating) <= rating);
-  });
+  setStoreReviewStarPreview(rating);
   const next = markRated(storeReviewState, rating);
   await saveStoreReviewState(next);
   showStoreReviewStep(positiveRating(rating) ? 'positive' : 'negative');
@@ -617,6 +622,14 @@ function initStoreReviewPrompt() {
   if (!storeReviewEl) return;
   applyDOMTranslations(storeReviewEl);
   storeReviewEl.querySelectorAll('.store-review-star').forEach((btn) => {
+    const previewRating = () => {
+      const rating = Number(btn.dataset.rating);
+      if (Number.isFinite(rating)) setStoreReviewStarPreview(rating);
+    };
+    btn.addEventListener('mouseenter', previewRating);
+    btn.addEventListener('focus', previewRating);
+    btn.addEventListener('mouseleave', () => setStoreReviewStarPreview(storeReviewSelectedRating));
+    btn.addEventListener('blur', () => setStoreReviewStarPreview(storeReviewSelectedRating));
     btn.addEventListener('click', () => {
       const rating = Number(btn.dataset.rating);
       if (Number.isFinite(rating)) void handleStoreReviewRating(rating);
