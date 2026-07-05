@@ -7673,10 +7673,11 @@ test('completion confetti is default-on and success-only in sidepanel completion
     assert.match(panel, /completionConfettiEnabled = changes\.completionConfetti\.newValue !== false/, `${label}: sidepanel should live-sync completion confetti setting`);
     assert.match(panel, /function triggerCompletionConfetti\(\)/, `${label}: sidepanel should define the confetti animation trigger`);
     assert.match(panel, /function updatesContainSuccessfulDone\(updates\)/, `${label}: live completion success should be derived from done tool updates`);
+    assert.match(panel, /function isSuccessfulAskCompletion\(mode, response\)/, `${label}: sidepanel should classify successful Ask replies separately`);
     assert.match(panel, /if \(success\) triggerCompletionConfetti\(\);/, `${label}: confetti should only fire for successful completions`);
     assert.match(panel, /result\?\.outcome === 'success'/, `${label}: live done success should require explicit success outcome`);
     assert.match(panel, /notifyCompletion\(\{\s*success:\s*job\?\.lastOutcome === 'success'\s*\}\)/, `${label}: scheduled completed jobs should celebrate only explicit success outcomes`);
-    assert.match(panel, /notifyCompletion\(\{\s*success:\s*currentTabId === tabId && completedSuccessfully\s*\}\)/, `${label}: live confetti should be gated to the tab that completed`);
+    assert.match(panel, /success:\s*currentTabId === tabId && completedSuccessfully/, `${label}: live confetti should be gated to the tab that completed`);
     assert.doesNotMatch(panel, /completedSuccessfully = !\(res\?\./, `${label}: live confetti should not treat every normal chat response as successful completion`);
 
     assert.match(css, /\.completion-confetti/, `${label}: sidepanel CSS should include the confetti overlay`);
@@ -17967,6 +17968,8 @@ test('sidepanel wires store review prompt after successful agent completion', ()
     assert.match(html, /id="store-review-step-negative"/, `${label}: negative step should exist`);
     assert.match(panel, /from '\.\/store-review-prompt\.js'/, `${label}: sidepanel should import store-review-prompt`);
     assert.match(panel, /void maybePromptStoreReviewAfterSuccess\(\)/, `${label}: successful completion should trigger review prompt check`);
+    assert.match(panel, /storeReviewSuccess:\s*currentTabId === tabId && promptEligibleCompletion/, `${label}: review prompt should count Ask completions separately from confetti success`);
+    assert.match(panel, /mode !== 'ask'[\s\S]*?attachment_rejected[\s\S]*?parseSubscribeError/, `${label}: Ask completions should require a clean content response`);
     assert.match(panel, /getStoreUrl\(getExtensionStoreKey\(\)\)/, `${label}: store link should pick chrome vs firefox URL`);
     assert.match(locale, /'sp\.review\.rating_title'/, `${label}: review strings should be localized`);
   }

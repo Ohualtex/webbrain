@@ -563,10 +563,10 @@ function triggerCompletionConfetti() {
   } catch { /* ignore */ }
 }
 
-function notifyCompletion({ success = false } = {}) {
+function notifyCompletion({ success = false, storeReviewSuccess = success } = {}) {
   playCompletionSound();
   if (success) triggerCompletionConfetti();
-  if (success) void maybePromptStoreReviewAfterSuccess();
+  if (storeReviewSuccess) void maybePromptStoreReviewAfterSuccess();
 }
 
 function getExtensionStoreKey() {
@@ -703,6 +703,14 @@ function isSuccessfulDoneUpdate(update) {
 
 function updatesContainSuccessfulDone(updates) {
   return Array.isArray(updates) && updates.some(isSuccessfulDoneUpdate);
+}
+
+function isSuccessfulAskCompletion(mode, response) {
+  if (mode !== 'ask') return false;
+  if (!response || response.success === false || response.ok === false) return false;
+  if (response.updates?.some?.(u => u?.type === 'attachment_rejected')) return false;
+  const content = typeof response.content === 'string' ? response.content.trim() : '';
+  return !!content && !parseSubscribeError(content);
 }
 
 // Per-tab chat history (stores innerHTML of messages container).
@@ -3029,6 +3037,7 @@ async function sendMessage(extraChatParams) {
 
   let accepted = false;
   let completedSuccessfully = false;
+  let promptEligibleCompletion = false;
   try {
     const res = await sendToBackground('chat', {
       tabId,
@@ -3040,6 +3049,7 @@ async function sendMessage(extraChatParams) {
     });
     accepted = true;
     completedSuccessfully = updatesContainSuccessfulDone(res?.updates);
+    promptEligibleCompletion = completedSuccessfully || isSuccessfulAskCompletion(modeForSend, res);
 
     // An unsupported-attachment rejection never records the turn in history;
     // the agent signals it via a structured 'attachment_rejected' update (not
@@ -3099,7 +3109,12 @@ async function sendMessage(extraChatParams) {
     if (currentAssistantEl === assistantEl) currentAssistantEl = null;
     if (renderToCurrentTab && currentTabId === tabId) scrollToBottom();
     if (renderToCurrentTab && renderedTabId === tabId) await flushRenderedTabChat();
-    if (renderToCurrentTab && !wasAborted) notifyCompletion({ success: currentTabId === tabId && completedSuccessfully });
+    if (renderToCurrentTab && !wasAborted) {
+      notifyCompletion({
+        success: currentTabId === tabId && completedSuccessfully,
+        storeReviewSuccess: currentTabId === tabId && promptEligibleCompletion,
+      });
+    }
     if (renderToCurrentTab && currentTabId === tabId) refreshRecommendedActions();
     await drainQueuedContextMenuPromptsAfterPendingTabSwitch();
   }
